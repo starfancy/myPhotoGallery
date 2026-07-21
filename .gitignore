@@ -9,3 +9,5 @@ config.toml
 .cache/
 .trash/
 .DS_Store
+.claude/
+*.egg-info/
