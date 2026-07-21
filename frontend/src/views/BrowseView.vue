@@ -19,7 +19,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import AppHeader from "../components/AppHeader.vue"
 import Breadcrumb from "../components/Breadcrumb.vue"
@@ -106,6 +106,9 @@ function onScroll() {
 onMounted(() => {
   window.addEventListener("scroll", onScroll, { passive: true })
   loadAll()
+})
+onUnmounted(() => {
+  window.removeEventListener("scroll", onScroll)
 })
 watch([gid, rid, path], loadAll)
 </script>
