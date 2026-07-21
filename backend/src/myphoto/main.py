@@ -73,6 +73,10 @@ def build_app(config_path: str = "config.toml") -> FastAPI:
 
     app.include_router(media_router)
 
+    from myphoto.routes_admin import router as admin_router
+
+    app.include_router(admin_router)
+
     @app.get("/api/health")
     def health():
         return {"ok": True}
