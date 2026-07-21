@@ -80,3 +80,18 @@ class Image(Base):
         Index("ix_image_folder_taken", "folder_id", "taken_at"),
         Index("ix_image_sha1", "sha1"),
     )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actor_ip: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    target: Mapped[str | None] = mapped_column(String, nullable=True)
+    detail: Mapped[str | None] = mapped_column(String, nullable=True)
+    __table_args__ = (
+        Index("ix_audit_ts", "ts"),
+        Index("ix_audit_action_ts", "action", "ts"),
+    )
