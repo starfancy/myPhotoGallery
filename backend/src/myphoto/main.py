@@ -14,6 +14,7 @@ from myphoto.errors import install_error_handlers
 from myphoto.models import GalleryRoot
 from myphoto.scanner import Scanner
 from myphoto.schema_init import ensure_schema_and_admin
+from myphoto.thumbnails import ThumbnailGenerator
 
 log = logging.getLogger("myphoto.main")
 
@@ -45,6 +46,9 @@ def build_app(config_path: str = "config.toml") -> FastAPI:
         app.state.sessionmaker = sm
         app.state.config = cfg
         app.state.scanner = scanner
+        app.state.thumbnails = ThumbnailGenerator(
+            Path(cfg.data_dir) / ".cache" / "thumbnails"
+        )
         try:
             yield
         finally:
@@ -62,6 +66,10 @@ def build_app(config_path: str = "config.toml") -> FastAPI:
     from myphoto.routes_browse import router as browse_router
 
     app.include_router(browse_router)
+
+    from myphoto.routes_media import router as media_router
+
+    app.include_router(media_router)
 
     @app.get("/api/health")
     def health():
