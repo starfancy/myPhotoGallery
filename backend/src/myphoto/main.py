@@ -6,11 +6,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from myphoto.config import AppConfig, load_or_init
 from myphoto.db import make_engine, make_sessionmaker
-from myphoto.errors import install_error_handlers
+from myphoto.errors import AppError, install_error_handlers
 from myphoto.models import GalleryRoot
 from myphoto.scanner import Scanner
 from myphoto.schema_init import ensure_schema_and_admin
@@ -74,6 +76,23 @@ def build_app(config_path: str = "config.toml") -> FastAPI:
     @app.get("/api/health")
     def health():
         return {"ok": True}
+
+    # ---- SPA fallback: serve built frontend ----
+    dist = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist"
+    if dist.exists():
+        assets = dist / "assets"
+        if assets.exists():
+            app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
+        index_html = dist / "index.html"
+
+        @app.get("/", include_in_schema=False)
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_index(full_path: str = ""):
+            if full_path.startswith("api/"):
+                raise AppError("not_found", 404, "not found")
+            if index_html.exists():
+                return FileResponse(index_html)
+            raise AppError("not_found", 404, "frontend not built")
 
     return app
 
