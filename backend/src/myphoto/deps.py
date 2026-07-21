@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+
 from fastapi import Depends, Request
 
 from myphoto.errors import AppError
@@ -36,3 +38,30 @@ async def admin_required(user: User = Depends(current_user)) -> User:
     if user.role != "admin":
         raise AppError("forbidden", 403, "admin only")
     return user
+
+
+_PRIVATE_RANGES = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("::1/128"),
+]
+
+
+def _is_lan_ip(host: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(addr in net for net in _PRIVATE_RANGES)
+
+
+async def require_lan_ip(request: Request) -> None:
+    host = request.client.host if request.client else "unknown"
+    if not _is_lan_ip(host):
+        raise AppError(
+            "admin_fs_lan_only", 403,
+            "this endpoint is only available on the local network",
+        )

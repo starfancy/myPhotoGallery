@@ -23,6 +23,11 @@ class LoginBody(BaseModel):
     password: str = Field(min_length=1)
 
 
+class ChangePasswordBody(BaseModel):
+    old_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=1)  # strength checked in handler (single authority)
+
+
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
@@ -102,3 +107,23 @@ async def me(user: User = Depends(current_user)):
         "role": user.role,
         "access_scope": user.access_scope,
     }
+
+
+@router.post("/change-password", status_code=204)
+async def change_password(
+    body: ChangePasswordBody,
+    request: Request,
+    user: User = Depends(current_user),
+):
+    if len(body.new_password) < 8:
+        raise AppError("password_too_weak", 422, "password must be at least 8 characters")
+    if not verify_password(body.old_password, user.password_hash):
+        raise AppError("invalid_credentials", 403, "current password is incorrect")
+
+    sm = request.app.state.sessionmaker
+    async with sm() as session:
+        u = await session.get(User, user.id)
+        if u is None or u.enabled != 1:
+            raise AppError("unauthenticated", 401, "user not found or disabled")
+        u.password_hash = hash_password(body.new_password)
+        await session.commit()

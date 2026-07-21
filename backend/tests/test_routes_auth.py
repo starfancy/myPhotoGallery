@@ -217,3 +217,55 @@ async def test_admin_required_rejects_non_admin():
 
     assert exc_info.value.http_status == 403
     assert exc_info.value.code == "forbidden"
+
+
+# ---- change-password ----
+
+
+def test_change_password_success(app_and_pw):
+    client, password, _ = app_and_pw
+    assert _login(client, password).status_code == 200
+
+    new_pw = "newpassword123456"
+    r = client.post("/api/auth/change-password", json={
+        "old_password": password,
+        "new_password": new_pw,
+    })
+    assert r.status_code == 204
+
+    # Old password should now fail
+    _assert_invalid_credentials(_login(client, password))
+
+    # New password should work
+    assert _login(client, new_pw).status_code == 200
+
+
+def test_change_password_wrong_current(app_and_pw):
+    client, password, _ = app_and_pw
+    assert _login(client, password).status_code == 200
+    r = client.post("/api/auth/change-password", json={
+        "old_password": "wrongpassword",
+        "new_password": "newpassword123456",
+    })
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "invalid_credentials"
+
+
+def test_change_password_too_weak(app_and_pw):
+    client, password, _ = app_and_pw
+    assert _login(client, password).status_code == 200
+    r = client.post("/api/auth/change-password", json={
+        "old_password": password,
+        "new_password": "short",
+    })
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "password_too_weak"
+
+
+def test_change_password_unauthenticated(app_and_pw):
+    client, _, _ = app_and_pw
+    r = client.post("/api/auth/change-password", json={
+        "old_password": "x",
+        "new_password": "longenoughpassword",
+    })
+    assert r.status_code == 401
