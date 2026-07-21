@@ -13,6 +13,8 @@
         此目录暂无图片
       </div>
     </main>
+    <ImageLightbox v-if="lightboxId !== null" :items="images" :start-id="lightboxId"
+                    @close="onLightboxClose" @change="onLightboxChange" />
   </div>
 </template>
 
@@ -23,6 +25,7 @@ import AppHeader from "../components/AppHeader.vue"
 import Breadcrumb from "../components/Breadcrumb.vue"
 import SubfolderStrip from "../components/SubfolderStrip.vue"
 import JustifiedGrid from "../components/JustifiedGrid.vue"
+import ImageLightbox from "../components/ImageLightbox.vue"
 import { apiGet } from "../api"
 import { useBrowseStore, type ImageRow } from "../stores/browse"
 
@@ -32,9 +35,21 @@ const gid = computed(() => Number(route.params.gid))
 const rid = computed(() => Number(route.params.rid))
 const path = computed(() => {
   const raw = route.params.path
-  if (!raw) return ""
-  return (Array.isArray(raw) ? raw.join("/") : String(raw)).replace(/\/+$/, "")
+  const p = Array.isArray(raw) ? raw.join("/") : String(raw || "")
+  return p.replace(/\/?image\/\d+$/, "").replace(/\/+$/, "")
 })
+const lightboxId = computed(() => {
+  const iid = route.params.iid
+  return iid ? Number(iid) : null
+})
+function onLightboxClose() {
+  const suffix = path.value ? `/${path.value}` : ""
+  router.push(`/galleries/${gid.value}/r/${rid.value}${suffix}`)
+}
+function onLightboxChange(id: number) {
+  const suffix = path.value ? `/${path.value}` : ""
+  router.replace(`/galleries/${gid.value}/r/${rid.value}${suffix}/image/${id}`)
+}
 const sort = ref("name_asc")
 
 const crumbs = ref<{ name: string; relative_path: string }[]>([])
