@@ -37,7 +37,12 @@ def build_app(config_path: str = "config.toml") -> FastAPI:
             await engine.dispose()
 
     app = FastAPI(title="myPhotoGallery", lifespan=lifespan)
+    app.state.login_lockout = {}
     install_error_handlers(app)
+
+    from myphoto.routes_auth import router as auth_router
+
+    app.include_router(auth_router)
 
     @app.get("/api/health")
     def health():
