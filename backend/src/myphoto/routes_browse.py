@@ -4,7 +4,7 @@ import base64
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from myphoto.deps import current_user
 from myphoto.errors import AppError
@@ -202,16 +202,18 @@ async def breadcrumbs(
         return crumbs
 
 
-def _encode_cursor(sort_key: str, iid: int) -> str:
-    raw = f"{sort_key}\x1f{iid}"
+def _encode_cursor(sort: str, sort_key_value, last_id: int) -> str:
+    raw = f"{sort}\x1f{sort_key_value}\x1f{last_id}"
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii")
 
 
 def _decode_cursor(cursor: str) -> tuple[str, int]:
     try:
         raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
-        k, i = raw.split("\x1f", 1)
-        return k, int(i)
+        parts = raw.split("\x1f", 2)
+        sort_val = parts[1]
+        last_id = int(parts[2])
+        return sort_val, last_id
     except Exception:
         raise AppError("path_invalid", 400, "invalid cursor")
 
@@ -245,20 +247,52 @@ async def list_images(
         q = select(Image).where(Image.folder_id == folder.id)
         if sort == "name_asc":
             q = q.order_by(Image.filename.asc(), Image.id.asc())
+            if cursor:
+                last_val, last_id = _decode_cursor(cursor)
+                q = q.where(or_(
+                    Image.filename > last_val,
+                    and_(Image.filename == last_val, Image.id > last_id)
+                ))
         elif sort == "name_desc":
             q = q.order_by(Image.filename.desc(), Image.id.desc())
+            if cursor:
+                last_val, last_id = _decode_cursor(cursor)
+                q = q.where(or_(
+                    Image.filename < last_val,
+                    and_(Image.filename == last_val, Image.id < last_id)
+                ))
         elif sort == "taken_at_asc":
-            q = q.order_by(Image.taken_at.asc(), Image.id.asc())
+            q = q.order_by(Image.taken_at.asc().nullsfirst(), Image.id.asc())
+            if cursor:
+                last_val, last_id = _decode_cursor(cursor)
+                last_val_int = int(last_val) if last_val != "None" else None
+                if last_val_int is not None:
+                    q = q.where(or_(
+                        Image.taken_at > last_val_int,
+                        and_(Image.taken_at == last_val_int, Image.id > last_id)
+                    ))
+                else:
+                    q = q.where(Image.taken_at.isnot(None))
+                    q = q.where(Image.id > last_id)
         elif sort == "taken_at_desc":
-            q = q.order_by(Image.taken_at.desc(), Image.id.desc())
+            q = q.order_by(Image.taken_at.desc().nullslast(), Image.id.desc())
+            if cursor:
+                last_val, last_id = _decode_cursor(cursor)
+                if last_val != "None":
+                    q = q.where(or_(
+                        Image.taken_at < int(last_val),
+                        and_(Image.taken_at == int(last_val), Image.id < last_id)
+                    ))
+                else:
+                    q = q.where(Image.taken_at.is_(None))
         else:  # size_desc
             q = q.order_by(Image.size_bytes.desc(), Image.id.desc())
-        if cursor:
-            _, last_id = _decode_cursor(cursor)
-            if sort.endswith("_asc"):
-                q = q.where(Image.id > last_id)
-            else:
-                q = q.where(Image.id < last_id)
+            if cursor:
+                last_val, last_id = _decode_cursor(cursor)
+                q = q.where(or_(
+                    Image.size_bytes < int(last_val),
+                    and_(Image.size_bytes == int(last_val), Image.id < last_id)
+                ))
         q = q.limit(limit + 1)
         rows = (await s.execute(q)).scalars().all()
         has_more = len(rows) > limit
@@ -276,5 +310,16 @@ async def list_images(
             }
             for r in rows
         ]
-        next_cursor = _encode_cursor(sort, rows[-1].id) if has_more and rows else None
-        return {"items": items, "next_cursor": next_cursor}
+        if has_more and rows:
+            if sort in ("name_asc", "name_desc"):
+                next_cursor = _encode_cursor(sort, rows[-1].filename, rows[-1].id)
+            elif sort in ("taken_at_asc", "taken_at_desc"):
+                next_cursor = _encode_cursor(
+                    sort,
+                    str(rows[-1].taken_at) if rows[-1].taken_at is not None else "None",
+                    rows[-1].id,
+                )
+            else:  # size_desc
+                next_cursor = _encode_cursor(sort, str(rows[-1].size_bytes), rows[-1].id)
+            return {"items": items, "next_cursor": next_cursor}
+        return {"items": items, "next_cursor": None}

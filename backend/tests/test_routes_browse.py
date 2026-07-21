@@ -124,6 +124,60 @@ def test_path_traversal_rejected(client_with_data):
     assert r.json()["error"]["code"] == "path_invalid"
 
 
+@pytest.fixture
+def client_with_many_images(tmp_path, capsys):
+    photos = tmp_path / "photos"
+    batch = photos / "batch"
+    for i in range(12):
+        _jpg(batch / f"img{i:02d}.jpg")
+    cfg = tmp_path / "config.toml"
+    app = build_app(config_path=str(cfg))
+    with TestClient(app) as c:
+        out = capsys.readouterr().out
+        pw = re.search(r"password=(\S+)", out).group(1)
+        c.post("/api/auth/login", json={"username": "admin", "password": pw})
+        gid, rid = c.portal.call(_seed, app, photos)
+        c.portal.call(_scan, app, rid)
+        yield c, gid, rid
+
+
+def test_images_cursor_pagination_no_duplicates(client_with_many_images):
+    c, gid, rid = client_with_many_images
+
+    # Page 1
+    r1 = c.get(
+        f"/api/galleries/{gid}/roots/{rid}/images",
+        params={"path": "batch", "sort": "name_asc", "limit": 3},
+    )
+    assert r1.status_code == 200
+    body1 = r1.json()
+    page1_names = [i["filename"] for i in body1["items"]]
+    assert len(page1_names) == 3
+    assert body1["next_cursor"] is not None
+
+    # Page 2
+    r2 = c.get(
+        f"/api/galleries/{gid}/roots/{rid}/images",
+        params={
+            "path": "batch",
+            "sort": "name_asc",
+            "limit": 3,
+            "cursor": body1["next_cursor"],
+        },
+    )
+    assert r2.status_code == 200
+    body2 = r2.json()
+    page2_names = [i["filename"] for i in body2["items"]]
+    assert len(page2_names) == 3
+
+    # No duplicates between pages
+    assert set(page1_names) & set(page2_names) == set()
+
+    # Correct ordering: names are alphabetically sorted
+    assert page1_names == ["img00.jpg", "img01.jpg", "img02.jpg"]
+    assert page2_names == ["img03.jpg", "img04.jpg", "img05.jpg"]
+
+
 def test_unauthenticated_blocked(tmp_path):
     app = build_app(config_path=str(tmp_path / "config.toml"))
     with TestClient(app) as c:
