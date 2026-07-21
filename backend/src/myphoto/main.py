@@ -6,10 +6,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from sqlalchemy import select
 
 from myphoto.config import AppConfig, load_or_init
 from myphoto.db import make_engine, make_sessionmaker
 from myphoto.errors import install_error_handlers
+from myphoto.models import GalleryRoot
+from myphoto.scanner import Scanner
 from myphoto.schema_init import ensure_schema_and_admin
 
 log = logging.getLogger("myphoto.main")
@@ -28,12 +31,24 @@ def build_app(config_path: str = "config.toml") -> FastAPI:
         if created and pw:
             # printed once to stdout so operator can grab it
             print(f"[myphoto] initial admin created. username=admin password={pw}", flush=True)
+        scanner = Scanner(sm)
+        await scanner.start()
+        async with sm() as session:
+            roots = (
+                await session.execute(
+                    select(GalleryRoot).where(GalleryRoot.enabled == 1)
+                )
+            ).scalars()
+            for root in roots:
+                await scanner.enqueue(root.id)
         app.state.engine = engine
         app.state.sessionmaker = sm
         app.state.config = cfg
+        app.state.scanner = scanner
         try:
             yield
         finally:
+            await scanner.stop()
             await engine.dispose()
 
     app = FastAPI(title="myPhotoGallery", lifespan=lifespan)
