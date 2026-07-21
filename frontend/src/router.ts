@@ -5,6 +5,8 @@ const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/galleries" },
   { path: "/login", component: () => import("./views/LoginView.vue"), meta: { public: true } },
   { path: "/galleries", component: () => import("./views/GalleryListView.vue") },
+  { path: "/galleries/:gid", component: () => import("./views/RootListView.vue") },
+  { path: "/galleries/:gid/r/:rid/:path(.*)*", component: () => import("./views/BrowseView.vue") },
 ]
 
 export const router = createRouter({
