@@ -81,6 +81,61 @@ async def admin_list_galleries(
         return out
 
 
+@router.get("/galleries/{gid}")
+async def admin_get_gallery(
+    gid: int,
+    request: Request,
+    response: Response,
+    _admin: User = Depends(admin_required),
+):
+    """Admin-specific gallery detail with full root metadata.
+
+    The browse-facing GET /api/galleries/{gid} omits absolute_path and
+    scan status fields for security (viewers shouldn't see local paths).
+    This endpoint provides the admin-level view needed by AdminGalleryEdit.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        g = await s.get(Gallery, gid)
+        if g is None:
+            raise AppError("not_found", 404, "gallery not found")
+
+        roots = (
+            await s.execute(select(GalleryRoot).where(GalleryRoot.gallery_id == gid))
+        ).scalars().all()
+
+        scanner = request.app.state.scanner
+        root_out = []
+        for r in roots:
+            cnt = (
+                await s.execute(
+                    select(func.count())
+                    .select_from(Image)
+                    .where(Image.root_id == r.id)
+                )
+            ).scalar_one()
+            live = scanner.get_status(r.id)
+            root_out.append({
+                "id": r.id,
+                "label": r.label,
+                "absolute_path": r.absolute_path,
+                "enabled": bool(r.enabled),
+                "image_count": cnt,
+                "status": live["status"],
+                "last_scan_at": live["last_scan_at"] if live["last_scan_at"] is not None else r.last_scan_at,
+                "last_scan_status": r.last_scan_status,
+                "last_scan_error": live["last_scan_error"] if live["last_scan_error"] is not None else r.last_scan_error,
+            })
+
+        return {
+            "id": g.id,
+            "name": g.name,
+            "description": g.description,
+            "roots": root_out,
+        }
+
+
 @router.post("/galleries", status_code=201)
 async def admin_create_gallery(
     body: GalleryCreate,

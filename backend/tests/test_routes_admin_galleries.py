@@ -115,3 +115,57 @@ def test_create_gallery_without_description(client_as_admin):
     r = c.post("/api/admin/galleries", json={"name": "NoDesc"})
     assert r.status_code == 201
     assert r.json()["description"] is None
+
+
+# ---- GET /api/admin/galleries/{gid} (admin detail) ----
+
+
+def test_admin_get_gallery_returns_gallery_with_roots(client_as_admin, tmp_path):
+    c, _ = client_as_admin
+    photos = tmp_path / "photos"
+    photos.mkdir()
+
+    gid = c.post("/api/admin/galleries", json={"name": "G"}).json()["id"]
+    rid = c.post(f"/api/admin/galleries/{gid}/roots", json={
+        "label": "R", "absolute_path": str(photos),
+    }).json()["id"]
+
+    r = c.get(f"/api/admin/galleries/{gid}")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    data = r.json()
+    assert data["id"] == gid
+    assert data["name"] == "G"
+    assert len(data["roots"]) == 1
+    root = data["roots"][0]
+    assert root["id"] == rid
+    assert root["label"] == "R"
+    assert root["absolute_path"] == str(photos.resolve())
+    assert isinstance(root["enabled"], bool)
+    assert root["image_count"] == 0
+    assert root["status"] in ("idle", "queued", "running")
+    assert "last_scan_at" in root
+    assert "last_scan_status" in root
+    assert "last_scan_error" in root
+
+
+def test_admin_get_gallery_not_found(client_as_admin):
+    c, _ = client_as_admin
+    r = c.get("/api/admin/galleries/999")
+    assert r.status_code == 404
+
+
+def test_admin_get_gallery_unauthorized(tmp_path, capsys):
+    app = build_app(config_path=str(tmp_path / "config.toml"))
+    with TestClient(app) as c:
+        capsys.readouterr()
+        r = c.get("/api/admin/galleries/1")
+    assert r.status_code == 401
+
+
+def test_admin_get_gallery_empty_roots(client_as_admin):
+    c, _ = client_as_admin
+    gid = c.post("/api/admin/galleries", json={"name": "Empty"}).json()["id"]
+    r = c.get(f"/api/admin/galleries/{gid}")
+    assert r.status_code == 200
+    assert r.json()["roots"] == []
