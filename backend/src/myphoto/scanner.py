@@ -11,6 +11,7 @@ from pathlib import Path
 from PIL import Image as PILImage
 from sqlalchemy import select
 
+from myphoto.audit import write_audit
 from myphoto.formats import classify, is_supported
 from myphoto.models import Folder, GalleryRoot, Image
 
@@ -98,20 +99,52 @@ class Scanner:
         status.status = "running"
         status.last_scan_error = None
         try:
-            last_scan_at = await self._scan_transaction(root_id)
-        except asyncio.CancelledError:
-            status.status = "idle"
+            await self._audit(root_id, "scan_start")
+            try:
+                last_scan_at = await self._scan_transaction(root_id)
+            except asyncio.CancelledError:
+                status.status = "idle"
+                raise
+            except Exception as exc:
+                error = str(exc)[:500]
+                log.warning("scan failed for root=%s: %s", root_id, error)
+                await self._record_scan_error(root_id, error)
+                status.status = "idle"
+                status.last_scan_error = error
+            else:
+                status.status = "idle"
+                status.last_scan_at = last_scan_at
+                status.last_scan_error = None
+                await self._audit(
+                    root_id, "scan_finish",
+                    detail=f"last_scan_at={last_scan_at}",
+                )
+        except Exception:
+            # A crash in _audit itself must not strand the root in "running":
+            # reset defensively before re-raising to the worker loop.
+            if status.status == "running":
+                status.status = "idle"
             raise
-        except Exception as exc:
-            error = str(exc)[:500]
-            log.warning("scan failed for root=%s: %s", root_id, error)
-            await self._record_scan_error(root_id, error)
-            status.status = "idle"
-            status.last_scan_error = error
-        else:
-            status.status = "idle"
-            status.last_scan_at = last_scan_at
-            status.last_scan_error = None
+
+    async def _audit(self, root_id: int, action: str, detail: str | None = None) -> None:
+        """Emit a scanner-lifecycle audit event on a dedicated session.
+
+        Scanner runs internally (not on behalf of an HTTP request) so
+        actor_user_id is None and actor_ip is fixed at 127.0.0.1 per plan.
+
+        Failures are caught and logged: audit persistence must never break the
+        scan lifecycle. `write_audit` already swallows flush errors; this
+        wrapper covers the commit and connect failures too.
+        """
+        try:
+            async with self._sm() as session:
+                await write_audit(
+                    session, action, None, "127.0.0.1",
+                    target=f"root:{root_id}", detail=detail,
+                )
+                await session.commit()
+        except Exception:
+            log.exception("audit write failed for scanner action=%s root=%s", action, root_id)
 
     async def _scan_transaction(self, root_id: int) -> int:
         async with self._sm() as session:
@@ -194,6 +227,9 @@ class Scanner:
                     await session.commit()
         except Exception:
             log.exception("could not persist scan error for root=%s", root_id)
+        # Emit the audit AFTER the error-state commit, on a fresh session, so
+        # audit failure cannot roll back the error-state persistence.
+        await self._audit(root_id, "scan_error", detail=error)
 
 
 def _walk_root(root: Path) -> tuple[set[str], dict[str, _WalkedFile]]:

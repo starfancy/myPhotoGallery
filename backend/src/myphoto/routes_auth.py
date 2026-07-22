@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from myphoto.audit import write_audit
 from myphoto.deps import SESSION_COOKIE, current_user
 from myphoto.errors import AppError
 from myphoto.models import User
@@ -59,6 +60,7 @@ async def login(body: LoginBody, request: Request, response: Response):
         raise AppError("login_locked", 429, "too many failed attempts; try again later")
 
     sm = request.app.state.sessionmaker
+    login_failed = False
     async with sm() as session:
         user = (
             await session.execute(select(User).where(User.username == body.username))
@@ -67,31 +69,47 @@ async def login(body: LoginBody, request: Request, response: Response):
         password_valid = verify_password(body.password, password_hash)
         if user is None or user.enabled != 1 or not password_valid:
             _record_fail(lockout_state, ip)
-            raise AppError("invalid_credentials", 401, "wrong username or password")
+            login_failed = True
+        else:
+            user.last_login_at = int(time.time())
+            await write_audit(
+                session, "login_success", user.id, ip,
+                target=f"user:{user.id}",
+            )
+            await session.commit()
+            lockout_state.pop(ip, None)
 
-        user.last_login_at = int(time.time())
-        await session.commit()
-        lockout_state.pop(ip, None)
-
-        cfg = request.app.state.config
-        max_age = cfg.session_hours * 3600
-        token = make_token(cfg.jwt_secret, user.id, user.role, max_age)
-        response.set_cookie(
-            SESSION_COOKIE,
-            token,
-            max_age=max_age,
-            httponly=True,
-            samesite="lax",
-            path="/",
-        )
-        return {
-            "user": {
-                "id": user.id,
-                "username": user.username,
-                "role": user.role,
-                "access_scope": user.access_scope,
+            cfg = request.app.state.config
+            max_age = cfg.session_hours * 3600
+            token = make_token(cfg.jwt_secret, user.id, user.role, max_age)
+            response.set_cookie(
+                SESSION_COOKIE,
+                token,
+                max_age=max_age,
+                httponly=True,
+                samesite="lax",
+                path="/",
+            )
+            return {
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "role": user.role,
+                    "access_scope": user.access_scope,
+                }
             }
-        }
+
+    # Reach here only on failed login — main session has been released, so the
+    # audit session below is not nested (avoids sqlite writer-writer contention
+    # on non-WAL setups).
+    if login_failed:
+        async with sm() as audit_session:
+            await write_audit(
+                audit_session, "login_fail", None, ip,
+                target=f"username={body.username}",
+            )
+            await audit_session.commit()
+        raise AppError("invalid_credentials", 401, "wrong username or password")
 
 
 @router.post("/logout", status_code=204)

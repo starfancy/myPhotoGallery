@@ -46,8 +46,9 @@ def test_status_shape_empty(client_as_admin):
     assert stats["roots"] == 0
     assert stats["users"] >= 1  # bootstrap admin
     assert data["scan_statuses"] == []
-    # recent_audit will include the login_success not yet — audit wiring is P2-7.
+    # login_success from the fixture is written by P2-7 audit wiring.
     assert isinstance(data["recent_audit"], list)
+    assert any(e["action"] == "login_success" for e in data["recent_audit"])
 
 
 def test_status_reflects_created_gallery_and_root(client_as_admin):
@@ -82,11 +83,14 @@ def test_status_recent_audit_limited_to_20(client_as_admin):
     app = c.app
 
     async def _seed(n):
+        # Use timestamps far in the future so seeded rows sort ahead of
+        # any real audits (e.g. the login_success written by the fixture).
+        base = 4_000_000_000  # year 2096
         sm = app.state.sessionmaker
         async with sm() as s:
             for i in range(n):
                 s.add(AuditLog(
-                    ts=1_000_000 + i,
+                    ts=base + i,
                     actor_user_id=1,
                     actor_ip="127.0.0.1",
                     action="login_success",

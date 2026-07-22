@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 from sqlalchemy import func, select
 
+from myphoto.audit import write_audit
 from myphoto.config import load_or_init
 from myphoto.db import create_all, make_engine, make_sessionmaker
 from myphoto.models import Gallery, GalleryRoot, Image
@@ -49,7 +50,13 @@ def add_gallery(ctx, name, description):
             async with sm() as s:
                 if (await s.execute(select(Gallery).where(Gallery.name == name))).scalar_one_or_none():
                     raise click.ClickException(f"gallery '{name}' already exists")
-                s.add(Gallery(name=name, description=description, created_at=int(time.time())))
+                g = Gallery(name=name, description=description, created_at=int(time.time()))
+                s.add(g)
+                await s.flush()
+                await write_audit(
+                    s, "gallery_create", None, "cli",
+                    target=f"gallery:{g.id}", detail=f"name={name}",
+                )
                 await s.commit()
                 click.echo(f"gallery '{name}' created")
         finally:
@@ -74,7 +81,14 @@ def add_root(ctx, gallery_name, label, absolute_path):
                 g = (await s.execute(select(Gallery).where(Gallery.name == gallery_name))).scalar_one_or_none()
                 if g is None:
                     raise click.ClickException(f"gallery '{gallery_name}' not found")
-                s.add(GalleryRoot(gallery_id=g.id, label=label, absolute_path=str(p), enabled=1))
+                r = GalleryRoot(gallery_id=g.id, label=label, absolute_path=str(p), enabled=1)
+                s.add(r)
+                await s.flush()
+                await write_audit(
+                    s, "root_add", None, "cli",
+                    target=f"root:{r.id}",
+                    detail=f"gallery={gallery_name} label={label} path={p}",
+                )
                 await s.commit()
                 click.echo(f"root '{label}' added to '{gallery_name}' -> {p}")
         finally:
