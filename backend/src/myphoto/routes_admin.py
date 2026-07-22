@@ -1,23 +1,27 @@
 from __future__ import annotations
 
 import os
+import shutil
 import string
 import sys
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from myphoto.audit import write_audit
 from myphoto.deps import admin_required, require_lan_ip
 from myphoto.errors import AppError
-from myphoto.models import Gallery, GalleryRoot, Image, User
+from myphoto.models import AuditLog, Gallery, GalleryRoot, Image, User
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 BROWSE_FS_MAX_ENTRIES = 5000
+STATUS_RECENT_AUDIT_LIMIT = 20
+AUDIT_DEFAULT_LIMIT = 50
+AUDIT_MAX_LIMIT = 500
 
 
 def _client_ip(request: Request) -> str:
@@ -466,3 +470,185 @@ async def admin_browse_fs(
     await _write_audit(audit_detail)
 
     return {"path": result_path, "entries": entries, "truncated": truncated}
+
+
+# ---- system status / thumb-cache purge / audit query ----
+
+
+@router.get("/status")
+async def admin_status(
+    request: Request,
+    response: Response,
+    _admin: User = Depends(admin_required),
+):
+    response.headers["Cache-Control"] = "no-store"
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        image_count = (await s.execute(select(func.count()).select_from(Image))).scalar_one()
+        gallery_count = (await s.execute(select(func.count()).select_from(Gallery))).scalar_one()
+        root_count = (await s.execute(select(func.count()).select_from(GalleryRoot))).scalar_one()
+        user_count = (await s.execute(select(func.count()).select_from(User))).scalar_one()
+
+        roots = (await s.execute(select(GalleryRoot))).scalars().all()
+        scanner = request.app.state.scanner
+        scan_statuses = []
+        for r in roots:
+            live = scanner.get_status(r.id)
+            scan_statuses.append({
+                "root_id": r.id,
+                "gallery_id": r.gallery_id,
+                "label": r.label,
+                "absolute_path": r.absolute_path,
+                "enabled": bool(r.enabled),
+                "status": live["status"],
+                "last_scan_at": live["last_scan_at"] if live["last_scan_at"] is not None else r.last_scan_at,
+                "last_scan_status": r.last_scan_status,
+                "last_scan_error": live["last_scan_error"] if live["last_scan_error"] is not None else r.last_scan_error,
+            })
+
+        recent = (
+            await s.execute(
+                select(AuditLog)
+                .order_by(AuditLog.ts.desc(), AuditLog.id.desc())
+                .limit(STATUS_RECENT_AUDIT_LIMIT)
+            )
+        ).scalars().all()
+        recent_audit = [
+            {
+                "id": row.id,
+                "ts": row.ts,
+                "actor_user_id": row.actor_user_id,
+                "actor_ip": row.actor_ip,
+                "action": row.action,
+                "target": row.target,
+                "detail": row.detail,
+            }
+            for row in recent
+        ]
+
+    return {
+        "stats": {
+            "images": image_count,
+            "galleries": gallery_count,
+            "roots": root_count,
+            "users": user_count,
+        },
+        "scan_statuses": scan_statuses,
+        "recent_audit": recent_audit,
+    }
+
+
+@router.post("/thumb-cache/purge", status_code=204)
+async def admin_thumb_cache_purge(
+    request: Request,
+    admin: User = Depends(admin_required),
+):
+    """Wipe the on-disk thumbnail cache.
+
+    Redline #1 (spec §3.4) — only touches the cache directory, never a gallery
+    root. Two in-code guards enforce this:
+      1. cache_dir must resolve to a path inside cfg.data_dir/.cache
+      2. cache_dir must not be a symlink (would otherwise let an attacker
+         redirect the rmtree target)
+    """
+    cfg = request.app.state.config
+    data_dir = Path(cfg.data_dir).resolve()
+    cache_root = data_dir / ".cache"
+    cache_dir = cache_root / "thumbnails"
+
+    if cache_dir.exists():
+        # Refuse to follow symlinks; refuse anything outside data_dir/.cache.
+        if cache_dir.is_symlink():
+            raise AppError("bad_request", 400, "thumbnail cache path is a symlink; refusing to purge")
+        try:
+            resolved = cache_dir.resolve(strict=True)
+        except OSError:
+            raise AppError("bad_request", 400, "thumbnail cache path is not accessible")
+        try:
+            resolved.relative_to(cache_root.resolve())
+        except ValueError:
+            raise AppError("bad_request", 400, "thumbnail cache path escapes data dir")
+        shutil.rmtree(resolved)
+        removed = True
+    else:
+        removed = False
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        await write_audit(
+            s, "thumb_cache_purge", admin.id, _client_ip(request),
+            target="thumb_cache", detail=f"path={cache_dir} removed={int(removed)}",
+        )
+        await s.commit()
+
+
+@router.get("/audit")
+async def admin_query_audit(
+    request: Request,
+    response: Response,
+    _admin: User = Depends(admin_required),
+    action: str | None = Query(None),
+    actor: int | None = Query(None),
+    from_ts: int | None = Query(None, alias="from"),
+    to_ts: int | None = Query(None, alias="to"),
+    limit: int = Query(AUDIT_DEFAULT_LIMIT, ge=1, le=AUDIT_MAX_LIMIT),
+    cursor: str | None = Query(None),
+):
+    """Paginated audit log query.
+
+    Ordering: (ts DESC, id DESC). Cursor format: "<ts>_<id>" — returns rows
+    strictly older than that (ts,id) tuple, giving stable pagination even when
+    multiple rows share the same ts.
+    """
+    response.headers["Cache-Control"] = "no-store"
+
+    stmt = select(AuditLog).order_by(AuditLog.ts.desc(), AuditLog.id.desc())
+    if action is not None:
+        stmt = stmt.where(AuditLog.action == action)
+    if actor is not None:
+        stmt = stmt.where(AuditLog.actor_user_id == actor)
+    if from_ts is not None:
+        stmt = stmt.where(AuditLog.ts >= from_ts)
+    if to_ts is not None:
+        stmt = stmt.where(AuditLog.ts <= to_ts)
+    if cursor is not None:
+        try:
+            cts_s, cid_s = cursor.split("_", 1)
+            if "_" in cts_s or "_" in cid_s:
+                raise ValueError("underscore in cursor components")
+            cts, cid = int(cts_s), int(cid_s)
+        except (ValueError, AttributeError):
+            raise AppError("bad_request", 400, "malformed cursor")
+        # rows STRICTLY older than the cursor tuple
+        stmt = stmt.where(
+            (AuditLog.ts < cts) | ((AuditLog.ts == cts) & (AuditLog.id < cid))
+        )
+
+    stmt = stmt.limit(limit + 1)
+
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        rows = (await s.execute(stmt)).scalars().all()
+
+    next_cursor: str | None = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        last = rows[-1]
+        next_cursor = f"{last.ts}_{last.id}"
+
+    return {
+        "entries": [
+            {
+                "id": r.id,
+                "ts": r.ts,
+                "actor_user_id": r.actor_user_id,
+                "actor_ip": r.actor_ip,
+                "action": r.action,
+                "target": r.target,
+                "detail": r.detail,
+            }
+            for r in rows
+        ],
+        "next_cursor": next_cursor,
+    }

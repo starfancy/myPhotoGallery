@@ -208,7 +208,7 @@ Root 删除时 `trash` 不 CASCADE，历史条目保留。
 | INDEX (ts DESC) | | |
 | INDEX (action, ts DESC) | | |
 
-**action 枚举**：`login_success`, `login_fail`, `user_create`, `user_delete`, `user_disable`, `user_update`, `password_reset`, `gallery_create`, `gallery_delete`, `gallery_update`, `root_add`, `root_remove`, `root_update`, `exclusion_add`, `exclusion_remove`, `image_delete`, `image_restore`, `trash_purge`, `scan_start`, `scan_finish`, `scan_error`, `fs_browse`, `settings_update`。
+**action 枚举**：`login_success`, `login_fail`, `user_create`, `user_delete`, `user_disable`, `user_update`, `password_reset`, `gallery_create`, `gallery_delete`, `gallery_update`, `root_add`, `root_remove`, `root_update`, `exclusion_add`, `exclusion_remove`, `image_delete`, `image_restore`, `trash_purge`, `thumb_cache_purge`, `scan_start`, `scan_finish`, `scan_error`, `fs_browse`, `settings_update`。
 
 **保留策略**：默认 180 天，可配置。
 
@@ -444,7 +444,7 @@ GET /api/image/{image_id}?download=0|1:
 
 ### 6.9 错误码
 
-`unauthenticated`, `invalid_credentials`, `login_locked`, `password_too_weak`, `access_scope_violation`, `admin_fs_lan_only`, `forbidden`, `not_found`, `path_invalid`, `path_not_readable`, `root_offline`, `last_admin_protected`, `scan_in_progress`, `batch_too_large`, `conflict`, `internal_error`。
+`unauthenticated`, `invalid_credentials`, `login_locked`, `password_too_weak`, `access_scope_violation`, `admin_fs_lan_only`, `forbidden`, `not_found`, `bad_request`, `path_invalid`, `path_not_readable`, `root_offline`, `last_admin_protected`, `scan_in_progress`, `batch_too_large`, `conflict`, `internal_error`。
 
 ### 6.10 HTTP 缓存
 
