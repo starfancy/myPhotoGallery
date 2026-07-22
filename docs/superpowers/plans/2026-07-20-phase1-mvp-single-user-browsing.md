@@ -4657,12 +4657,52 @@ git tag phase1-mvp
 
 ## P2 – P7 骨架（不属本计划，供全局参考）
 
-- **P2 多图库多根 + 最小管理 API**：新增 `/api/admin/galleries*` `/api/admin/galleries/{gid}/roots*` `/api/admin/browse-fs`；RootListView 支持多根；后端加 audit 表与部分事件；CLI 保留但不再必需
-- **P3 多用户 + Viewer 角色 + 图库授权**：新增 `user_galleries` 表；`/api/admin/users*`；权限链步骤 5（图库授权）；前端 AdminUsers 页面
-- **P4 LAN / 远程访问域 + 可信代理**：权限链步骤 3 上线；配置 `trusted_proxies`；`admin_fs_lan_only` 错误码；AdminSettings 页面
-- **P5 单图删除 + 回收站（三入口清理）**：新增 `trash` 表；`.trash/` 目录约定；`os.remove` 唯一位点在 `trash.purge_expired()` 并加路径前缀护栏；启动一次 + 每日定时 + Admin 手动清理；AdminTrash 页面；Lightbox Admin 删除按钮
-- **P6 排除清单 + 完整管理端 UI**：`exclusions` 表；`/api/admin/.../exclusions*`；AdminGalleryEdit UI；Overview/Settings 全面完善
-- **P7 审计 · 搜索 · 批量下载 · 移动端打磨 · 无障碍**：`audit_log` 事件闭合；`/api/…/search`；`/api/download-batch`；深色模式细化；触屏尺寸复核；深度可访问性检查
+> **版本 2 (2026-07-22 修订)**：P3-P7 重排。原骨架把"单图删除"排在 P5、把"完整管理端 UI"塞成大筐、把 P7 混成打包箱。修订后按 spec §1.1 场景 3 的优先级（单人 admin 场景闭环优先），把单图删除+回收站提到 P3；把散在多 phase 的 AdminSettings 集中到 P5；把 P7 的五件不相关事拆到具体位置。EXIF 抽取与展示按用户要求下沉到 P3。
+
+- **P2 多图库多根 + 最小管理 API**：新增 `/api/admin/galleries*` `/api/admin/galleries/{gid}/roots*` `/api/admin/browse-fs`；RootListView 支持多根；后端加 audit 表与部分事件；CLI 保留但不再必需。（计划：`docs/superpowers/plans/2026-07-21-phase2-admin-gallery-management.md`）
+
+- **P3 单图删除 + 回收站（三入口清理）+ EXIF 抽取与展示**：单人 admin 场景闭环 + Lightbox 展示 EXIF 元数据。
+  - **新表 / 字段**：`trash` 表；`images.exif_json` TEXT NULL 字段
+  - **红线**：spec §3.4 红线 2、3 —— `os.rename` 用于删除，`os.remove` 唯一位点在 `trash.purge_expired()`；启动清一次 + 每日 03:17 定时 + 手动，走同一幂等函数。**红线校验只针对 delete/trash 部分。**
+  - **新 API（删除/回收站）**：`DELETE /api/images/{id}`、`POST /api/images/batch-delete`、`GET /api/trash`、`POST /api/trash/{id}/restore`、`POST /api/trash/batch-restore`、`DELETE /api/trash/{id}`、`POST /api/trash/purge`
+  - **新 API（EXIF）**：`GET /api/images/{id}/exif` → 结构化 EXIF JSON（列表 API 不带 EXIF，避免体积膨胀）
+  - **扫描器改动**：`_read_image_meta` 扩展抽取常用 EXIF tag（约 15-20 项，Make/Model/DateTimeOriginal/ExposureTime/FNumber/ISOSpeedRatings/FocalLength/LensModel/GPSInfo/Orientation 等），JSON 序列化存 `exif_json`。RAW 通过 `rawpy` 或 Pillow 读 EXIF。提供 `myphoto rescan --force-exif` CLI 一次性回补：跳过 mtime/size 判等，对所有已入库图片强制重抽 EXIF。
+  - **新前端**：BrowseView admin hover 三点菜单（"移入回收站"，含预览+路径的二次确认）、Lightbox 底部删除按钮、`AdminTrash` 页面（过滤+表格+批量恢复/删除+清空）、Lightbox 顶部 `i` 按钮 + EXIF 侧边面板（常用字段中文标签由前端映射）
+  - **审计事件**：`image_delete`、`image_restore`、`trash_purge`
+  - **规模预估**：15-18 tasks（P2 的 1.3-1.5 倍）
+
+- **P4 多用户 + Viewer 角色 + LAN/远程访问 + trusted_proxies**：家人可用自己账号登录浏览；权限链步骤 3 与步骤 5 一次性上线。
+  - **新表**：`user_galleries`
+  - **新 API**：`/api/admin/users*` 全套（列表/新建/详情/更新/重置密码/删除，含最后一个 admin 保护）；`/api/galleries` 按用户可见性过滤；权限链步骤 3（`access_scope` 判 LAN/远程）与步骤 5（图库授权）同步上线
+  - **新前端**：`AdminUsers` 页面；LoginView 感知 `access_scope_violation` 错误；AppHeader 显示当前访问域（LAN / 远程）
+  - **配置**：`[security] trusted_proxies` 生效；`admin_fs_lan_only` 错误码上线（P2 已定义，此处贯通实际强制）
+  - **审计事件**：`user_create`、`user_delete`、`user_disable`、`user_update`、`password_reset`
+  - **合并理由**：`trusted_proxies` 直接影响 `access_scope` 判定，两者若分开做会出现权限链步骤 3 只有半个能生效的中间态，Viewer 角色也会被卡
+
+- **P5 排除清单 + AdminSettings 完整版**：admin 能把某个子目录从图库中排除（不删本地文件）；集中一次配置所有可调参数。
+  - **新表**：`exclusions`
+  - **新 API**：`GET/POST /api/admin/galleries/{gid}/roots/{rid}/exclusions`、`DELETE .../exclusions/{eid}`；`GET/PATCH /api/admin/settings`
+  - **新前端**：`AdminGalleryEdit` 加排除清单区（复用 P2 的 DirectoryChooser，限定该 root 内）；`AdminSettings` 页面完整版（5 项：回收站保留天数 7/30/90/never、登录锁定阈值、trusted_proxies、缩略图预生成尺寸多选、会话过期时间）
+  - **扫描联动**：排除变更后触发受影响 root 重扫（reconcile 阶段清索引，纯 DB 操作，不动 FS —— spec §5.6）
+  - **审计事件**：`exclusion_add`、`exclusion_remove`、`settings_update`
+  - **合并理由**：exclusion 与 AdminSettings 各自规模不足以独立成 phase；合并后规模约 P2 的 60-70%
+
+- **P6 搜索 + 批量下载**：图库变大后可用性的关键补丁。
+  - **新 API**：`GET /api/galleries/{gid}/roots/{rid}/search?q=&limit=&cursor=`（文件名/目录名子串搜，当前 root 子孙范围）；`POST /api/download-batch`（on-the-fly zip，上限 500 条，spec §10）
+  - **新前端**：BrowseView 工具条搜索框 + 结果视图；BrowseView 批量选择模式（多选 → 底部工具条：删除/下载）
+  - **合并理由**：两者都是"图库变大后必须"的功能，且都需要新 API + 显著前端改动，规模都够一个小 phase 的量；合并后规模接近 P2
+
+- **P7 审计 UI + 深色模式 + 移动端打磨 + 无障碍**：面向发布的最后一波打磨。此 phase 无新表、无新后端 API（P2-6 的 `/api/admin/audit` 分页 API 已就绪）。
+  - **新前端**：
+    - `AdminAudit` 页面（表格 + 过滤 + 无限滚动 + CSV 导出）
+    - 深色模式跟 `prefers-color-scheme`（spec §7.8）
+    - 移动端断点复核 + 触屏最小 44×44
+    - 键盘导航 + `aria-*` + 图片 `alt=filename`
+    - **README + 部署文档定稿**
+  - **规模**：多个独立小项拼装，无后端改动可并行推进
+
+**Roadmap 总规模预估**：P3 ~15-18 tasks / P4 ~15 tasks / P5 ~11 tasks / P6 ~10 tasks / P7 ~10 tasks = 约 61-64 个后续 task（P2 是 12 个）。
+
 
 ## Self-Review 备忘（内部审计已完成）
 
