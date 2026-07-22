@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import string
+import sys
 import time
 from pathlib import Path
 
@@ -9,11 +11,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from myphoto.audit import write_audit
-from myphoto.deps import admin_required
+from myphoto.deps import admin_required, require_lan_ip
 from myphoto.errors import AppError
 from myphoto.models import Gallery, GalleryRoot, Image, User
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+BROWSE_FS_MAX_ENTRIES = 5000
 
 
 def _client_ip(request: Request) -> str:
@@ -338,3 +342,127 @@ async def admin_scan_status(
         "last_scan_at": status["last_scan_at"],
         "last_scan_error": status["last_scan_error"],
     }
+
+
+# ---- browse-fs (directory chooser) ----
+
+
+class BrowseFsRequest(BaseModel):
+    path: str = ""
+
+
+def _list_drive_letters() -> list[dict]:
+    """Windows: return mounted drives via GetLogicalDrives bitmask.
+
+    Uses the kernel32 bitmask rather than probing each letter with `os.path.exists`
+    so we do not wake removable media or block on dead network mounts.
+    """
+    import ctypes
+    try:
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return []
+    out = []
+    for i, letter in enumerate(string.ascii_uppercase):
+        if bitmask & (1 << i):
+            drive = f"{letter}:\\"
+            out.append({"name": f"{letter}:", "path": drive, "is_root": True})
+    return out
+
+
+def _list_directories(parent: Path) -> tuple[list[dict], bool]:
+    """List immediate subdirectories of `parent`.
+
+    - excludes files
+    - skips symlinks (no resolution)
+    - skips hidden entries (name startswith '.')
+    - stops after BROWSE_FS_MAX_ENTRIES and reports truncated=True
+    """
+    entries: list[dict] = []
+    truncated = False
+    with os.scandir(parent) as it:
+        for de in it:
+            name = de.name
+            if name.startswith("."):
+                continue
+            try:
+                if not de.is_dir(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            if len(entries) >= BROWSE_FS_MAX_ENTRIES:
+                truncated = True
+                break
+            entries.append({"name": name, "path": de.path, "is_root": False})
+    entries.sort(key=lambda e: e["name"].lower())
+    return entries, truncated
+
+
+@router.post("/browse-fs")
+async def admin_browse_fs(
+    body: BrowseFsRequest,
+    request: Request,
+    response: Response,
+    admin: User = Depends(admin_required),
+    _lan: None = Depends(require_lan_ip),
+):
+    response.headers["Cache-Control"] = "no-store"
+    raw = body.path or ""
+    audit_target = raw or "<root>"
+    audit_detail: str | None = None
+    sm = request.app.state.sessionmaker
+
+    async def _write_audit(detail: str | None) -> None:
+        async with sm() as s:
+            await write_audit(
+                s, "fs_browse", admin.id, _client_ip(request),
+                target=audit_target, detail=detail,
+            )
+            await s.commit()
+
+    try:
+        # Rule 5: reject any '..' segment (checked before resolution / normalization)
+        if raw:
+            norm_for_check = raw.replace("\\", "/")
+            parts = [p for p in norm_for_check.split("/") if p]
+            if any(p == ".." for p in parts):
+                raise AppError("path_invalid", 400, "path must not contain '..' segments")
+
+        if not raw:
+            # Default root
+            if sys.platform == "win32":
+                entries = _list_drive_letters()
+                truncated = False
+                result_path = ""
+            else:
+                root = Path("/")
+                entries, truncated = _list_directories(root)
+                result_path = str(root)
+        else:
+            p = Path(raw)
+            # Rule 4: reject symlinks (do not resolve)
+            try:
+                if p.is_symlink():
+                    raise AppError("path_invalid", 400, "symlinks are not permitted")
+            except OSError:
+                raise AppError("path_not_readable", 400, f"path not readable: {raw}")
+
+            if not p.exists() or not p.is_dir():
+                raise AppError("path_not_readable", 400, f"path not readable: {raw}")
+
+            try:
+                entries, truncated = _list_directories(p)
+            except OSError:
+                raise AppError("path_not_readable", 400, f"path not readable: {raw}")
+            result_path = str(p)
+    except AppError as e:
+        audit_detail = f"error={e.code}"
+        await _write_audit(audit_detail)
+        raise
+
+    audit_detail = f"count={len(entries)}"
+    if truncated:
+        audit_detail += " truncated=1"
+    await _write_audit(audit_detail)
+
+    return {"path": result_path, "entries": entries, "truncated": truncated}
