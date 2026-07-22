@@ -5,6 +5,10 @@
       <slot name="title"></slot>
     </div>
     <div v-if="auth.user" class="flex items-center gap-2 text-sm">
+      <router-link v-if="auth.isAdmin" to="/admin"
+        class="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100">
+        管理
+      </router-link>
       <span class="text-neutral-400">{{ auth.user.username }}</span>
       <button class="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100" @click="onLogout">
         登出
