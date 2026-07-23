@@ -5,6 +5,7 @@ from PIL import Image as PILImage
 from click.testing import CliRunner
 
 from myphoto.cli import cli
+from myphoto.config import DEFAULT_CONFIG_PATH
 
 
 def _jpg(p: Path):
@@ -45,3 +46,30 @@ def test_add_root_missing_path(tmp_path):
     CliRunner().invoke(cli, ["--config", str(cfg), "add-gallery", "G"])
     r = CliRunner().invoke(cli, ["--config", str(cfg), "add-root", "G", "L", str(tmp_path / "nope")])
     assert r.exit_code != 0
+
+
+def test_cli_uses_project_config_when_option_omitted(monkeypatch):
+    seen: list[str | None] = []
+
+    async def fake_bootstrap(config_path):
+        seen.append(config_path)
+        raise RuntimeError("stop after config capture")
+
+    monkeypatch.setattr("myphoto.cli._bootstrap", fake_bootstrap)
+    result = CliRunner().invoke(cli, ["list"])
+    assert result.exit_code != 0  # RuntimeError
+    assert seen == [None]
+
+
+def test_cli_passes_explicit_config(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.toml"
+    seen: list[str | None] = []
+
+    async def fake_bootstrap(config_path):
+        seen.append(config_path)
+        raise RuntimeError("stop after config capture")
+
+    monkeypatch.setattr("myphoto.cli._bootstrap", fake_bootstrap)
+    result = CliRunner().invoke(cli, ["--config", str(cfg), "list"])
+    assert result.exit_code != 0  # RuntimeError
+    assert seen == [str(cfg)]

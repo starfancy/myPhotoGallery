@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 from myphoto.main import build_app
 
@@ -17,3 +19,17 @@ def test_build_app_lifespan_creates_db_and_state(tmp_path):
         r = client.get("/api/health")
         assert r.status_code == 200
         assert r.json() == {"ok": True}
+
+
+def test_build_app_honors_explicit_relative_data_dir(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n'
+        'data_dir="db"\n',
+        encoding="utf-8",
+    )
+    app = build_app(config_path=cfg_path)
+    with TestClient(app):
+        db = tmp_path / "db" / "app.db"
+        assert db.exists(), f"expected db at {db}"
+        assert app.state.config.data_dir == str((tmp_path / "db").resolve())

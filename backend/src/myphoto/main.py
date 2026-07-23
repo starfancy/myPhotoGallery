@@ -4,13 +4,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Union
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
-from myphoto.config import AppConfig, load_or_init
+from myphoto.config import AppConfig, load_or_init, resolve_config_path
 from myphoto.db import make_engine, make_sessionmaker
 from myphoto.errors import AppError, install_error_handlers
 from myphoto.models import GalleryRoot
@@ -21,9 +22,10 @@ from myphoto.thumbnails import ThumbnailGenerator
 log = logging.getLogger("myphoto.main")
 
 
-def build_app(config_path: str = "config.toml") -> FastAPI:
-    cfg = load_or_init(config_path)
+def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
+    cfg = load_or_init(resolve_config_path(config_path))
     db_path = Path(cfg.data_dir) / "app.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     db_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
     @asynccontextmanager
@@ -106,4 +108,4 @@ async def get_state(request: Request) -> tuple[AppConfig, object]:
 
 
 # uvicorn entry: `uvicorn myphoto.main:app`
-app = build_app(os.environ.get("MYPHOTO_CONFIG", "config.toml"))
+app = build_app(os.environ.get("MYPHOTO_CONFIG"))

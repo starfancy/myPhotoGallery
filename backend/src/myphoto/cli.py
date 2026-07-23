@@ -8,7 +8,7 @@ import click
 from sqlalchemy import func, select
 
 from myphoto.audit import write_audit
-from myphoto.config import load_or_init
+from myphoto.config import load_or_init, resolve_config_path
 from myphoto.db import create_all, make_engine, make_sessionmaker
 from myphoto.models import Gallery, GalleryRoot, Image
 from myphoto.scanner import Scanner
@@ -19,9 +19,10 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-async def _bootstrap(config_path: str):
-    cfg = load_or_init(config_path)
+async def _bootstrap(config_path: str | None):
+    cfg = load_or_init(resolve_config_path(config_path))
     db = Path(cfg.data_dir) / "app.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
     engine = await make_engine(f"sqlite+aiosqlite:///{db.as_posix()}")
     await create_all(engine)
     sm = await make_sessionmaker(engine)
@@ -32,7 +33,7 @@ async def _bootstrap(config_path: str):
 
 
 @click.group()
-@click.option("--config", "config_path", default="config.toml")
+@click.option("--config", "config_path", default=None, type=click.Path(path_type=str))
 @click.pass_context
 def cli(ctx, config_path):
     ctx.ensure_object(dict)
