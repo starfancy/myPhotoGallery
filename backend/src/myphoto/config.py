@@ -4,6 +4,26 @@ import secrets
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Union
+
+# ---------- shared defaults (cwd-independent) ----------
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+
+
+def resolve_config_path(path: Union[str, Path, None] = None) -> Path:
+    """Return the absolute path to the config file.
+
+    - ``None`` → project-root ``config.toml`` (independent of cwd)
+    - relative / absolute string or Path → resolved from cwd
+    """
+    if path is None:
+        return DEFAULT_CONFIG_PATH
+    return Path(path).expanduser().resolve()
+
+
+# ---------- config model ----------
 
 
 @dataclass
@@ -12,10 +32,11 @@ class AppConfig:
     listen_port: int
     jwt_secret: str
     session_hours: int
-    data_dir: str  # directory holding app.db and .cache/
+    data_dir: str  # directory holding  app.db  and  .cache/
 
 
-_DEFAULT_TEMPLATE = """# myPhotoGallery config
+_DEFAULT_TEMPLATE = """\
+# myPhotoGallery config
 [app]
 listen_host = "0.0.0.0"
 listen_port = 8080
@@ -24,17 +45,32 @@ session_hours = 8
 """
 
 
-def load_or_init(path: str | Path) -> AppConfig:
-    p = Path(path)
+def load_or_init(path: Union[str, Path]) -> AppConfig:
+    p = resolve_config_path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
     if not p.exists():
         secret = secrets.token_urlsafe(48)
         p.write_text(_DEFAULT_TEMPLATE.format(secret=secret), encoding="utf-8")
+
     data = tomllib.loads(p.read_text(encoding="utf-8"))
-    app = data.get("app", {})
+    app_section = data.get("app", {})
+
+    # ---- data_dir resolution ----
+    raw = app_section.get("data_dir")
+    if raw is None:
+        data_dir = p.parent.resolve()
+    else:
+        configured = Path(str(raw)).expanduser()
+        if configured.is_absolute():
+            data_dir = configured.resolve()
+        else:
+            data_dir = (p.parent / configured).resolve()
+
     return AppConfig(
-        listen_host=app.get("listen_host", "0.0.0.0"),
-        listen_port=int(app.get("listen_port", 8080)),
-        jwt_secret=app["jwt_secret"],
-        session_hours=int(app.get("session_hours", 8)),
-        data_dir=str(p.parent.resolve()),
+        listen_host=app_section.get("listen_host", "0.0.0.0"),
+        listen_port=int(app_section.get("listen_port", 8080)),
+        jwt_secret=app_section["jwt_secret"],
+        session_hours=int(app_section.get("session_hours", 8)),
+        data_dir=str(data_dir),
     )
