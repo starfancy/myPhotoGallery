@@ -6,6 +6,9 @@ node_modules/
 frontend/dist/
 app.db
 config.toml
+db/
+backend/app.db.bak
+backend/config.toml.bak
 .cache/
 .trash/
 .DS_Store
