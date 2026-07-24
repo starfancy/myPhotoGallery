@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@unocss/reset':
+        specifier: 0.58.9
+        version: 0.58.9
       photoswipe:
         specifier: ^5.4.4
         version: 5.4.4
