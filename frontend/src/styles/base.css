@@ -1,0 +1,37 @@
+/* 全局样式补丁 */
+
+/*
+ * @unocss/reset/tailwind-compat.css 出于对第三方组件库的兼容，把
+ *   button, [type='button'], [type='reset'], [type='submit']
+ *     { background-color: transparent; }
+ * 这一条注释掉了。本项目未使用第三方 UI 库，且是深色主题，
+ * 浏览器默认的浅色 buttonface 背景在此处非常突兀，故显式恢复。
+ * 仍可通过 UnoCSS 的 bg-* 工具类正常覆盖。
+ */
+button,
+[type="button"],
+[type="reset"],
+[type="submit"] {
+  background-color: transparent;
+}
+
+/*
+ * 原图查看器（ImageLightbox 内的二级 PhotoSwipe）用浅色内描边与外层
+ * 灯箱做视觉区分。
+ *
+ * 不能用 inset box-shadow / border：.pswp 有 overflow: hidden 且被
+ * 内部铺满 100% 的 .pswp__bg 层覆盖，阴影会被吃掉；contain: layout
+ * style size 也会限制阴影渲染。
+ *
+ * 改用伪元素方案：::after 在最外层绝对定位，仅描一层 2px 边框，
+ * pointer-events: none 不影响任何手势/点击。
+ */
+.pswp.pswp--original::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+  /* 覆盖在按钮层（.pswp__top-bar 一般是 z-index 10 左右）之上 */
+  z-index: 100;
+}
