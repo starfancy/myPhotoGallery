@@ -9,6 +9,14 @@
       <div v-if="loading" class="text-neutral-400">加载中...</div>
       <div v-else-if="error" class="text-red-400">{{ error }}</div>
       <template v-else-if="data">
+        <!-- Back link -->
+        <section>
+          <router-link to="/admin/galleries"
+                       class="text-xs text-neutral-400 hover:text-neutral-200">
+            ← 返回图库列表
+          </router-link>
+        </section>
+
         <!-- Gallery edit form -->
         <section class="rounded-lg bg-neutral-900 p-4">
           <h2 class="mb-3 text-sm font-medium text-neutral-400">图库信息</h2>

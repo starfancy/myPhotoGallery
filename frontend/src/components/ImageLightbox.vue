@@ -29,6 +29,7 @@ function open() {
     width: it.width ?? 1600,
     height: it.height ?? 1200,
     alt: it.filename,
+    image_id: it.id,
   }))
   pswp = new PhotoSwipe({
     dataSource,
@@ -40,6 +41,24 @@ function open() {
     if (pswp) emit("change", props.items[pswp.currIndex].id)
   })
   pswp.on("close", () => emit("close"))
+  pswp.on("uiRegister", () => {
+    pswp!.ui!.registerElement({
+      name: "original-image",
+      ariaLabel: "查看原图",
+      order: 8,
+      isButton: true,
+      html: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 3 21 3 21 9" />
+        <polyline points="9 21 3 21 3 15" />
+        <line x1="21" y1="3" x2="14" y2="10" />
+        <line x1="3" y1="21" x2="10" y2="14" />
+      </svg>`,
+      onClick: () => {
+        const id = pswp!.currSlide?.data?.image_id
+        if (id) window.open(`/api/image/${id}`, "_blank")
+      },
+    })
+  })
   pswp.init()
 }
 

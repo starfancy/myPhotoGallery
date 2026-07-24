@@ -1,5 +1,5 @@
 <template>
-  <div v-if="folders.length" class="flex gap-3 overflow-x-auto px-1 py-2">
+  <div v-if="folders.length" class="flex flex-wrap gap-3 px-1 py-2">
     <router-link v-for="f in folders" :key="f.relative_path"
                  :to="linkFor(f.relative_path)"
                  class="group flex w-32 flex-none flex-col overflow-hidden rounded bg-neutral-800 text-sm hover:ring-2 hover:ring-blue-500">

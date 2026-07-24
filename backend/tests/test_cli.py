@@ -61,6 +61,39 @@ def test_cli_uses_project_config_when_option_omitted(monkeypatch):
     assert seen == [None]
 
 
+def test_reset_password_default_admin(tmp_path):
+    cfg = tmp_path / "config.toml"
+    runner = CliRunner()
+    # First, ensure admin user exists by running add-gallery (which bootstraps admin)
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "ResetTest"])
+
+    # Reset password with auto-generation
+    r = runner.invoke(cli, ["--config", str(cfg), "reset-password"])
+    assert r.exit_code == 0, r.output
+    assert "password for 'admin' has been reset to:" in r.output
+
+
+def test_reset_password_explicit_value(tmp_path):
+    cfg = tmp_path / "config.toml"
+    runner = CliRunner()
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "ResetExplicit"])
+
+    r = runner.invoke(cli, ["--config", str(cfg), "reset-password", "--password", "mynewpass123"])
+    assert r.exit_code == 0, r.output
+    assert "password for 'admin' has been reset." in r.output
+
+
+def test_reset_password_unknown_user(tmp_path):
+    cfg = tmp_path / "config.toml"
+    runner = CliRunner()
+    # Bootstrap first
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "ResetUnknown"])
+
+    r = runner.invoke(cli, ["--config", str(cfg), "reset-password", "--username", "nobody"])
+    assert r.exit_code != 0
+    assert "user 'nobody' not found" in r.output
+
+
 def test_cli_passes_explicit_config(tmp_path, monkeypatch):
     cfg = tmp_path / "config.toml"
     seen: list[str | None] = []

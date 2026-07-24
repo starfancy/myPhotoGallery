@@ -91,7 +91,7 @@
 
         <!-- Manage galleries link (moved to end per plan wording) -->
         <section>
-          <router-link to="/galleries"
+          <router-link to="/admin/galleries"
             class="inline-flex items-center rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500">
             管理图库
           </router-link>

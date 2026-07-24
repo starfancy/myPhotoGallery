@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import time
 from pathlib import Path
 
@@ -10,9 +11,10 @@ from sqlalchemy import func, select
 from myphoto.audit import write_audit
 from myphoto.config import load_or_init, resolve_config_path
 from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import Gallery, GalleryRoot, Image
+from myphoto.models import Gallery, GalleryRoot, Image, User
 from myphoto.scanner import Scanner
 from myphoto.schema_init import ensure_schema_and_admin
+from myphoto.security import hash_password
 
 
 def _run(coro):
@@ -145,5 +147,35 @@ def list_all(ctx):
     _run(_run_it())
 
 
-def main():
-    cli(obj={})
+@cli.command("reset-password")
+@click.option("--username", default="admin", help="username to reset (default: admin)")
+@click.option("--password", default=None, help="new password; auto-generated if omitted")
+@click.pass_context
+def reset_password(ctx, username, password):
+    """Reset a user's password (bypasses old-password check)."""
+
+    async def _run_it():
+        engine, sm, _ = await _bootstrap(ctx.obj["config_path"])
+        try:
+            async with sm() as s:
+                u = (await s.execute(select(User).where(User.username == username))).scalar_one_or_none()
+                if u is None:
+                    raise click.ClickException(f"user '{username}' not found")
+                auto_generated = password is None
+                new_pw = password
+                if auto_generated:
+                    alphabet = (
+                        "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz"
+                        "23456789!@#$%"
+                    )
+                    new_pw = "".join(secrets.choice(alphabet) for _ in range(16))
+                u.password_hash = hash_password(new_pw)
+                await s.commit()
+                if auto_generated:
+                    click.echo(f"password for '{username}' has been reset to: {new_pw}")
+                else:
+                    click.echo(f"password for '{username}' has been reset.")
+        finally:
+            await engine.dispose()
+
+    _run(_run_it())

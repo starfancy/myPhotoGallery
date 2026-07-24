@@ -19,9 +19,18 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAdmin: true },
   },
   {
+    path: "/admin/galleries",
+    component: () => import("./views/AdminGalleryList.vue"),
+    meta: { requiresAdmin: true },
+  },
+  {
     path: "/admin/galleries/:gid",
     component: () => import("./views/AdminGalleryEdit.vue"),
     meta: { requiresAdmin: true },
+  },
+  {
+    path: "/settings/password",
+    component: () => import("./views/ChangePasswordView.vue"),
   },
 ]
 

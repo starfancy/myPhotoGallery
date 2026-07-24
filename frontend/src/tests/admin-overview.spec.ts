@@ -13,6 +13,7 @@ function makeRouter() {
       { path: "/", component: { template: "<div />" } },
       { path: "/galleries", component: { template: "<div />" } },
       { path: "/admin", component: { template: "<div />" } },
+      { path: "/admin/galleries", component: { template: "<div />" } },
     ],
   })
 }
@@ -164,13 +165,13 @@ describe("AdminOverview", () => {
     expect(w.text()).toContain("some_future_action")
   })
 
-  it("renders the manage-galleries link pointing to /galleries", async () => {
+  it("renders the manage-galleries link pointing to /admin/galleries", async () => {
     mockStatus(FULL_PAYLOAD)
     const w = mountView()
     await flushPromises()
     // AppHeader also renders a router-link to /galleries (the brand); pick
     // the one whose text is "管理图库" specifically.
-    const links = w.findAll('a[href="/galleries"]')
+    const links = w.findAll('a[href="/admin/galleries"]')
     const manage = links.find((a) => a.text().includes("管理图库"))
     expect(manage).toBeDefined()
   })

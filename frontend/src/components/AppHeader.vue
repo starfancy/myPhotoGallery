@@ -9,6 +9,10 @@
         class="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100">
         管理
       </router-link>
+      <router-link to="/settings/password"
+        class="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100">
+        修改密码
+      </router-link>
       <span class="text-neutral-400">{{ auth.user.username }}</span>
       <button class="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100" @click="onLogout">
         登出
