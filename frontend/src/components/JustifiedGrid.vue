@@ -5,10 +5,11 @@
          :style="{ marginBottom: `${gap}px` }">
       <div v-for="cell in row.items" :key="cell.id"
            class="lb-grid-cell relative overflow-hidden bg-neutral-800"
+           :class="{ 'lb-grid-cell--selected': isSelected(cell.id) }"
            :style="{ width: `${cell.scaledW}px`, height: `${cell.scaledH}px` }">
         <button type="button"
                 class="absolute inset-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                @click="$emit('open', cell.id)"
+                @click="onCellClick(cell.id, $event)"
                 @contextmenu.prevent="onLongPress(cell.id, $event)"
                 @touchstart="onTouchStart(cell.id, $event)"
                 @touchend="onTouchEnd"
@@ -20,8 +21,22 @@
                :alt="cell.filename"
                class="h-full w-full object-cover" />
         </button>
-        <!-- Admin-only 三点菜单：hover 显示；点击后弹出 -->
-        <button v-if="isAdmin"
+        <!-- 选择模式：左上角勾选圈；非选择模式也保留一个可显示的空框，避免选择切换后布局跳动 -->
+        <button v-if="selectionMode"
+                type="button"
+                :aria-label="`选择 ${cell.filename}`"
+                :aria-pressed="isSelected(cell.id)"
+                class="lb-cell-check"
+                :class="{ 'lb-cell-check--on': isSelected(cell.id) }"
+                @click.stop="toggleSelect(cell.id)">
+          <svg v-if="isSelected(cell.id)" width="14" height="14" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="3"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </button>
+        <!-- Admin-only 三点菜单：选择模式下隐藏，避免与勾选交互冲突 -->
+        <button v-if="isAdmin && !selectionMode"
                 type="button"
                 :aria-label="`更多操作 ${cell.filename}`"
                 class="lb-cell-menu-btn"
@@ -60,12 +75,16 @@ const props = defineProps<{
   items: ImageRow[]
   canLoadMore: boolean
   targetHeight?: number
+  selectionMode?: boolean
+  /** 已选图片 id。父组件保持权威状态；此组件仅发出 toggle 事件。 */
+  selectedIds?: Set<number>
 }>()
 
 const emit = defineEmits<{
   (e: "open", id: number): void
   (e: "loadMore"): void
   (e: "menuAction", id: number, action: "delete"): void
+  (e: "toggleSelect", id: number): void
 }>()
 
 const auth = useAuthStore()
@@ -107,6 +126,25 @@ const rows = computed(() => {
   }))
 })
 
+// ---------- selection ----------
+
+function isSelected(id: number): boolean {
+  return props.selectedIds?.has(id) === true
+}
+
+function toggleSelect(id: number) {
+  emit("toggleSelect", id)
+}
+
+/** 点击缩略图：选择模式下切换选中；否则打开 lightbox。 */
+function onCellClick(id: number, _ev: MouseEvent) {
+  if (props.selectionMode) {
+    toggleSelect(id)
+  } else {
+    emit("open", id)
+  }
+}
+
 // ---------- 菜单（admin-only） ----------
 
 const menu = ref<{ id: number; x: number; y: number } | null>(null)
@@ -132,6 +170,7 @@ let pressStartXY: { x: number; y: number } | null = null
 
 function onTouchStart(id: number, ev: TouchEvent) {
   if (!isAdmin.value) return
+  if (props.selectionMode) return  // 选择模式下不走长按弹菜单
   const t = ev.touches[0]
   pressStartXY = { x: t.clientX, y: t.clientY }
   pressTimer = window.setTimeout(() => {
@@ -155,6 +194,7 @@ function onTouchEnd() {
 function onLongPress(id: number, ev: MouseEvent) {
   // 桌面右键 → 菜单（不覆盖浏览器默认菜单是不友好的；此处主动禁止默认）
   if (!isAdmin.value) return
+  if (props.selectionMode) return
   openMenu(id, ev)
 }
 </script>
@@ -162,6 +202,10 @@ function onLongPress(id: number, ev: MouseEvent) {
 <style scoped>
 .lb-grid-cell {
   /* hover 时才让子按钮出现 */
+}
+.lb-grid-cell--selected {
+  outline: 3px solid rgb(37 99 235);
+  outline-offset: -3px;
 }
 .lb-cell-menu-btn {
   position: absolute;
@@ -185,6 +229,26 @@ function onLongPress(id: number, ev: MouseEvent) {
 }
 .lb-cell-menu-btn:hover {
   background: rgba(0, 0, 0, 0.75);
+}
+.lb-cell-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  z-index: 2;
+}
+.lb-cell-check--on {
+  background: rgb(37 99 235);
+  border-color: rgb(37 99 235);
 }
 </style>
 
