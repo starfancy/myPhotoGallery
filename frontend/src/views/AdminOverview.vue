@@ -90,10 +90,14 @@
         </section>
 
         <!-- Manage galleries link (moved to end per plan wording) -->
-        <section>
+        <section class="flex flex-wrap gap-2">
           <router-link to="/admin/galleries"
             class="inline-flex items-center rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500">
             管理图库
+          </router-link>
+          <router-link to="/admin/trash"
+            class="inline-flex items-center rounded bg-neutral-700 px-3 py-2 text-sm hover:bg-neutral-600">
+            回收站
           </router-link>
         </section>
       </template>

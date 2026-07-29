@@ -29,6 +29,11 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAdmin: true },
   },
   {
+    path: "/admin/trash",
+    component: () => import("./views/AdminTrash.vue"),
+    meta: { requiresAdmin: true },
+  },
+  {
     path: "/settings/password",
     component: () => import("./views/ChangePasswordView.vue"),
   },
