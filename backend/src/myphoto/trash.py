@@ -1,8 +1,8 @@
-"""回收站工具：TRASH_DIR 定位、路径护栏、purge_expired。
+"""回收站工具：TRASH_DIR 定位、路径护栏、purge_expired、delete_one。
 
-**红线 3**：`os.remove` 唯一位点在 [purge_expired] 中，且执行前必须通过
-[is_under_trash_dir] 前缀校验；不通过则跳过 + 写审计 `trash_purge`
-detail=`path_guard_blocked`，绝不对文件做任何写操作。
+**红线 3**：`os.remove` 唯一位点在本模块（[purge_expired]、[delete_one]）中，
+且每次调用前都要过 [is_under_trash_dir] 前缀校验；不通过则跳过并写审计
+`trash_purge` detail=`path_guard_blocked`，绝不对文件做任何写操作。
 """
 from __future__ import annotations
 
@@ -143,3 +143,57 @@ async def purge_expired(
         "missing": missing,
         "errors": errors,
     }
+
+
+async def delete_one(
+    session: AsyncSession,
+    trash_id: int,
+    *,
+    actor_user_id: Optional[int] = None,
+    actor_ip: str = "system",
+) -> dict:
+    """物理删除单条回收站条目——`os.remove` 的另一个受控入口。
+
+    与 [purge_expired] 一样必须过 [is_under_trash_dir] 前缀护栏。
+    - 找不到 trash 行 → ``{"status": "not_found"}``
+    - 路径不在 TRASH_DIR 下 → 拒绝 + 写审计 `trash_purge:path_guard_blocked`，
+      ``{"status": "blocked"}``
+    - 文件缺失 → 仍清理 DB 行，``{"status": "missing"}``
+    - 正常 → ``{"status": "purged"}``
+
+    调用方（handler）负责事务提交。不在此写"成功清理"审计——单条删除
+    与批量 purge 语义不同，交给上层聚合。
+    """
+    row = await session.get(Trash, trash_id)
+    if row is None:
+        return {"status": "not_found"}
+
+    root = await session.get(GalleryRoot, row.root_id)
+    if root is None:
+        # root 已消失，无法定位 TRASH_DIR；只清 DB 行
+        log.warning("delete_one: trash row %s references missing root %s", row.id, row.root_id)
+        await session.delete(row)
+        return {"status": "purged"}
+
+    trash_file = Path(root.absolute_path) / row.trash_relative_path
+    if not is_under_trash_dir(trash_file, root):
+        await write_audit(
+            session, "trash_purge", actor_user_id, actor_ip,
+            target=f"trash:{row.id}",
+            detail=f"path_guard_blocked:trash_id={row.id} path={row.trash_relative_path}",
+        )
+        log.error("delete_one blocked by path guard: trash_id=%s path=%s", row.id, trash_file)
+        return {"status": "blocked"}
+
+    try:
+        os.remove(trash_file)
+        status = "purged"
+    except FileNotFoundError:
+        status = "missing"
+    except OSError:
+        log.exception("delete_one failed to remove file: trash_id=%s path=%s", row.id, trash_file)
+        return {"status": "errors"}
+
+    await session.delete(row)
+    return {"status": status}
+

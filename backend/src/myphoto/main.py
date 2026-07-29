@@ -83,6 +83,10 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
 
     app.include_router(images_router)
 
+    from myphoto.routes_trash import router as trash_router
+
+    app.include_router(trash_router)
+
     @app.get("/api/health")
     def health():
         return {"ok": True}
