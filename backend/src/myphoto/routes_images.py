@@ -123,6 +123,10 @@ async def _delete_single(
     # 递减目录 count
     await _decrement_folder_counts(session, image, root.id)
 
+    now = int(time.time())
+    retention_days = int(
+        getattr(request.app.state.config, "trash_retention_days", 30)
+    )
     session.add(
         Trash(
             gallery_id=root.gallery_id,
@@ -132,8 +136,8 @@ async def _delete_single(
             sha1=image.sha1,
             size_bytes=image.size_bytes,
             deleted_by=admin.id,
-            deleted_at=int(time.time()),
-            purge_after=int(time.time()) + 30 * 86400,  # TODO(P4): read from config
+            deleted_at=now,
+            purge_after=now + retention_days * 86400,
         )
     )
     await write_audit(

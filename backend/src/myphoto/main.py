@@ -18,6 +18,7 @@ from myphoto.models import GalleryRoot
 from myphoto.scanner import Scanner
 from myphoto.schema_init import ensure_schema_and_admin
 from myphoto.thumbnails import ThumbnailGenerator
+from myphoto.trash import purge_expired
 
 log = logging.getLogger("myphoto.main")
 
@@ -46,6 +47,23 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
             ).scalars()
             for root in roots:
                 await scanner.enqueue(root.id)
+
+        # 启动时清理一次已到期的回收站条目——防主机长时间关机漏掉。
+        # 定时器（daily）延后到 P4；本 phase 只做启动 + 手动。
+        try:
+            async with sm() as session:
+                result = await purge_expired(
+                    session, actor_user_id=None, actor_ip="startup",
+                )
+                await session.commit()
+                if result.get("purged") or result.get("blocked") or result.get("errors"):
+                    log.info(
+                        "startup purge_expired: purged=%s blocked=%s missing=%s errors=%s",
+                        result["purged"], result["blocked"],
+                        result["missing"], result["errors"],
+                    )
+        except Exception:
+            log.exception("startup purge_expired failed")
         app.state.engine = engine
         app.state.sessionmaker = sm
         app.state.config = cfg
