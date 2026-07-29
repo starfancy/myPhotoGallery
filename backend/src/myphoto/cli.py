@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import secrets
 import time
 from pathlib import Path
@@ -11,10 +12,13 @@ from sqlalchemy import func, select
 from myphoto.audit import write_audit
 from myphoto.config import load_or_init, resolve_config_path
 from myphoto.db import create_all, make_engine, make_sessionmaker
+from myphoto.formats import classify
 from myphoto.models import Gallery, GalleryRoot, Image, User
-from myphoto.scanner import Scanner
+from myphoto.scanner import Scanner, _process_file
 from myphoto.schema_init import ensure_schema_and_admin
 from myphoto.security import hash_password
+
+_cli_log = logging.getLogger("myphoto.cli")
 
 
 def _run(coro):
@@ -126,6 +130,111 @@ def rescan(ctx, gallery_name, root_label):
         finally:
             await engine.dispose()
     _run(_run_it())
+
+
+@cli.command("rescan-exif")
+@click.argument("gallery_name", required=False)
+@click.argument("root_label", required=False)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="重跑所有图片（默认只处理 exif_json IS NULL 的图片）。",
+)
+@click.pass_context
+def rescan_exif(ctx, gallery_name, root_label, force):
+    """回填已入库图片的 exif_json 字段。
+
+    与 [rescan] 不同：不改 sha1/mtime/size，也不重算目录 count；只逐张
+    重新读一次 EXIF 并更新 images 表。默认只处理 `exif_json IS NULL` 的
+    图片；`--force` 全量重跑。图片文件不存在或读取失败时跳过。
+    """
+
+    async def _run_it():
+        engine, sm, _ = await _bootstrap(ctx.obj["config_path"])
+        try:
+            async with sm() as s:
+                q = select(GalleryRoot).where(GalleryRoot.enabled == 1)
+                if gallery_name:
+                    g = (await s.execute(
+                        select(Gallery).where(Gallery.name == gallery_name)
+                    )).scalar_one_or_none()
+                    if g is None:
+                        raise click.ClickException(f"gallery '{gallery_name}' not found")
+                    q = q.where(GalleryRoot.gallery_id == g.id)
+                if root_label:
+                    q = q.where(GalleryRoot.label == root_label)
+                roots = (await s.execute(q)).scalars().all()
+
+            total_updated = 0
+            total_skipped = 0
+            total_missing = 0
+            for r in roots:
+                click.echo(f"rescan-exif {r.label} ({r.absolute_path})...")
+                updated, skipped, missing = await _rescan_exif_root(sm, r, force=force)
+                total_updated += updated
+                total_skipped += skipped
+                total_missing += missing
+                click.echo(
+                    f"  -> updated={updated} skipped={skipped} missing={missing}"
+                )
+
+            # 汇总审计（CLI 触发，actor_user_id=None，actor_ip='cli'）
+            async with sm() as s:
+                await write_audit(
+                    s, "rescan_exif", None, "cli",
+                    target=(
+                        f"gallery:{gallery_name}" if gallery_name else "all"
+                    ),
+                    detail=(
+                        f"updated={total_updated} skipped={total_skipped} "
+                        f"missing={total_missing} force={int(force)}"
+                    ),
+                )
+                await s.commit()
+        finally:
+            await engine.dispose()
+    _run(_run_it())
+
+
+async def _rescan_exif_root(
+    sm, root: GalleryRoot, *, force: bool
+) -> tuple[int, int, int]:
+    """回填一个 root 下的 exif_json；返回 (updated, skipped, missing)。"""
+    updated = 0
+    skipped = 0
+    missing = 0
+    async with sm() as s:
+        stmt = select(Image).where(Image.root_id == root.id)
+        if not force:
+            stmt = stmt.where(Image.exif_json.is_(None))
+        images = (await s.execute(stmt)).scalars().all()
+
+        for image in images:
+            path = Path(root.absolute_path) / image.relative_path
+            if not path.exists():
+                missing += 1
+                continue
+            try:
+                # 只用 EXIF 结果；sha1/w/h/taken_at 已在 rescan 时算过，本命令
+                # 只回填 exif_json，避免把 taken_at 意外覆盖为空
+                _sha1, _w, _h, _taken, exif_json = await asyncio.to_thread(
+                    _process_file,
+                    path,
+                    classify(image.filename) == "raw",
+                )
+            except Exception:
+                _cli_log.warning("rescan-exif failed for %s", path, exc_info=True)
+                skipped += 1
+                continue
+            if exif_json is None and image.exif_json is None:
+                # 无 EXIF 又本就是空，无需变更；也不算 "updated"
+                continue
+            image.exif_json = exif_json
+            updated += 1
+        await s.commit()
+    return updated, skipped, missing
+
 
 
 @cli.command("list")
