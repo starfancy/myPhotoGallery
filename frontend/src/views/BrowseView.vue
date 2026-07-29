@@ -8,13 +8,15 @@
     <main class="p-3">
       <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid" />
       <JustifiedGrid v-if="images.length" :items="images" :can-load-more="!!nextCursor"
-                     @open="onOpen" @load-more="onLoadMore" />
+                     @open="onOpen" @load-more="onLoadMore"
+                     @menu-action="onGridMenuAction" />
       <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-neutral-500">
         此目录暂无图片
       </div>
     </main>
     <ImageLightbox v-if="lightboxId !== null" :items="images" :start-id="lightboxId"
-                    @close="onLightboxClose" @change="onLightboxChange" />
+                    @close="onLightboxClose" @change="onLightboxChange"
+                    @deleted="onImageDeleted" />
   </div>
 </template>
 
@@ -26,7 +28,7 @@ import Breadcrumb from "../components/Breadcrumb.vue"
 import SubfolderStrip from "../components/SubfolderStrip.vue"
 import JustifiedGrid from "../components/JustifiedGrid.vue"
 import ImageLightbox from "../components/ImageLightbox.vue"
-import { apiGet } from "../api"
+import { apiGet, apiDelete, HttpError } from "../api"
 import { useBrowseStore, type ImageRow } from "../stores/browse"
 
 const route = useRoute()
@@ -59,6 +61,29 @@ const nextCursor = ref<string | null>(null)
 const loading = ref(false)
 
 const browse = useBrowseStore()
+
+function onImageDeleted(id: number) {
+  const key = { gid: gid.value, rid: rid.value, path: path.value, sort: sort.value }
+  browse.removeImages(key, [id])
+  const entry = browse.get(key)
+  images.value = entry ? entry.items : []
+}
+
+async function onGridMenuAction(id: number, action: "delete") {
+  if (action !== "delete") return
+  const image = images.value.find((it) => it.id === id)
+  if (!image) return
+  const msg = `确定将「${image.filename}」移入回收站？\n\n30 天内可从「回收站」恢复。`
+  if (!window.confirm(msg)) return
+  try {
+    await apiDelete(`/api/images/${id}`)
+  } catch (err) {
+    const m = err instanceof HttpError ? err.message : "删除失败"
+    window.alert(`删除失败：${m}`)
+    return
+  }
+  onImageDeleted(id)
+}
 
 async function loadAll() {
   loading.value = true

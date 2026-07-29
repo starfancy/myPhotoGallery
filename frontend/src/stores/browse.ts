@@ -95,5 +95,14 @@ export const useBrowseStore = defineStore("browse", () => {
     }
   }
 
-  return { cache, get, load, loadMore, saveScroll }
+  /** 从当前视图（缓存条目）中移除一张图片。批量删除时也可用。 */
+  function removeImages(k: BrowseKey, imageIds: number[]) {
+    const e = get(k)
+    if (!e) return
+    const set = new Set(imageIds)
+    e.items = e.items.filter((it) => !set.has(it.id))
+    touch(e)
+  }
+
+  return { cache, get, load, loadMore, saveScroll, removeImages }
 })
