@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -17,12 +18,12 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from myphoto.audit import write_audit
-from myphoto.deps import admin_required
+from myphoto.deps import admin_required, current_user
 from myphoto.errors import AppError
 from myphoto.models import Folder, GalleryRoot, Image, Trash, User
 from myphoto.trash import trash_dir_for
@@ -200,3 +201,37 @@ async def batch_delete_images(
             log.exception("batch delete failed for image_id=%s", image_id)
             failed.append({"id": image_id, "error": str(exc)[:200]})
     return {"deleted": deleted, "failed": failed}
+
+
+@router.get("/images/{image_id}/exif")
+async def get_image_exif(
+    image_id: int,
+    request: Request,
+    response: Response,
+    _user: User = Depends(current_user),
+) -> dict:
+    """返回图片存储的 EXIF 字典。
+
+    - `exif_json` 为 NULL 或解析失败：`exif` 字段为空 dict
+    - 权限：任何登录用户（不做 gallery/root 粒度访问控制——本产品设计中
+      登录用户对所有图片可见）
+    """
+    response.headers["Cache-Control"] = "no-store"
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        image = await s.get(Image, image_id)
+        if image is None:
+            raise AppError("not_found", 404, "image not found")
+        exif: dict = {}
+        if image.exif_json:
+            try:
+                parsed = json.loads(image.exif_json)
+                if isinstance(parsed, dict):
+                    exif = parsed
+            except (ValueError, TypeError):
+                log.warning("malformed exif_json for image_id=%s", image_id)
+        return {
+            "image_id": image.id,
+            "filename": image.filename,
+            "exif": exif,
+        }
