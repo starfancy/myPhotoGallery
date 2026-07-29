@@ -79,6 +79,10 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
 
     app.include_router(admin_router)
 
+    from myphoto.routes_images import router as images_router
+
+    app.include_router(images_router)
+
     @app.get("/api/health")
     def health():
         return {"ok": True}
