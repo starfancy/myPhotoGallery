@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
+import json
 import logging
 import os
 import time
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 
-from PIL import Image as PILImage
+from PIL import ExifTags, Image as PILImage
+from PIL.TiffImagePlugin import IFDRational
 from sqlalchemy import select
 
 from myphoto.audit import write_audit
@@ -23,6 +27,32 @@ try:
     pillow_heif.register_heif_opener()
 except Exception:  # pragma: no cover - optional decoder registration
     pass
+
+
+# EXIF tag ID → 输出字典中使用的名字。GPSInfo (0x8825) 单独处理：其值
+# 是 sub-IFD 指针，抽取时会替换成 GPS 子字段字典。
+EXIF_TAGS: dict[int, str] = {
+    0x010F: "Make",
+    0x0110: "Model",
+    0x9003: "DateTimeOriginal",
+    0x0132: "ModifyDate",
+    0x829A: "ExposureTime",
+    0x829D: "FNumber",
+    0x8827: "ISOSpeedRatings",
+    0x920A: "FocalLength",
+    0xA434: "LensModel",
+    0x8825: "GPSInfo",
+    0x0112: "Orientation",
+    0x0131: "Software",
+    0x9209: "Flash",
+    0xA403: "WhiteBalance",
+    0xA001: "ColorSpace",
+    0x8822: "ExposureProgram",
+    0x9207: "MeteringMode",
+    0x9204: "ExposureBiasValue",
+    0xA406: "SceneCaptureType",
+    0xA300: "FileSource",
+}
 
 
 @dataclass
@@ -180,7 +210,7 @@ class Scanner:
                     continue
 
                 try:
-                    sha1, width, height, taken_at = await asyncio.to_thread(
+                    sha1, width, height, taken_at, exif_json = await asyncio.to_thread(
                         _process_file,
                         walked.path,
                         classify(walked.filename) == "raw",
@@ -199,6 +229,7 @@ class Scanner:
                     width=width,
                     height=height,
                     taken_at=taken_at,
+                    exif_json=exif_json,
                 )
                 indexed_paths.add(relative_path)
 
@@ -293,13 +324,13 @@ def _walk_root(root: Path) -> tuple[set[str], dict[str, _WalkedFile]]:
 
 def _process_file(
     path: Path, is_raw: bool
-) -> tuple[str, int | None, int | None, int | None]:
+) -> tuple[str, int | None, int | None, int | None, str | None]:
     sha1 = _sha1_of(path)
     if is_raw:
-        width, height, taken_at = _read_raw_meta(path)
+        width, height, taken_at, exif_json = _read_raw_meta(path)
     else:
-        width, height, taken_at = _read_image_meta(path)
-    return sha1, width, height, taken_at
+        width, height, taken_at, exif_json = _read_image_meta(path)
+    return sha1, width, height, taken_at, exif_json
 
 
 def _sha1_of(path: Path, buffer_size: int = 64 * 1024) -> str:
@@ -310,23 +341,43 @@ def _sha1_of(path: Path, buffer_size: int = 64 * 1024) -> str:
     return digest.hexdigest()
 
 
-def _read_image_meta(path: Path) -> tuple[int, int, int | None]:
+def _read_image_meta(
+    path: Path,
+) -> tuple[int, int, int | None, str | None]:
     with PILImage.open(path) as image:
         image.verify()
     with PILImage.open(path) as image:
         width, height = image.size
-        taken_at = _taken_at_from_exif(image.getexif())
-    return width, height, taken_at
+        exif = image.getexif()
+        taken_at = _taken_at_from_exif(exif)
+        exif_json = _extract_exif_json(exif)
+    return width, height, taken_at, exif_json
 
 
-def _read_raw_meta(path: Path) -> tuple[int, int, int | None]:
+def _read_raw_meta(path: Path) -> tuple[int, int, int | None, str | None]:
     import rawpy
 
+    exif_json: str | None = None
+    taken_at: int | None = None
     with rawpy.imread(os.fspath(path)) as raw:
         sizes = raw.sizes
         width = int(sizes.width)
         height = int(sizes.height)
-    return width, height, None
+        # 通过 rawpy 抽取内嵌 JPEG，再用 Pillow 读它的 EXIF。RAW 库本身没提供
+        # 直接的 EXIF 结构化接口；内嵌 JPEG 是相机厂商写入的原始 EXIF 副本。
+        try:
+            thumb = raw.extract_thumb()
+        except Exception:
+            thumb = None
+    if thumb is not None and getattr(thumb, "format", None) == rawpy.ThumbFormat.JPEG:
+        try:
+            with PILImage.open(io.BytesIO(thumb.data)) as embedded:
+                embedded_exif = embedded.getexif()
+                taken_at = _taken_at_from_exif(embedded_exif)
+                exif_json = _extract_exif_json(embedded_exif)
+        except Exception:  # pragma: no cover - defensive: never break scan
+            log.debug("could not read EXIF from embedded thumb of %s", path, exc_info=True)
+    return width, height, taken_at, exif_json
 
 
 def _taken_at_from_exif(exif) -> int | None:
@@ -336,6 +387,124 @@ def _taken_at_from_exif(exif) -> int | None:
     try:
         return int(time.mktime(time.strptime(str(raw_value), "%Y:%m:%d %H:%M:%S")))
     except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _extract_exif_json(exif) -> str | None:
+    """从 PIL exif 对象抽取 20 个白名单 tag，返回可序列化的 JSON 字符串。
+
+    - `getexif()` 返回顶层 IFD；EXIF sub-IFD（0x8769）通过 `get_ifd(...)`
+      展开合并，因为 ExposureTime、FNumber 等大部分字段实际在 sub-IFD。
+    - GPSInfo 是 sub-IFD 指针（0x8825），单独通过 `get_ifd(0x8825)` 展开
+      为可读字典。
+    - 抽取失败绝不抛异常，返回 None。
+    """
+    if exif is None:
+        return None
+    try:
+        # 顶层 tag（Make/Model/Orientation/Software/ModifyDate）
+        merged: dict[int, object] = {tag: value for tag, value in exif.items()}
+        # 合并 EXIF sub-IFD（大量拍摄参数在这里）
+        try:
+            sub = exif.get_ifd(0x8769)
+            merged.update(sub)
+        except Exception:  # pragma: no cover
+            pass
+
+        out: dict[str, object] = {}
+        for tag_id, name in EXIF_TAGS.items():
+            if tag_id not in merged:
+                continue
+            if tag_id == 0x8825:
+                # GPSInfo 单独展开
+                try:
+                    gps_ifd = exif.get_ifd(0x8825)
+                except Exception:  # pragma: no cover
+                    gps_ifd = merged.get(0x8825)
+                gps = _serialize_gps(gps_ifd)
+                if gps:
+                    out[name] = gps
+                continue
+            serialized = _serialize_exif_value(merged[tag_id])
+            if serialized is not None:
+                out[name] = serialized
+
+        if not out:
+            return None
+        return json.dumps(out, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        log.debug("EXIF extraction failed", exc_info=True)
+        return None
+
+
+def _serialize_exif_value(value):
+    """转成 JSON 安全值：str/int/float/bool/list/dict。丢弃 bytes/未知对象。"""
+    if isinstance(value, IFDRational):
+        return _format_rational(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, str):
+        # PIL 常返回带 NUL 结尾的字符串
+        return value.strip("\x00").strip() or None
+    if isinstance(value, bytes):
+        try:
+            decoded = value.decode("utf-8", errors="ignore").strip("\x00").strip()
+        except Exception:
+            return None
+        return decoded or None
+    if isinstance(value, (tuple, list)):
+        items = [_serialize_exif_value(v) for v in value]
+        items = [v for v in items if v is not None]
+        return items or None
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            key = str(k)
+            serialized = _serialize_exif_value(v)
+            if serialized is not None:
+                out[key] = serialized
+        return out or None
+    return None
+
+
+def _format_rational(value: IFDRational) -> str | float | int:
+    """有理数：分子/分母格式化。快门速度这类 <1 的用分数字符串（"1/250"），
+    ≥1 的直接给 float。分母为 0 或非法时回退 float(value)。"""
+    try:
+        numerator = int(value.numerator)
+        denominator = int(value.denominator)
+    except Exception:  # pragma: no cover
+        try:
+            return float(value)
+        except Exception:
+            return None  # type: ignore[return-value]
+    if denominator == 0:
+        return None  # type: ignore[return-value]
+    if denominator == 1:
+        return numerator
+    # 快门速度约定：<1 秒用 "N/M" 字符串保留可读性
+    fraction = Fraction(numerator, denominator)
+    if abs(fraction) < 1:
+        return f"{fraction.numerator}/{fraction.denominator}"
+    return round(float(fraction), 3)
+
+
+# GPS sub-IFD 常见 tag id → 名字
+_GPS_TAG_NAMES = {v: k for k, v in getattr(ExifTags, "GPSTAGS", {}).items()}
+
+
+def _serialize_gps(ifd) -> dict | None:
+    if not ifd:
+        return None
+    try:
+        out: dict[str, object] = {}
+        for tag_id, value in dict(ifd).items():
+            name = ExifTags.GPSTAGS.get(tag_id, str(tag_id))
+            serialized = _serialize_exif_value(value)
+            if serialized is not None:
+                out[name] = serialized
+        return out or None
+    except Exception:  # pragma: no cover
         return None
 
 
@@ -350,6 +519,7 @@ def _upsert_image(
     width: int | None,
     height: int | None,
     taken_at: int | None,
+    exif_json: str | None,
 ) -> None:
     kind = classify(walked.filename)
     extension = walked.filename.rsplit(".", 1)[-1].lower()
@@ -370,6 +540,7 @@ def _upsert_image(
                 taken_at=taken_at,
                 is_raw=int(kind == "raw"),
                 indexed_at=indexed_at,
+                exif_json=exif_json,
             )
         )
         return
@@ -385,6 +556,7 @@ def _upsert_image(
     existing.taken_at = taken_at
     existing.is_raw = int(kind == "raw")
     existing.indexed_at = indexed_at
+    existing.exif_json = exif_json
 
 
 async def _ensure_folders(
