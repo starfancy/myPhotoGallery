@@ -74,6 +74,7 @@ class Image(Base):
     taken_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_raw: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     indexed_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    exif_json: Mapped[str | None] = mapped_column(String, nullable=True)
     __table_args__ = (
         UniqueConstraint("root_id", "relative_path", name="uq_image_path_per_root"),
         Index("ix_image_folder_filename", "folder_id", "filename"),
@@ -94,4 +95,22 @@ class AuditLog(Base):
     __table_args__ = (
         Index("ix_audit_ts", "ts"),
         Index("ix_audit_action_ts", "action", "ts"),
+    )
+
+
+class Trash(Base):
+    __tablename__ = "trash"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    root_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_relative_path: Mapped[str] = mapped_column(String, nullable=False)
+    trash_relative_path: Mapped[str] = mapped_column(String, nullable=False)
+    sha1: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    deleted_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    deleted_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    purge_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    __table_args__ = (
+        Index("ix_trash_deleted_at", "deleted_at"),
+        Index("ix_trash_gallery_deleted", "gallery_id", "deleted_at"),
     )
