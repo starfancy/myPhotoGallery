@@ -288,3 +288,7 @@ def reset_password(ctx, username, password):
             await engine.dispose()
 
     _run(_run_it())
+
+
+# Console-script entry point declared in pyproject.toml (`myphoto = "myphoto.cli:main"`).
+main = cli
