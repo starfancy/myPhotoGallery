@@ -425,3 +425,103 @@ def test_purge_requires_admin(admin_client):
     c.post("/api/auth/logout")
     c.post("/api/auth/login", json={"username": "viewer", "password": "viewerpw"})
     assert c.post("/api/trash/purge", json={"confirm": True}).status_code == 403
+
+
+# ---------- GET /api/trash/{id}/thumb ----------
+
+
+def test_trash_thumb_returns_jpeg(admin_client):
+    c, app, *_ = admin_client
+    image_id = c.portal.call(_image_id, app, "a.jpg")
+    r = c.delete(f"/api/images/{image_id}")
+    assert r.status_code == 204
+    t = c.portal.call(_list_trash, app)[0]
+
+    r = c.get(f"/api/trash/{t.id}/thumb", params={"size": 200})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/jpeg"
+    assert r.headers["etag"] == t.sha1
+    assert r.content[:3] == b"\xff\xd8\xff"  # JPEG magic
+
+
+def test_trash_thumb_supports_multiple_sizes(admin_client):
+    c, app, *_ = admin_client
+    image_id = c.portal.call(_image_id, app, "a.jpg")
+    c.delete(f"/api/images/{image_id}")
+    t = c.portal.call(_list_trash, app)[0]
+
+    for size in (200, 400, 1600):
+        r = c.get(f"/api/trash/{t.id}/thumb", params={"size": size})
+        assert r.status_code == 200, f"size {size}: {r.text}"
+
+
+def test_trash_thumb_rejects_disallowed_size(admin_client):
+    c, app, *_ = admin_client
+    image_id = c.portal.call(_image_id, app, "a.jpg")
+    c.delete(f"/api/images/{image_id}")
+    t = c.portal.call(_list_trash, app)[0]
+
+    r = c.get(f"/api/trash/{t.id}/thumb", params={"size": 999})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "path_invalid"
+
+
+def test_trash_thumb_404_when_unknown_trash_id(admin_client):
+    c, *_ = admin_client
+    r = c.get("/api/trash/99999/thumb")
+    assert r.status_code == 404
+
+
+def test_trash_thumb_404_when_file_missing_on_disk(admin_client):
+    c, app, gid, rid, photos = admin_client
+    image_id = c.portal.call(_image_id, app, "a.jpg")
+    c.delete(f"/api/images/{image_id}")
+    t = c.portal.call(_list_trash, app)[0]
+    # 手工把 trash 文件删掉，模拟外部误删
+    (photos / t.trash_relative_path).unlink()
+
+    r = c.get(f"/api/trash/{t.id}/thumb")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "not_found"
+
+
+def test_trash_thumb_path_guard_blocks_external_path(admin_client):
+    """红线护栏：trash_relative_path 指向 root 外时，thumb 端点 403，
+    绝不读取任意文件内容。"""
+    c, app, gid, rid, photos = admin_client
+
+    async def _seed_evil():
+        async with app.state.sessionmaker() as s:
+            s.add(Trash(
+                gallery_id=gid, root_id=rid,
+                original_relative_path="a.jpg",
+                trash_relative_path="../outside-file.jpg",  # 逃出 root
+                sha1="x", size_bytes=1,
+                deleted_by=1, deleted_at=1, purge_after=2,
+            ))
+            await s.commit()
+
+    c.portal.call(_seed_evil)
+    t = c.portal.call(_list_trash, app)[0]
+    r = c.get(f"/api/trash/{t.id}/thumb")
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "forbidden"
+
+
+def test_trash_thumb_requires_admin(admin_client):
+    c, app, *_ = admin_client
+    image_id = c.portal.call(_image_id, app, "a.jpg")
+    c.delete(f"/api/images/{image_id}")
+    t = c.portal.call(_list_trash, app)[0]
+
+    c.portal.call(_add_viewer, app)
+    c.post("/api/auth/logout")
+    c.post("/api/auth/login", json={"username": "viewer", "password": "viewerpw"})
+    assert c.get(f"/api/trash/{t.id}/thumb").status_code == 403
+
+
+def test_trash_thumb_requires_auth(tmp_path):
+    app = build_app(config_path=str(tmp_path / "config.toml"))
+    with TestClient(app) as c:
+        r = c.get("/api/trash/1/thumb")
+        assert r.status_code == 401

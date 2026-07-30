@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -31,7 +32,12 @@ from myphoto.deps import admin_required
 from myphoto.errors import AppError
 from myphoto.formats import classify
 from myphoto.models import Folder, GalleryRoot, Image, Trash, User
-from myphoto.trash import delete_one as _trash_delete_one, purge_expired
+from myphoto.thumbnails import ALLOWED_SIZES, ThumbnailError
+from myphoto.trash import (
+    delete_one as _trash_delete_one,
+    is_under_trash_dir,
+    purge_expired,
+)
 
 log = logging.getLogger("myphoto.routes_trash")
 
@@ -392,3 +398,61 @@ async def purge_trash(
         )
         await s.commit()
         return result
+
+
+@router.get("/{trash_id}/thumb")
+async def get_trash_thumb(
+    trash_id: int,
+    request: Request,
+    size: int = Query(200),
+    admin: User = Depends(admin_required),
+):
+    """回收站条目的缩略图。
+
+    - 权限：admin_required（与其他 /api/trash/* 一致；回收站是管理功能）
+    - 源路径：`<root.absolute_path>/<trash_relative_path>`
+    - **红线护栏**：源路径必须过 [is_under_trash_dir] 前缀校验，
+      拒绝人为篡改的 `trash_relative_path`（生成 thumb 也是文件读，
+      虽不写盘，但泄露任意文件内容同样危险）
+    - `is_raw` 由 `original_relative_path` 后缀推断（trash 表未存该字段）
+    - Thumb 缓存以 sha1 命名（`ThumbnailGenerator.cache_path`），因此
+      删除前若浏览过就已经命中缓存；从 .trash/ 里的源文件重新渲染也可用
+    """
+    if size not in ALLOWED_SIZES:
+        raise AppError("path_invalid", 400, f"size {size} not allowed")
+
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        row = await s.get(Trash, trash_id)
+        if row is None:
+            raise AppError("not_found", 404, "trash entry not found")
+        root = await s.get(GalleryRoot, row.root_id)
+        if root is None:
+            raise AppError("not_found", 404, "gallery root missing")
+
+    src = Path(root.absolute_path) / row.trash_relative_path
+    if not is_under_trash_dir(src, root):
+        # 与 delete_one 相同护栏；这里读取被拦，避免任意文件内容泄漏
+        log.error(
+            "trash thumb blocked by path guard: trash_id=%s path=%s",
+            row.id, row.trash_relative_path,
+        )
+        raise AppError("forbidden", 403, "trash entry path outside TRASH_DIR")
+    if not src.exists():
+        raise AppError("not_found", 404, "trash file missing on disk")
+
+    is_raw = classify(row.original_relative_path.rsplit("/", 1)[-1]) == "raw"
+    gen = request.app.state.thumbnails
+    try:
+        out = await gen.ensure(row.sha1, size, str(src), is_raw=is_raw)
+    except ThumbnailError as exc:
+        raise AppError("internal_error", 500, f"thumb generation failed: {exc}")
+
+    return FileResponse(
+        out,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "ETag": row.sha1,
+        },
+    )

@@ -54,6 +54,7 @@
                          :indeterminate.prop="someSelected && !allSelected"
                          @change="toggleAll" />
                 </th>
+                <th class="px-3 py-2">预览</th>
                 <th class="px-3 py-2">原路径</th>
                 <th class="px-3 py-2">图库</th>
                 <th class="px-3 py-2">删除时间</th>
@@ -67,6 +68,20 @@
                   <input type="checkbox"
                          :checked="selectedIds.has(e.id)"
                          @change="toggleOne(e.id)" />
+                </td>
+                <td class="px-3 py-2">
+                  <!-- 缩略图；文件缺失或后端 403/404 时 fallback 为占位符 -->
+                  <div class="lb-trash-thumb">
+                    <img v-if="!thumbFailed.has(e.id)"
+                         :src="`/api/trash/${e.id}/thumb?size=200`"
+                         :alt="basename(e.original_relative_path)"
+                         loading="lazy"
+                         @error="thumbFailed.add(e.id)"
+                         class="h-full w-full object-cover" />
+                    <span v-else class="text-neutral-500 text-[10px] text-center px-1">
+                      无预览
+                    </span>
+                  </div>
                 </td>
                 <td class="px-3 py-2">
                   <div class="font-medium">{{ basename(e.original_relative_path) }}</div>
@@ -149,6 +164,8 @@ const error = ref("")
 
 const filterGalleryId = ref<number | null>(null)
 const selectedIds = ref(new Set<number>())
+// 缩略图加载失败的 trash id 集合——每次 reload 清空，避免重试
+const thumbFailed = ref(new Set<number>())
 
 const restoring = ref(false)
 const deleting = ref(false)
@@ -193,6 +210,7 @@ async function reload() {
   loading.value = true
   error.value = ""
   selectedIds.value = new Set()
+  thumbFailed.value = new Set()
   try {
     const r = await apiGet<{ entries: TrashEntry[]; next_cursor: number | null }>(
       `/api/trash${buildQuery(null)}`,
@@ -347,3 +365,17 @@ onMounted(async () => {
   await reload()
 })
 </script>
+
+<style scoped>
+.lb-trash-thumb {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background: rgb(23 23 23);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+</style>

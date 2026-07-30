@@ -230,4 +230,29 @@ describe("AdminTrash", () => {
     const purgeCalls = calls.filter((c) => typeof c[0] === "string" && c[0] === "/api/trash/purge")
     expect(purgeCalls.length).toBe(0)
   })
+
+  it("renders a thumbnail img for each entry pointing at /api/trash/{id}/thumb", async () => {
+    const { w } = await mountView()
+    const imgs = w.findAll("img")
+    expect(imgs.length).toBe(TRASH_ENTRIES.length)
+    // 每条 img 的 src 指向对应 trash id
+    const ids = imgs.map((i) => i.attributes("src")).sort()
+    expect(ids).toEqual([
+      "/api/trash/101/thumb?size=200",
+      "/api/trash/102/thumb?size=200",
+      "/api/trash/103/thumb?size=200",
+    ])
+  })
+
+  it("falls back to '无预览' when thumb image fails to load", async () => {
+    const { w } = await mountView()
+    const firstImg = w.findAll("img")[0]
+    // 触发 img @error
+    await firstImg.trigger("error")
+    await flushPromises()
+    // 第一行现在应显示占位符文案
+    expect(w.text()).toContain("无预览")
+    // 其他两条仍是 img
+    expect(w.findAll("img").length).toBe(TRASH_ENTRIES.length - 1)
+  })
 })
