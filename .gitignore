@@ -11,6 +11,7 @@ backend/app.db.bak
 backend/config.toml.bak
 .cache/
 .trash/
+.vite/
 .DS_Store
 .claude/
 *.egg-info/
