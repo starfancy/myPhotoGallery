@@ -130,6 +130,11 @@ describe("ImageLightbox — EXIF panel & delete", () => {
             ExposureTime: "1/250",
             FNumber: 4.0,
             ISOSpeedRatings: 200,
+            ColorSpace: 1,
+            Flash: 0x19,
+            WhiteBalance: 0,
+            ExposureProgram: 3,
+            MeteringMode: 5,
           },
         })
       }
@@ -153,6 +158,33 @@ describe("ImageLightbox — EXIF panel & delete", () => {
     expect(text).toContain("f/4")
     expect(text).toContain("ISO")
     expect(text).toContain("200")
+    // 枚举值映射
+    expect(text).toContain("sRGB")
+    expect(text).toContain("光圈优先")
+    expect(text).toContain("评价")
+    expect(text).toContain("闪光（自动模式）")
+    expect(text).toContain("自动")
+  })
+
+  it("hides Orientation / SceneCaptureType / FileSource fields", async () => {
+    await mountLightbox("admin")
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({
+      image_id: 1,
+      filename: "a.jpg",
+      exif: {
+        Make: "Canon",
+        Orientation: 6,
+        SceneCaptureType: 0,
+        FileSource: 3,
+      },
+    })))
+    findElement("exif-info")!.onClick!()
+    await flushPromises()
+    const text = document.querySelector(".lb-exif-panel")!.textContent ?? ""
+    expect(text).toContain("Canon")
+    expect(text).not.toContain("方向")
+    expect(text).not.toContain("场景类型")
+    expect(text).not.toContain("文件来源")
   })
 
   it("shows '无 EXIF 信息' when exif dict is empty", async () => {

@@ -9,6 +9,11 @@ import "photoswipe/style.css"
 import type { ImageRow } from "../stores/browse"
 import { useAuthStore } from "../stores/auth"
 import { apiDelete, apiGet, HttpError } from "../api"
+import {
+  computeHistogramFromUrl,
+  drawHistogram,
+  type Histogram,
+} from "../lib/histogram"
 
 const props = defineProps<{
   items: ImageRow[]
@@ -29,9 +34,18 @@ let pswp: PhotoSwipe | null = null
 let originalPswp: PhotoSwipe | null = null
 
 // EXIF 侧边面板 DOM——附着在 body 上，只有当前 lightbox 打开时才存在
+let sidePanelsEl: HTMLElement | null = null
 let exifPanelEl: HTMLElement | null = null
+let histPanelEl: HTMLElement | null = null
 // EXIF 缓存：image_id -> exif dict（避免翻页反复请求同一张）
 const exifCache = new Map<number, Record<string, unknown>>()
+// 直方图缓存：image_id -> Histogram（RGB 256 桶）
+const histCache = new Map<number, Histogram>()
+// 翻页切图时用递增序号丢弃过时的异步结果
+let exifSeq = 0
+let histSeq = 0
+// 直方图请求可中止，避免快速翻页时旧图片仍在下载
+let histAbort: AbortController | null = null
 
 // 中文标签映射：PIL tag name -> 展示名。GPSInfo 单独展开成两行（经度/纬度）。
 const EXIF_LABEL_ZH: Record<string, string> = {
@@ -44,7 +58,6 @@ const EXIF_LABEL_ZH: Record<string, string> = {
   ISOSpeedRatings: "ISO",
   FocalLength: "焦距",
   LensModel: "镜头",
-  Orientation: "方向",
   Software: "软件",
   Flash: "闪光灯",
   WhiteBalance: "白平衡",
@@ -52,8 +65,62 @@ const EXIF_LABEL_ZH: Record<string, string> = {
   ExposureProgram: "曝光程序",
   MeteringMode: "测光模式",
   ExposureBiasValue: "曝光补偿",
-  SceneCaptureType: "场景类型",
-  FileSource: "文件来源",
+}
+
+// 抽取出来但不在面板展示的 EXIF 字段：信息量低或用户觉得干扰。
+// 后端仍在 exif_json 里保留（面向 API 消费者），前端仅隐藏。
+const EXIF_HIDDEN_TAGS = new Set(["Orientation", "SceneCaptureType", "FileSource"])
+
+// EXIF 枚举值到人类可读名称的映射。EXIF 规范定义了每个 tag 的编码方式；
+// 数字值单独放这里查询，未命中则回退到原始数字。
+const EXIF_ENUM_MAP: Record<string, Record<number, string>> = {
+  // EXIF ColorSpace: 1=sRGB, 2=Adobe RGB (Exif 2.3 扩展), 0xFFFF=Uncalibrated
+  ColorSpace: {
+    1: "sRGB",
+    2: "Adobe RGB",
+    0xFFFF: "Uncalibrated",
+  },
+  // ExposureProgram: 0..8 见 EXIF 2.3 §4.6.5
+  ExposureProgram: {
+    0: "未定义",
+    1: "手动",
+    2: "程序 AE",
+    3: "光圈优先",
+    4: "快门优先",
+    5: "创意程序",
+    6: "运动程序",
+    7: "肖像",
+    8: "风景",
+  },
+  // MeteringMode: 0..6, 255
+  MeteringMode: {
+    0: "未知",
+    1: "平均",
+    2: "中央重点",
+    3: "点测光",
+    4: "多点",
+    5: "评价",
+    6: "局部",
+    255: "其它",
+  },
+  // WhiteBalance: 0=自动, 1=手动
+  WhiteBalance: {
+    0: "自动",
+    1: "手动",
+  },
+  // Flash: 位掩码，这里只做常见组合的展示；其他值回落到数字
+  Flash: {
+    0x0: "未闪光",
+    0x1: "闪光",
+    0x5: "闪光，未检测到回闪",
+    0x7: "闪光，检测到回闪",
+    0x8: "未闪光（未开启）",
+    0x9: "闪光（强制）",
+    0x10: "未闪光（关闭）",
+    0x18: "未闪光（自动模式）",
+    0x19: "闪光（自动模式）",
+    0x20: "无闪光功能",
+  },
 }
 
 function currentSlideItem(): ImageRow | null {
@@ -108,6 +175,67 @@ function openOriginal() {
   originalPswp.init()
 }
 
+// ---------- side panels container ----------
+// EXIF 与直方图共享一个右上角固定容器，宽度对齐、顺序固定为 EXIF 在上、
+// 直方图在下。任一子面板首次显示时创建容器；最后一个子面板关闭时销毁。
+
+function ensureSidePanels() {
+  if (sidePanelsEl) return
+  const el = document.createElement("aside")
+  el.className = "lb-side-panels"
+  el.setAttribute("aria-label", "Lightbox 侧边面板")
+  document.body.appendChild(el)
+  sidePanelsEl = el
+}
+
+function maybeRemoveSidePanels() {
+  if (!sidePanelsEl) return
+  if (exifPanelEl || histPanelEl) return
+  sidePanelsEl.remove()
+  sidePanelsEl = null
+}
+
+function ensureExifPanel() {
+  ensureSidePanels()
+  if (exifPanelEl) return
+  const el = document.createElement("section")
+  el.className = "lb-side-panel lb-exif-panel"
+  // EXIF 永远排在容器最前（直方图之上），无论谁先打开
+  sidePanelsEl!.insertBefore(el, sidePanelsEl!.firstChild)
+  exifPanelEl = el
+}
+
+function ensureHistPanel() {
+  ensureSidePanels()
+  if (histPanelEl) return
+  const el = document.createElement("section")
+  el.className = "lb-side-panel lb-hist-panel"
+  // 直方图总是排在末尾
+  sidePanelsEl!.appendChild(el)
+  histPanelEl = el
+}
+
+function closeExifPanel() {
+  if (!exifPanelEl) return
+  exifPanelEl.remove()
+  exifPanelEl = null
+  maybeRemoveSidePanels()
+}
+
+function closeHistPanel() {
+  if (!histPanelEl) return
+  histPanelEl.remove()
+  histPanelEl = null
+  histAbort?.abort()
+  histAbort = null
+  maybeRemoveSidePanels()
+}
+
+function closeAllSidePanels() {
+  closeExifPanel()
+  closeHistPanel()
+}
+
 // ---------- EXIF panel ----------
 
 function formatExifValue(key: string, value: unknown): string {
@@ -115,6 +243,9 @@ function formatExifValue(key: string, value: unknown): string {
   if (Array.isArray(value)) return value.map((v) => formatExifValue(key, v)).join(", ")
   if (typeof value === "object") return JSON.stringify(value)
   if (typeof value === "number") {
+    // 枚举先查表，命中则以 "名称 (原值)" 展示；未命中回落到原值
+    const enumMap = EXIF_ENUM_MAP[key]
+    if (enumMap && enumMap[value] !== undefined) return enumMap[value]
     if (key === "FNumber") return `f/${value}`
     if (key === "FocalLength") return `${value} mm`
     if (key === "ExposureBiasValue") return `${value >= 0 ? "+" : ""}${value} EV`
@@ -128,6 +259,7 @@ function formatExifValue(key: string, value: unknown): string {
 function buildExifRows(exif: Record<string, unknown>): Array<[string, string]> {
   const rows: Array<[string, string]> = []
   for (const [k, v] of Object.entries(exif)) {
+    if (EXIF_HIDDEN_TAGS.has(k)) continue
     if (k === "GPSInfo" && v && typeof v === "object") {
       const gps = v as Record<string, unknown>
       const latRef = gps.GPSLatitudeRef ?? ""
@@ -172,21 +304,6 @@ function escapeHtml(s: string) {
   })[c] as string)
 }
 
-function ensureExifPanel() {
-  if (exifPanelEl) return
-  const el = document.createElement("aside")
-  el.className = "lb-exif-panel"
-  el.setAttribute("aria-label", "EXIF 面板")
-  document.body.appendChild(el)
-  exifPanelEl = el
-}
-
-function closeExifPanel() {
-  if (!exifPanelEl) return
-  exifPanelEl.remove()
-  exifPanelEl = null
-}
-
 async function openExifPanel() {
   const it = currentSlideItem()
   if (!it) return
@@ -202,17 +319,20 @@ async function openExifPanel() {
     const body = exifPanelEl.querySelector(".lb-exif-body")
     if (body) body.innerHTML = `<div class="lb-exif-msg">加载中...</div>`
   }
+  const seq = ++exifSeq
   try {
     const r = await apiGet<{ image_id: number; filename: string; exif: Record<string, unknown> }>(
       `/api/images/${it.id}/exif`,
     )
     exifCache.set(it.id, r.exif ?? {})
-    // 若期间用户已切到别的图，仍显示最新 image_id 对应的数据
+    // 若期间用户已切到别的图，忽略这份过时数据
+    if (seq !== exifSeq) return
     const now = currentSlideItem()
     if (exifPanelEl && now && now.id === r.image_id) {
       renderExifPanel(r.image_id, r.exif ?? {}, null)
     }
   } catch (err) {
+    if (seq !== exifSeq) return
     const msg = err instanceof HttpError ? err.message : "加载 EXIF 失败"
     renderExifPanel(it.id, null, msg)
   }
@@ -222,6 +342,75 @@ async function openExifPanel() {
 function refreshExifPanelIfOpen() {
   if (!exifPanelEl) return
   openExifPanel()
+}
+
+// ---------- Histogram panel ----------
+
+function renderHistPanel(imageId: number, hist: Histogram | null, msg: string | null) {
+  if (!histPanelEl) return
+  histPanelEl.dataset.imageId = String(imageId)
+  const bodyHtml = msg
+    ? `<div class="lb-hist-msg">${msg}</div>`
+    : hist
+      ? `
+          <canvas class="lb-hist-canvas" width="288" height="140"></canvas>
+          <dl class="lb-hist-stats">
+            <div class="lb-hist-stat"><dt>R 均值</dt><dd>${hist.meanR.toFixed(1)}</dd></div>
+            <div class="lb-hist-stat"><dt>G 均值</dt><dd>${hist.meanG.toFixed(1)}</dd></div>
+            <div class="lb-hist-stat"><dt>B 均值</dt><dd>${hist.meanB.toFixed(1)}</dd></div>
+          </dl>`
+      : `<div class="lb-hist-msg">计算中...</div>`
+  histPanelEl.innerHTML = `
+    <div class="lb-side-head">
+      <span>直方图</span>
+      <button class="lb-side-close lb-hist-close" aria-label="关闭">×</button>
+    </div>
+    <div class="lb-hist-body">${bodyHtml}</div>`
+  const closeBtn = histPanelEl.querySelector<HTMLButtonElement>(".lb-hist-close")
+  closeBtn?.addEventListener("click", closeHistPanel)
+  if (hist) {
+    const canvas = histPanelEl.querySelector<HTMLCanvasElement>(".lb-hist-canvas")
+    if (canvas) drawHistogram(canvas, hist)
+  }
+}
+
+async function openHistPanel() {
+  const it = currentSlideItem()
+  if (!it) return
+  ensureHistPanel()
+  const cached = histCache.get(it.id)
+  if (cached) {
+    renderHistPanel(it.id, cached, null)
+    return
+  }
+  renderHistPanel(it.id, null, null)
+  // 采样源：用 400 缩图（后端 ALLOWED_SIZES = {200, 400, 1600}）。
+  // 计算成本约 5–10ms；桶分布和 1600 版本几乎一致，视觉上肉眼看不出差别。
+  const url = `/api/thumb/${it.sha1}?size=400`
+  histAbort?.abort()
+  histAbort = new AbortController()
+  const seq = ++histSeq
+  try {
+    const hist = await computeHistogramFromUrl(url, {
+      stride: 2,
+      signal: histAbort.signal,
+    })
+    if (seq !== histSeq) return
+    histCache.set(it.id, hist)
+    const now = currentSlideItem()
+    if (histPanelEl && now && now.id === it.id) {
+      renderHistPanel(it.id, hist, null)
+    }
+  } catch (err) {
+    if (seq !== histSeq) return
+    if (err instanceof DOMException && err.name === "AbortError") return
+    renderHistPanel(it.id, null, "直方图计算失败")
+  }
+}
+
+function refreshHistPanelIfOpen() {
+  if (!histPanelEl) return
+  openHistPanel()
 }
 
 // ---------- delete ----------
@@ -262,9 +451,10 @@ function open() {
   pswp.on("change", () => {
     if (pswp) emit("change", props.items[pswp.currIndex].id)
     refreshExifPanelIfOpen()
+    refreshHistPanelIfOpen()
   })
   pswp.on("close", () => {
-    closeExifPanel()
+    closeAllSidePanels()
     emit("close")
   })
   pswp.on("uiRegister", () => {
@@ -311,12 +501,26 @@ function open() {
       </svg>`,
       onClick: () => openExifPanel(),
     })
+    // 直方图按钮
+    pswp!.ui!.registerElement({
+      name: "histogram",
+      ariaLabel: "直方图",
+      order: 11,
+      isButton: true,
+      html: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="20" x2="4" y2="12" />
+        <line x1="9" y1="20" x2="9" y2="4" />
+        <line x1="14" y1="20" x2="14" y2="9" />
+        <line x1="19" y1="20" x2="19" y2="14" />
+      </svg>`,
+      onClick: () => openHistPanel(),
+    })
     // 删除按钮：仅 admin 可见
     if (auth.isAdmin) {
       pswp!.ui!.registerElement({
         name: "delete-image",
         ariaLabel: "移入回收站",
-        order: 11,
+        order: 12,
         isButton: true,
         html: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="3 6 5 6 21 6" />
@@ -332,42 +536,85 @@ function open() {
   pswp.init()
 }
 
-// 组件挂载时打开外层灯箱
+// 组件挂载时尝试打开；若 items 尚未加载（例如页面刷新直达 /image/:iid，
+// 父组件的 loadAll() 还在异步中），open() 会因找不到 startId 而 no-op。
+// 下面的 watch 会在 items 到达后再尝试一次。
 onMounted(open)
 
 onUnmounted(() => {
-  closeExifPanel()
+  closeAllSidePanels()
   originalPswp?.destroy()
   originalPswp = null
   pswp?.destroy()
   pswp = null
 })
 
-watch(() => props.startId, (nid) => {
-  if (!pswp) return
-  const idx = props.items.findIndex((it) => it.id === nid)
-  if (idx >= 0 && idx !== pswp.currIndex) pswp.goTo(idx)
-})
+// 单个 watch 统一处理两种情况：
+//  1) pswp 已开：startId 变化 → goTo 目标索引
+//  2) pswp 未开：items 加载完 / startId 首次可解析 → 补一次 open()
+watch(
+  [() => props.startId, () => props.items],
+  ([nid]) => {
+    if (!pswp) {
+      // 挂载时 items 为空的情况，等到 items 到齐后自动补开
+      open()
+      return
+    }
+    const idx = props.items.findIndex((it) => it.id === nid)
+    if (idx >= 0 && idx !== pswp.currIndex) pswp.goTo(idx)
+  },
+)
 </script>
 
 <style>
-/* EXIF 侧边面板：附着在 body 顶层，覆盖在 PhotoSwipe 之上 */
-.lb-exif-panel {
+/* 侧边面板共享容器：附着在 body 顶层，右上角固定，浮在 PhotoSwipe 之上。
+   内部子面板（EXIF、直方图）垂直排列，宽度一致。 */
+.lb-side-panels {
   position: fixed;
   top: 60px;
-  right: 12px;
+  /* PhotoSwipe 右翻页按钮宽 75px 贴在 right:0，留出 88px 避免遮挡 */
+  right: 88px;
   width: 320px;
   max-height: calc(100vh - 120px);
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* PhotoSwipe v5 根 z-index = --pswp-root-z-index (默认 100000)，
+     必须比它高才能覆盖在灯箱之上。 */
+  z-index: 100010;
+  pointer-events: none; /* 容器本身不吃事件，子面板单独启用 */
+}
+.lb-side-panel {
   background: rgba(20, 20, 22, 0.94);
   color: #f3f4f6;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  z-index: 1600; /* PhotoSwipe 默认 1500 */
   font-size: 13px;
   line-height: 1.5;
   backdrop-filter: blur(6px);
+  pointer-events: auto;
 }
+.lb-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-weight: 600;
+}
+.lb-side-close {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.lb-side-close:hover { color: #fff; }
+
+/* --- EXIF 子面板（沿用旧类名，容器已由 .lb-side-panels 管理） --- */
 .lb-exif-head {
   display: flex;
   align-items: center;
@@ -410,4 +657,42 @@ watch(() => props.startId, (nid) => {
   color: #f3f4f6;
   overflow-wrap: anywhere;
 }
+
+/* --- 直方图子面板 --- */
+.lb-hist-body { padding: 8px 12px 12px; }
+.lb-hist-msg {
+  padding: 24px 8px;
+  text-align: center;
+  color: #9ca3af;
+}
+.lb-hist-canvas {
+  display: block;
+  width: 100%;
+  height: 140px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+}
+.lb-hist-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+.lb-hist-stat {
+  text-align: center;
+  padding: 4px 0;
+}
+.lb-hist-stat dt {
+  color: #9ca3af;
+  margin-bottom: 2px;
+}
+.lb-hist-stat dd {
+  margin: 0;
+  color: #f3f4f6;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 独立 EXIF 面板（旧类名兼容）——当只有 EXIF 打开时视觉一致 */
+.lb-exif-panel { /* 现在只是 .lb-side-panel 的一个变体，无需重复背景等 */ }
 </style>
