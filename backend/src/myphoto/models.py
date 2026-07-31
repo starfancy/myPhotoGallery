@@ -114,3 +114,20 @@ class Trash(Base):
         Index("ix_trash_deleted_at", "deleted_at"),
         Index("ix_trash_gallery_deleted", "gallery_id", "deleted_at"),
     )
+
+
+class UserGallery(Base):
+    """P4: viewer 的图库授权表（spec §4.2）。
+
+    - 联合主键 (user_id, gallery_id)
+    - user_id / gallery_id 均 ON DELETE CASCADE
+    - admin 角色不入此表 —— admin 隐含全图库可见
+    """
+    __tablename__ = "user_galleries"
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True,
+    )
+    gallery_id: Mapped[int] = mapped_column(
+        ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True,
+    )
+    granted_at: Mapped[int] = mapped_column(Integer, nullable=False)

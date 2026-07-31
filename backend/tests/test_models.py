@@ -3,7 +3,7 @@ import time
 
 import pytest
 from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import Gallery, GalleryRoot, Image, Trash, User
+from myphoto.models import Gallery, GalleryRoot, Image, Trash, User, UserGallery
 
 
 @pytest.fixture
@@ -139,3 +139,143 @@ async def test_trash_crud_and_indexes(session):
     await session.commit()
     remaining = (await session.execute(select(Trash))).scalars().all()
     assert remaining == []
+
+
+# ---- P4: UserGallery (spec §4.2) ----
+
+async def test_user_gallery_create_and_query(session):
+    """P4: UserGallery 行可创建并按 (user_id, gallery_id) 查询。"""
+    now = int(time.time())
+    u = User(username="alice", password_hash="x", role="viewer",
+             access_scope="lan_only", enabled=1, created_at=now)
+    g = Gallery(name="G", created_at=now)
+    session.add_all([u, g])
+    await session.flush()
+
+    ug = UserGallery(user_id=u.id, gallery_id=g.id, granted_at=now)
+    session.add(ug)
+    await session.commit()
+
+    from sqlalchemy import select
+    row = (
+        await session.execute(
+            select(UserGallery).where(
+                UserGallery.user_id == u.id,
+                UserGallery.gallery_id == g.id,
+            )
+        )
+    ).scalar_one()
+    assert row.user_id == u.id
+    assert row.gallery_id == g.id
+    assert row.granted_at == now
+
+
+async def test_user_gallery_composite_pk_blocks_duplicate(session):
+    """P4: (user_id, gallery_id) 联合主键，重复插入失败。"""
+    now = int(time.time())
+    u = User(username="alice", password_hash="x", role="viewer",
+             access_scope="lan_only", enabled=1, created_at=now)
+    g = Gallery(name="G", created_at=now)
+    session.add_all([u, g])
+    await session.flush()
+
+    session.add(UserGallery(user_id=u.id, gallery_id=g.id, granted_at=now))
+    await session.commit()
+
+    session.add(UserGallery(user_id=u.id, gallery_id=g.id, granted_at=now + 1))
+    with pytest.raises(Exception):
+        await session.commit()
+
+
+async def test_user_gallery_cascade_on_user_delete(session):
+    """P4: 删除 user 时 user_galleries 行级联消失。"""
+    now = int(time.time())
+    u = User(username="alice", password_hash="x", role="viewer",
+             access_scope="lan_only", enabled=1, created_at=now)
+    g1 = Gallery(name="G1", created_at=now)
+    g2 = Gallery(name="G2", created_at=now)
+    session.add_all([u, g1, g2])
+    await session.flush()
+
+    session.add_all([
+        UserGallery(user_id=u.id, gallery_id=g1.id, granted_at=now),
+        UserGallery(user_id=u.id, gallery_id=g2.id, granted_at=now),
+    ])
+    await session.commit()
+
+    from sqlalchemy import select, func
+    before = (
+        await session.execute(
+            select(func.count()).select_from(UserGallery).where(UserGallery.user_id == u.id)
+        )
+    ).scalar_one()
+    assert before == 2
+
+    await session.delete(u)
+    await session.commit()
+
+    after = (
+        await session.execute(
+            select(func.count()).select_from(UserGallery).where(UserGallery.user_id == u.id)
+        )
+    ).scalar_one()
+    assert after == 0
+
+
+async def test_user_gallery_cascade_on_gallery_delete(session):
+    """P4: 删除 gallery 时 user_galleries 行级联消失。"""
+    now = int(time.time())
+    u1 = User(username="u1", password_hash="x", role="viewer",
+              access_scope="lan_only", enabled=1, created_at=now)
+    u2 = User(username="u2", password_hash="x", role="viewer",
+              access_scope="lan_only", enabled=1, created_at=now)
+    g = Gallery(name="G", created_at=now)
+    session.add_all([u1, u2, g])
+    await session.flush()
+
+    session.add_all([
+        UserGallery(user_id=u1.id, gallery_id=g.id, granted_at=now),
+        UserGallery(user_id=u2.id, gallery_id=g.id, granted_at=now),
+    ])
+    await session.commit()
+
+    from sqlalchemy import select, func
+    before = (
+        await session.execute(
+            select(func.count()).select_from(UserGallery).where(UserGallery.gallery_id == g.id)
+        )
+    ).scalar_one()
+    assert before == 2
+
+    await session.delete(g)
+    await session.commit()
+
+    after = (
+        await session.execute(
+            select(func.count()).select_from(UserGallery).where(UserGallery.gallery_id == g.id)
+        )
+    ).scalar_one()
+    assert after == 0
+
+
+async def test_user_gallery_table_created_by_create_all():
+    """P4: create_all() 自动建表，复合主键 (user_id, gallery_id) 存在。"""
+    from sqlalchemy import text
+    engine = await make_engine("sqlite+aiosqlite:///:memory:")
+    await create_all(engine)
+    try:
+        async with engine.begin() as conn:
+            rows = (await conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='user_galleries'"
+            )).all()
+            assert len(rows) == 1, "user_galleries 表未创建"
+
+            pk_rows = (await conn.exec_driver_sql(
+                "SELECT name FROM pragma_table_info('user_galleries') WHERE pk > 0 ORDER BY pk"
+            )).all()
+            pk_cols = {r[0] for r in pk_rows}
+            assert pk_cols == {"user_id", "gallery_id"}, (
+                f"联合主键应为 (user_id, gallery_id)，实际为 {pk_cols}"
+            )
+    finally:
+        await engine.dispose()

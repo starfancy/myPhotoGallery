@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
@@ -48,7 +49,20 @@ async def _apply_column_migrations(engine: AsyncEngine) -> None:
 
 
 async def make_engine(db_url: str) -> AsyncEngine:
-    return create_async_engine(db_url, future=True)
+    engine = create_async_engine(db_url, future=True)
+    # SQLite requires PRAGMA foreign_keys=ON per connection to honor
+    # ForeignKey(ondelete="CASCADE") declared in the ORM. Without it, the
+    # ondelete clause is inert (in schema but never fires on DELETE).
+    # aiosqlite wraps a sync engine — listen on that for the per-connection
+    # PRAGMA so cascade deletes actually fire.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_fk_pragma(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+    return engine
 
 
 async def make_sessionmaker(engine: AsyncEngine):
