@@ -183,3 +183,218 @@ def test_unauthenticated_blocked(tmp_path):
     with TestClient(app) as c:
         r = c.get("/api/galleries")
         assert r.status_code == 401
+
+
+# ---- P4: viewer gallery access (gallery_scope_guard + list filtering) ----
+
+
+async def _seed_two_galleries(app, photos1, photos2):
+    """创建两个图库，各含一个根目录；返回 ((g1, r1), (g2, r2))。"""
+    from myphoto.models import Gallery, GalleryRoot
+
+    async with app.state.sessionmaker() as s:
+        g1 = Gallery(name="Gallery1", created_at=int(time.time()))
+        g2 = Gallery(name="Gallery2", created_at=int(time.time()))
+        s.add(g1)
+        s.add(g2)
+        await s.flush()
+        r1 = GalleryRoot(
+            gallery_id=g1.id, label="R1",
+            absolute_path=str(photos1.resolve()), enabled=1,
+        )
+        r2 = GalleryRoot(
+            gallery_id=g2.id, label="R2",
+            absolute_path=str(photos2.resolve()), enabled=1,
+        )
+        s.add(r1)
+        s.add(r2)
+        await s.commit()
+        await s.refresh(r1)
+        await s.refresh(r2)
+        return (g1.id, r1.id), (g2.id, r2.id)
+
+
+async def _add_viewer_with_galleries(app, username, password, gallery_ids):
+    """创建 viewer 并授权指定的 gallery_ids。"""
+    from myphoto.models import User, UserGallery
+    from myphoto.security import hash_password
+
+    async with app.state.sessionmaker() as s:
+        user = User(
+            username=username,
+            password_hash=hash_password(password),
+            role="viewer",
+            access_scope="remote_allowed",
+            enabled=1,
+            created_at=int(time.time()),
+        )
+        s.add(user)
+        await s.flush()
+        for gid in gallery_ids:
+            s.add(UserGallery(
+                user_id=user.id, gallery_id=gid, granted_at=int(time.time()),
+            ))
+        await s.commit()
+
+
+@pytest.fixture
+def client_two_galleries(tmp_path, capsys):
+    """两个图库各含一张图片，admin 已登录。"""
+    photos1 = tmp_path / "photos1"
+    photos2 = tmp_path / "photos2"
+    _jpg(photos1 / "a1.jpg")
+    _jpg(photos2 / "a2.jpg")
+    cfg = tmp_path / "config.toml"
+    app = build_app(config_path=str(cfg))
+    with TestClient(app) as c:
+        out = capsys.readouterr().out
+        pw = re.search(r"password=(\S+)", out).group(1)
+        c.post("/api/auth/login", json={"username": "admin", "password": pw})
+        (g1, r1), (g2, r2) = c.portal.call(
+            _seed_two_galleries, app, photos1, photos2,
+        )
+        c.portal.call(_scan, app, r1)
+        c.portal.call(_scan, app, r2)
+        yield c, app, g1, g2
+
+
+# ---- 图库列表过滤 ----
+
+def test_viewer_sees_only_authorized_galleries(client_two_galleries):
+    """viewer 只能看到 user_galleries 中授权的图库。"""
+    c, app, g1, g2 = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v", "vpw", [g1])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v", "password": "vpw"})
+    assert r.status_code == 200
+
+    r = c.get("/api/galleries")
+    assert r.status_code == 200
+    ids = [item["id"] for item in r.json()]
+    assert g1 in ids
+    assert g2 not in ids
+
+
+def test_viewer_empty_gallery_list_when_no_auth(client_two_galleries):
+    """viewer 未授权任何图库时返回空列表。"""
+    c, app, _, _ = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v2", "vpw2", [])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v2", "password": "vpw2"})
+    assert r.status_code == 200
+
+    r = c.get("/api/galleries")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_admin_sees_all_galleries(client_two_galleries):
+    """admin 不受 user_galleries 限制，看到所有图库。"""
+    c, _, g1, g2 = client_two_galleries
+    r = c.get("/api/galleries")
+    assert r.status_code == 200
+    ids = [item["id"] for item in r.json()]
+    assert g1 in ids
+    assert g2 in ids
+
+
+# ---- 图库详情访问控制 (404 反枚举) ----
+
+def test_viewer_200_for_authorized_gallery_detail(client_two_galleries):
+    """viewer 可以访问已授权图库的详情。"""
+    c, app, g1, _ = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v3", "vpw3", [g1])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v3", "password": "vpw3"})
+    assert r.status_code == 200
+
+    r = c.get(f"/api/galleries/{g1}")
+    assert r.status_code == 200
+    assert r.json()["gallery"]["id"] == g1
+
+
+def test_viewer_404_for_unauthorized_gallery_detail(client_two_galleries):
+    """viewer 访问未授权图库返回 404（防枚举，非 403）。"""
+    c, app, g1, g2 = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v4", "vpw4", [g1])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v4", "password": "vpw4"})
+    assert r.status_code == 200
+
+    r = c.get(f"/api/galleries/{g2}")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "not_found"
+
+
+# ---- 文件夹/图片/面包屑访问控制 ----
+
+def test_viewer_200_for_authorized_folders(client_two_galleries):
+    """viewer 可以访问已授权图库的文件夹列表。"""
+    c, app, g1, _ = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v5", "vpw5", [g1])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v5", "password": "vpw5"})
+    assert r.status_code == 200
+
+    r = c.get(f"/api/galleries/{g1}")
+    assert r.status_code == 200
+    rid = r.json()["roots"][0]["id"]
+
+    r = c.get(f"/api/galleries/{g1}/roots/{rid}/folders", params={"path": ""})
+    assert r.status_code == 200
+
+
+def test_viewer_404_for_unauthorized_folders(client_two_galleries):
+    """viewer 访问未授权图库的文件夹返回 404。"""
+    c, app, g1, g2 = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v6", "vpw6", [g1])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v6", "password": "vpw6"})
+    assert r.status_code == 200
+
+    r = c.get(f"/api/galleries/{g2}/roots/99999/folders")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "not_found"
+
+
+def test_viewer_200_for_authorized_images(client_two_galleries):
+    """viewer 可以访问已授权图库的图片列表。"""
+    c, app, g1, _ = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v7", "vpw7", [g1])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v7", "password": "vpw7"})
+    assert r.status_code == 200
+
+    r = c.get(f"/api/galleries/{g1}")
+    assert r.status_code == 200
+    rid = r.json()["roots"][0]["id"]
+
+    r = c.get(f"/api/galleries/{g1}/roots/{rid}/images", params={"path": ""})
+    assert r.status_code == 200
+    assert len(r.json()["items"]) >= 1
+
+
+def test_viewer_404_for_unauthorized_images(client_two_galleries):
+    """viewer 访问未授权图库的图片返回 404。"""
+    c, app, g1, g2 = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v8", "vpw8", [g1])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v8", "password": "vpw8"})
+    assert r.status_code == 200
+
+    r = c.get(f"/api/galleries/{g2}/roots/99999/images")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "not_found"
+
+
+def test_viewer_404_for_unauthorized_breadcrumbs(client_two_galleries):
+    """viewer 访问未授权图库的面包屑返回 404。"""
+    c, app, g1, g2 = client_two_galleries
+    c.portal.call(_add_viewer_with_galleries, app, "v9", "vpw9", [g1])
+    c.post("/api/auth/logout")
+    r = c.post("/api/auth/login", json={"username": "v9", "password": "vpw9"})
+    assert r.status_code == 200
+
+    r = c.get(f"/api/galleries/{g2}/roots/99999/breadcrumbs")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "not_found"

@@ -6,9 +6,9 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import and_, func, or_, select
 
-from myphoto.deps import current_user
+from myphoto.access import access_scope_guard, gallery_scope_guard
 from myphoto.errors import AppError
-from myphoto.models import Folder, Gallery, GalleryRoot, Image, User
+from myphoto.models import Folder, Gallery, GalleryRoot, Image, User, UserGallery
 from myphoto.paths import PathTraversalError, normalize_relative
 
 router = APIRouter(prefix="/api", tags=["browse"])
@@ -47,12 +47,22 @@ async def _get_root_or_404(s, gid: int, rid: int) -> GalleryRoot:
 async def list_galleries(
     request: Request,
     response: Response,
-    _user: User = Depends(current_user),
+    user: User = Depends(access_scope_guard),
 ):
     _no_store(response)
     sm = request.app.state.sessionmaker
     async with sm() as s:
-        gals = (await s.execute(select(Gallery))).scalars().all()
+        if user.role == "admin":
+            gals = (await s.execute(select(Gallery))).scalars().all()
+        else:
+            # viewer：仅列出 user_galleries 中授权的图库
+            gals = (
+                await s.execute(
+                    select(Gallery)
+                    .join(UserGallery, UserGallery.gallery_id == Gallery.id)
+                    .where(UserGallery.user_id == user.id)
+                )
+            ).scalars().all()
         out = []
         for g in gals:
             root_count = (
@@ -87,7 +97,7 @@ async def gallery_detail(
     gid: int,
     request: Request,
     response: Response,
-    _user: User = Depends(current_user),
+    _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
     sm = request.app.state.sessionmaker
@@ -133,7 +143,7 @@ async def list_folders(
     request: Request,
     response: Response,
     path: str = "",
-    _user: User = Depends(current_user),
+    _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
     rel = _norm_or_400(path)
@@ -185,7 +195,7 @@ async def breadcrumbs(
     request: Request,
     response: Response,
     path: str = "",
-    _user: User = Depends(current_user),
+    _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
     rel = _norm_or_400(path)
@@ -228,7 +238,7 @@ async def list_images(
     sort: Sort = "name_asc",
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     cursor: str | None = None,
-    _user: User = Depends(current_user),
+    _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
     rel = _norm_or_400(path)

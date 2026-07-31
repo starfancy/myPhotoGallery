@@ -76,7 +76,7 @@ def get_client_ip(request: Request, trusted_proxies: list[str]) -> str:
 
 async def access_scope_guard(
     request: Request,
-    user: User = None,  # 由 Depends(current_user) 注入；类型提示用 None 占位
+    user=None,  # 内部 fallback 解析（非 FastAPI 注入）；保持无类型提示避免 Pydantic 误判
 ) -> User:
     """权限链步骤 3：用户访问域判定（spec §5.2）。
 
@@ -85,9 +85,7 @@ async def access_scope_guard(
     否则 403 access_scope_violation。
     """
     if user is None:
-        # 防御性 fallback：单测不通过 Depends 时手动传入 user；
-        # 实际请求链路里 FastAPI 一定注入。
-        from fastapi import Depends
+        # 防御性 fallback：直接调用 current_user（它内部含步骤 1+2+3）
         user = await current_user(request=request)
     if user.access_scope == "lan_only":
         cfg = request.app.state.config
@@ -130,7 +128,7 @@ async def check_gallery_access(
 async def gallery_scope_guard(
     gid: int,
     request: Request,
-    user: User = None,  # 实际由 Depends(access_scope_guard) 注入
+    user=None,  # 内部 fallback 解析（非 FastAPI 注入）；保持无类型提示避免 Pydantic 误判
 ) -> User:
     """权限链步骤 5 Depends 版（spec §5.2）。
 
