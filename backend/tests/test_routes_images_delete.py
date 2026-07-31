@@ -52,7 +52,8 @@ async def _add_viewer(app):
             username="viewer",
             password_hash=hash_password("viewerpw"),
             role="viewer",
-            access_scope="lan_only",
+            # P4: TestClient 主机名 "testclient" 不在 _PRIVATE_RANGES
+            access_scope="remote_allowed",
             enabled=1,
             created_at=int(time.time()),
         ))

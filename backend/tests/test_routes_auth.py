@@ -98,7 +98,7 @@ def test_lockout_counts_first_five_as_failures(app_and_pw):
         _assert_invalid_credentials(_login(client, "wrong"))
 
     response = _login(client, "wrong")
-    assert response.status_code == 429
+    assert response.status_code == 423
     assert response.json()["error"]["code"] == "login_locked"
 
 
@@ -106,7 +106,7 @@ def test_lockout_is_isolated_per_app(app_factory):
     with app_factory() as (client, _, _):
         for _ in range(5):
             _assert_invalid_credentials(_login(client, "wrong"))
-        assert _login(client, "wrong").status_code == 429
+        assert _login(client, "wrong").status_code == 423
 
     with app_factory() as (client, _, _):
         _assert_invalid_credentials(_login(client, "wrong"))
@@ -121,7 +121,7 @@ def test_successful_login_resets_failures(app_and_pw):
 
     for _ in range(5):
         _assert_invalid_credentials(_login(client, "wrong"))
-    assert _login(client, "wrong").status_code == 429
+    assert _login(client, "wrong").status_code == 423
 
 
 def test_lockout_expires_at_exact_window_boundary(app_and_pw, monkeypatch):
@@ -138,7 +138,7 @@ def test_lockout_expires_at_exact_window_boundary(app_and_pw, monkeypatch):
     _assert_invalid_credentials(_login(client, "wrong"))
     for _ in range(4):
         _assert_invalid_credentials(_login(client, "wrong"))
-    assert _login(client, "wrong").status_code == 429
+    assert _login(client, "wrong").status_code == 423
 
 
 def test_logout_deletes_session_cookie(app_and_pw):
@@ -269,3 +269,80 @@ def test_change_password_unauthenticated(app_and_pw):
         "new_password": "longenoughpassword",
     })
     assert r.status_code == 401
+
+
+# ---- P4: access_scope in login / me ----
+
+def test_login_success_returns_access_scope(app_and_pw):
+    """P4: login 成功后响应含 access_scope 字段。"""
+    client, password, _ = app_and_pw
+    response = _login(client, password)
+    assert response.status_code == 200
+    assert response.json()["user"]["access_scope"] == "remote_allowed"
+
+
+def test_me_returns_access_scope(app_and_pw):
+    """P4: GET /api/auth/me 响应含 access_scope。"""
+    client, password, _ = app_and_pw
+    assert _login(client, password).status_code == 200
+    me = client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["access_scope"] == "remote_allowed"
+
+
+def test_login_lan_only_from_public_ip_blocked(app_factory):
+    """P4: access_scope=lan_only 用户从公网 IP 登录 → 403。"""
+    from myphoto.models import User
+    from myphoto.security import hash_password
+
+    with app_factory() as (client, _, app):
+        # 创建 lan_only viewer
+        async def _create_lan_viewer():
+            async with app.state.sessionmaker() as s:
+                s.add(User(
+                    username="lanviewer",
+                    password_hash=hash_password("lanviewerpw"),
+                    role="viewer",
+                    access_scope="lan_only",
+                    enabled=1,
+                    created_at=int(time.time()),
+                ))
+                await s.commit()
+        client.portal.call(_create_lan_viewer)
+
+        # 从公网 IP 登录 → 应被拒绝
+        with TestClient(app, client=("8.8.8.8", 50000)) as wan_client:
+            r = wan_client.post("/api/auth/login", json={
+                "username": "lanviewer", "password": "lanviewerpw",
+            })
+            assert r.status_code == 403
+            assert r.json()["error"]["code"] == "access_scope_violation"
+
+
+def test_login_lan_only_ip_does_not_lock_account(app_factory):
+    """P4: access_scope_violation 不计入登录失败锁计数器。"""
+    from myphoto.models import User
+    from myphoto.security import hash_password
+
+    with app_factory() as (client, _, app):
+        async def _create_lan_viewer():
+            async with app.state.sessionmaker() as s:
+                s.add(User(
+                    username="lanviewer2",
+                    password_hash=hash_password("lanviewer2pw"),
+                    role="viewer",
+                    access_scope="lan_only",
+                    enabled=1,
+                    created_at=int(time.time()),
+                ))
+                await s.commit()
+        client.portal.call(_create_lan_viewer)
+
+        # 从公网 IP 登录 6 次（超过锁阈值）→ 每次都应 403，不触发锁
+        with TestClient(app, client=("8.8.8.8", 50000)) as wan_client:
+            for _ in range(6):
+                r = wan_client.post("/api/auth/login", json={
+                    "username": "lanviewer2", "password": "lanviewer2pw",
+                })
+                assert r.status_code == 403
+                assert r.json()["error"]["code"] == "access_scope_violation"

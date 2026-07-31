@@ -19,6 +19,15 @@ _LOCKOUT_WINDOW_SEC = 15 * 60
 _DUMMY_PASSWORD_HASH = hash_password("myphoto-login-dummy-password")
 
 
+def _client_ip(request: Request) -> str:
+    """原始请求 IP（锁计数器用，不走 trusted_proxies —— 锁定应基于直连 IP）。
+
+    P4 新增的 access_scope 判定用 access.get_client_ip（走 trusted_proxies）；
+    此处保留原始 IP 以确保锁计数器独立于代理配置。
+    """
+    return request.client.host if request.client else "unknown"
+
+
 class LoginBody(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1)
@@ -27,10 +36,6 @@ class LoginBody(BaseModel):
 class ChangePasswordBody(BaseModel):
     old_password: str = Field(min_length=1)
     new_password: str = Field(min_length=1)  # strength checked in handler (single authority)
-
-
-def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
 
 
 def _record_fail(state: dict[str, tuple[int, float]], ip: str) -> None:
@@ -57,7 +62,7 @@ async def login(body: LoginBody, request: Request, response: Response):
     ip = _client_ip(request)
     lockout_state = request.app.state.login_lockout
     if _is_locked(lockout_state, ip):
-        raise AppError("login_locked", 429, "too many failed attempts; try again later")
+        raise AppError("login_locked", 423, "too many failed attempts; try again later")
 
     sm = request.app.state.sessionmaker
     login_failed = False
@@ -71,6 +76,18 @@ async def login(body: LoginBody, request: Request, response: Response):
             _record_fail(lockout_state, ip)
             login_failed = True
         else:
+            # P4: 步骤 3 判定 — lan_only 用户从公网登录直接拒绝（403），不计入锁计数。
+            if user.access_scope == "lan_only":
+                from myphoto import access  # lazy import 避免循环
+                from myphoto.deps import _is_lan_ip
+                cfg = request.app.state.config
+                effective_ip = access.get_client_ip(request, cfg.trusted_proxies)
+                if not _is_lan_ip(effective_ip):
+                    raise AppError(
+                        "access_scope_violation", 403,
+                        "this account is restricted to the local network",
+                    )
+
             user.last_login_at = int(time.time())
             await write_audit(
                 session, "login_success", user.id, ip,
