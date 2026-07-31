@@ -31,10 +31,13 @@
             <div class="text-xs text-neutral-500">根目录</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.roots.toLocaleString() }}</div>
           </div>
-          <div class="rounded-lg bg-neutral-900 p-4">
+          <!-- P4: 用户卡片 → 链接到 /admin/users -->
+          <router-link to="/admin/users"
+            class="rounded-lg bg-neutral-900 p-4 transition-colors hover:bg-neutral-800"
+            data-testid="users-stat-card">
             <div class="text-xs text-neutral-500">用户</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.users.toLocaleString() }}</div>
-          </div>
+          </router-link>
         </section>
 
         <!-- Scan status list -->
@@ -98,6 +101,10 @@
           <router-link to="/admin/trash"
             class="inline-flex items-center rounded bg-neutral-700 px-3 py-2 text-sm hover:bg-neutral-600">
             回收站
+          </router-link>
+          <router-link to="/admin/users"
+            class="inline-flex items-center rounded bg-neutral-700 px-3 py-2 text-sm hover:bg-neutral-600">
+            用户管理
           </router-link>
         </section>
       </template>

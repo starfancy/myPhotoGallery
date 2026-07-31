@@ -14,6 +14,8 @@ function makeRouter() {
       { path: "/galleries", component: { template: "<div />" } },
       { path: "/admin", component: { template: "<div />" } },
       { path: "/admin/galleries", component: { template: "<div />" } },
+      { path: "/admin/users", component: { template: "<div />" } },
+      { path: "/admin/trash", component: { template: "<div />" } },
     ],
   })
 }
@@ -173,6 +175,24 @@ describe("AdminOverview", () => {
     // the one whose text is "管理图库" specifically.
     const links = w.findAll('a[href="/admin/galleries"]')
     const manage = links.find((a) => a.text().includes("管理图库"))
+    expect(manage).toBeDefined()
+  })
+
+  it("用户 stat card links to /admin/users (P4)", async () => {
+    mockStatus(FULL_PAYLOAD)
+    const w = mountView()
+    await flushPromises()
+    const userCard = w.find('[data-testid="users-stat-card"]')
+    expect(userCard.exists()).toBe(true)
+    expect(userCard.attributes("href")).toBe("/admin/users")
+  })
+
+  it("shows the user-management button next to trash", async () => {
+    mockStatus(FULL_PAYLOAD)
+    const w = mountView()
+    await flushPromises()
+    const links = w.findAll('a[href="/admin/users"]')
+    const manage = links.find((a) => a.text().includes("用户管理"))
     expect(manage).toBeDefined()
   })
 

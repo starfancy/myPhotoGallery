@@ -28,6 +28,11 @@ const testRoutes: RouteRecordRaw[] = [
     component: { template: "<div>admin gallery</div>" },
     meta: { requiresAdmin: true },
   },
+  {
+    path: "/admin/users",
+    component: { template: "<div>admin users</div>" },
+    meta: { requiresAdmin: true },
+  },
 ]
 
 function makeRouter(): Router {
@@ -106,6 +111,20 @@ describe("authGuard", () => {
     expect(r.currentRoute.value.params.gid).toBe("7")
   })
 
+  it("permits admin to visit /admin/users", async () => {
+    const r = makeRouter()
+    seedUser("admin")
+    await r.push("/admin/users")
+    expect(r.currentRoute.value.path).toBe("/admin/users")
+  })
+
+  it("redirects viewer trying to visit /admin/users", async () => {
+    const r = makeRouter()
+    seedUser("viewer")
+    await r.push("/admin/users")
+    expect(r.currentRoute.value.path).toBe("/galleries")
+  })
+
   it("permits viewer to visit /galleries (no admin meta)", async () => {
     const r = makeRouter()
     seedUser("viewer")
@@ -137,23 +156,39 @@ describe("AppHeader admin link", () => {
     })
   }
 
-  it("shows 管理 link for admin users", () => {
+  it("shows 管理 button for admin users", () => {
     seedUser("admin")
     const w = mountHeader()
-    const link = w.find('a[href="/admin"]')
-    expect(link.exists()).toBe(true)
-    expect(link.text()).toContain("管理")
+    // P4: 管理现在是 dropdown 按钮（非直接链接），点击展开
+    const button = w.find('button[aria-haspopup="menu"]')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toContain("管理")
   })
 
-  it("hides 管理 link for viewer users", () => {
+  it("hides 管理 button for viewer users", () => {
     seedUser("viewer")
     const w = mountHeader()
-    expect(w.find('a[href="/admin"]').exists()).toBe(false)
+    // viewer 不应有"管理"按钮（admin-only 元素）
+    const buttons = w.findAll("button")
+    const adminBtn = buttons.find((b) => b.text() === "管理")
+    expect(adminBtn).toBeUndefined()
   })
 
-  it("hides 管理 link when logged out", () => {
+  it("hides 管理 button when logged out", () => {
     seedUser(null)
     const w = mountHeader()
-    expect(w.find('a[href="/admin"]').exists()).toBe(false)
+    const buttons = w.findAll("button")
+    const adminBtn = buttons.find((b) => b.text() === "管理")
+    expect(adminBtn).toBeUndefined()
+  })
+
+  it("管理 dropdown contains /admin/users link for admin", async () => {
+    seedUser("admin")
+    const r = makeRouter()
+    const w = mount(AppHeader, { global: { plugins: [r] } })
+    // 点击"管理"按钮展开 dropdown
+    const adminBtn = w.findAll("button").find((b) => b.text() === "管理")!
+    await adminBtn.trigger("click")
+    expect(w.find('a[href="/admin/users"]').exists()).toBe(true)
   })
 })
