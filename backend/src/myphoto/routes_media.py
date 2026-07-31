@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 
+from myphoto.access import check_gallery_access
 from myphoto.deps import current_user
 from myphoto.errors import AppError
 from myphoto.models import GalleryRoot, Image, User
@@ -37,6 +38,8 @@ async def get_thumb(
         if img is None:
             raise AppError("not_found", 404, "image not found")
         root = await s.get(GalleryRoot, img.root_id)
+        # P4: 步骤 5 — viewer 必须对该图库有授权；admin 自动通过
+        await check_gallery_access(s, _user, root.gallery_id)
     try:
         src = resolve_within_root(root.absolute_path, img.relative_path)
     except PathTraversalError:
@@ -71,6 +74,8 @@ async def get_image(
         if img is None:
             raise AppError("not_found", 404, "image not found")
         root = await s.get(GalleryRoot, img.root_id)
+        # P4: 步骤 5 — viewer 必须对该图库有授权；admin 自动通过
+        await check_gallery_access(s, _user, root.gallery_id)
     try:
         src = resolve_within_root(root.absolute_path, img.relative_path)
     except PathTraversalError:
