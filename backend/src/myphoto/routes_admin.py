@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import string
 import sys
@@ -9,12 +10,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from myphoto.audit import write_audit
 from myphoto.deps import admin_required, require_lan_ip
 from myphoto.errors import AppError
-from myphoto.models import AuditLog, Gallery, GalleryRoot, Image, User
+from myphoto.models import AuditLog, Gallery, GalleryRoot, Image, User, UserGallery
+from myphoto.security import hash_password
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -707,3 +709,308 @@ async def admin_query_audit(
         ],
         "next_cursor": next_cursor,
     }
+
+
+# ---- P4: users CRUD ----
+
+
+_PW_ALPHABET = string.ascii_letters + string.digits
+
+
+def _generate_password(length: int = 12) -> str:
+    return "".join(secrets.choice(_PW_ALPHABET) for _ in range(length))
+
+
+async def _guard_last_admin(session, target_user: User, *, will_be_active_admin: bool) -> None:
+    """若操作会导致零活跃 admin，抛出 409 last_admin_protected。
+
+    仅当目标当前是活跃 admin 且操作后不再活跃 admin 时才需检查。
+    will_be_active_admin=False 表示删除 / 降级 role / 禁用 —— 此时校验是否还有其他活跃 admin。
+    """
+    if will_be_active_admin:
+        return
+    if target_user.role != "admin" or target_user.enabled != 1:
+        return  # 目标本身就不是活跃 admin，不影响计数
+    remaining = (
+        await session.execute(
+            select(func.count()).select_from(User).where(
+                User.role == "admin", User.enabled == 1, User.id != target_user.id,
+            )
+        )
+    ).scalar_one()
+    if remaining < 1:
+        raise AppError(
+            "last_admin_protected", 409,
+            "cannot remove or disable the last active admin",
+        )
+
+
+# ---- schemas ----
+
+
+class UserCreateBody(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    password: str | None = Field(None, min_length=8, max_length=128)
+    role: str = Field(pattern=r"^(admin|viewer)$")
+    access_scope: str = Field(pattern=r"^(lan_only|remote_allowed)$")
+    gallery_ids: list[int] | None = None
+
+
+class UserUpdateBody(BaseModel):
+    role: str | None = Field(None, pattern=r"^(admin|viewer)$")
+    access_scope: str | None = Field(None, pattern=r"^(lan_only|remote_allowed)$")
+    enabled: int | None = Field(None, ge=0, le=1)
+    gallery_ids: list[int] | None = None
+
+
+class ResetPasswordBody(BaseModel):
+    new_password: str | None = Field(None, min_length=8, max_length=128)
+
+
+# ---- GET /api/admin/users ----
+
+@router.get("/users")
+async def admin_list_users(
+    request: Request,
+    response: Response,
+    admin: User = Depends(admin_required),
+):
+    response.headers["Cache-Control"] = "no-store"
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        users = (await s.execute(select(User))).scalars().all()
+        out = []
+        for u in users:
+            gallery_count: int
+            if u.role == "admin":
+                gallery_count = (
+                    await s.execute(select(func.count()).select_from(Gallery))
+                ).scalar_one()
+            else:
+                gallery_count = (
+                    await s.execute(
+                        select(func.count()).select_from(UserGallery).where(
+                            UserGallery.user_id == u.id,
+                        )
+                    )
+                ).scalar_one()
+            out.append({
+                "id": u.id,
+                "username": u.username,
+                "role": u.role,
+                "access_scope": u.access_scope,
+                "enabled": u.enabled,
+                "gallery_count": gallery_count,
+                "last_login_at": u.last_login_at,
+                "created_at": u.created_at,
+            })
+        return out
+
+
+# ---- POST /api/admin/users ----
+
+@router.post("/users", status_code=201)
+async def admin_create_user(
+    body: UserCreateBody,
+    request: Request,
+    admin: User = Depends(admin_required),
+):
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        existing = (
+            await s.execute(select(User).where(User.username == body.username))
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise AppError("conflict", 409, f"username '{body.username}' already exists")
+
+        initial_password = body.password if body.password else _generate_password()
+        user = User(
+            username=body.username,
+            password_hash=hash_password(initial_password),
+            role=body.role,
+            access_scope=body.access_scope,
+            enabled=1,
+            created_at=int(time.time()),
+        )
+        s.add(user)
+        await s.flush()
+
+        # viewer 图库授权
+        if body.role == "viewer" and body.gallery_ids:
+            for gid in body.gallery_ids:
+                s.add(UserGallery(
+                    user_id=user.id, gallery_id=gid, granted_at=int(time.time()),
+                ))
+
+        await write_audit(
+            s, "user_create", admin.id, _client_ip(request),
+            target=f"user:{user.id}", detail=f"username={body.username} role={body.role}",
+        )
+        await s.commit()
+
+        resp = {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role,
+            "access_scope": user.access_scope,
+            "enabled": user.enabled,
+            "gallery_ids": body.gallery_ids or [],
+        }
+        if not body.password:
+            resp["initial_password"] = initial_password
+        return resp
+
+
+# ---- GET /api/admin/users/{uid} ----
+
+@router.get("/users/{uid}")
+async def admin_get_user(
+    uid: int,
+    request: Request,
+    response: Response,
+    admin: User = Depends(admin_required),
+):
+    response.headers["Cache-Control"] = "no-store"
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        user = await s.get(User, uid)
+        if user is None:
+            raise AppError("not_found", 404, "user not found")
+
+        gallery_ids: list[int]
+        if user.role == "admin":
+            rows = (await s.execute(select(Gallery.id))).scalars().all()
+            gallery_ids = list(rows)
+        else:
+            rows = (
+                await s.execute(
+                    select(UserGallery.gallery_id).where(UserGallery.user_id == uid)
+                )
+            ).scalars().all()
+            gallery_ids = list(rows)
+
+        return {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role,
+            "access_scope": user.access_scope,
+            "enabled": user.enabled,
+            "gallery_ids": gallery_ids,
+            "last_login_at": user.last_login_at,
+            "created_at": user.created_at,
+        }
+
+
+# ---- PATCH /api/admin/users/{uid} ----
+
+@router.patch("/users/{uid}")
+async def admin_update_user(
+    uid: int,
+    body: UserUpdateBody,
+    request: Request,
+    admin: User = Depends(admin_required),
+):
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        user = await s.get(User, uid)
+        if user is None:
+            raise AppError("not_found", 404, "user not found")
+
+        # 确定操作后是否仍是活跃 admin（用于最后 admin 保护）
+        new_role = body.role if body.role is not None else user.role
+        new_enabled = body.enabled if body.enabled is not None else user.enabled
+        will_be_active = (new_role == "admin" and new_enabled == 1)
+        await _guard_last_admin(s, user, will_be_active_admin=will_be_active)
+
+        if body.role is not None:
+            user.role = body.role
+        if body.access_scope is not None:
+            user.access_scope = body.access_scope
+        if body.enabled is not None:
+            user.enabled = body.enabled
+
+        # gallery_ids：仅 viewer 角色生效；admin 忽略
+        if body.gallery_ids is not None and user.role == "viewer":
+            await s.execute(delete(UserGallery).where(UserGallery.user_id == uid))
+            for gid in body.gallery_ids:
+                s.add(UserGallery(
+                    user_id=uid, gallery_id=gid, granted_at=int(time.time()),
+                ))
+
+        await write_audit(
+            s, "user_update", admin.id, _client_ip(request),
+            target=f"user:{uid}",
+        )
+        await s.commit()
+
+        # 返回更新后的 gallery_ids
+        gallery_ids: list[int]
+        if user.role == "admin":
+            rows = (await s.execute(select(Gallery.id))).scalars().all()
+            gallery_ids = list(rows)
+        else:
+            rows = (
+                await s.execute(
+                    select(UserGallery.gallery_id).where(UserGallery.user_id == uid)
+                )
+            ).scalars().all()
+            gallery_ids = list(rows)
+
+        return {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role,
+            "access_scope": user.access_scope,
+            "enabled": user.enabled,
+            "gallery_ids": gallery_ids,
+        }
+
+
+# ---- POST /api/admin/users/{uid}/reset-password ----
+
+@router.post("/users/{uid}/reset-password")
+async def admin_reset_user_password(
+    uid: int,
+    body: ResetPasswordBody,
+    request: Request,
+    admin: User = Depends(admin_required),
+):
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        user = await s.get(User, uid)
+        if user is None:
+            raise AppError("not_found", 404, "user not found")
+
+        new_pw = body.new_password if body.new_password else _generate_password()
+        user.password_hash = hash_password(new_pw)
+
+        await write_audit(
+            s, "user_reset_password", admin.id, _client_ip(request),
+            target=f"user:{uid}",
+        )
+        await s.commit()
+        return {"new_password": new_pw}
+
+
+# ---- DELETE /api/admin/users/{uid} ----
+
+@router.delete("/users/{uid}", status_code=204)
+async def admin_delete_user(
+    uid: int,
+    request: Request,
+    admin: User = Depends(admin_required),
+):
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        user = await s.get(User, uid)
+        if user is None:
+            raise AppError("not_found", 404, "user not found")
+
+        await _guard_last_admin(s, user, will_be_active_admin=False)
+
+        await write_audit(
+            s, "user_delete", admin.id, _client_ip(request),
+            target=f"user:{uid}", detail=f"username={user.username}",
+        )
+        await s.delete(user)
+        await s.commit()
