@@ -32,7 +32,9 @@ async def ensure_schema_and_admin(engine, sessionmaker) -> tuple[bool, str | Non
             username="admin",
             password_hash=hash_password(password),
             role="admin",
-            access_scope="lan_only",
+            # P4: 初始 admin 默认 remote_allowed，确保首次登录（不论网络位置）可用。
+            # 安全模式下 admin 可在登录后通过 PATCH /api/admin/users/{self} 改回 lan_only。
+            access_scope="remote_allowed",
             enabled=1,
             created_at=int(time.time()),
         ))

@@ -12,6 +12,15 @@ SESSION_COOKIE = "mpg_session"
 
 
 async def current_user(request: Request) -> User:
+    """权限链步骤 1+2+3 串联。
+
+    1. authenticate：解析 JWT cookie
+    2. user active：enabled==1
+    3. access_scope：lan_only 时校验 client_ip 在 RFC1918（get_client_ip 应用 trusted_proxies）
+
+    access 模块在函数体内 lazy import —— 避免 deps ↔ access 模块级循环（access.py
+    也 import 自本模块的 _is_lan_ip / current_user）。
+    """
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         raise AppError("unauthenticated", 401, "authentication required")
@@ -31,6 +40,17 @@ async def current_user(request: Request) -> User:
         user = await session.get(User, user_id)
     if user is None or user.enabled != 1:
         raise AppError("unauthenticated", 401, "user not found or disabled")
+
+    # 步骤 3：访问域判定（spec §5.2）。逻辑与 access.access_scope_guard 一致，
+    # 但这里直接复用本模块的 _is_lan_ip，避免 Depends 嵌套循环。
+    if user.access_scope == "lan_only":
+        from myphoto import access  # lazy：避免模块级循环
+        ip = access.get_client_ip(request, cfg.trusted_proxies)
+        if not _is_lan_ip(ip):
+            raise AppError(
+                "access_scope_violation", 403,
+                "this account is restricted to the local network",
+            )
     return user
 
 
@@ -59,7 +79,15 @@ def _is_lan_ip(host: str) -> bool:
 
 
 async def require_lan_ip(request: Request) -> None:
-    host = request.client.host if request.client else "unknown"
+    """P4: 改用 access.get_client_ip 解析 client_ip（应用 trusted_proxies）。
+
+    与 current_user 步骤 3 判定共用同一 client_ip 解析逻辑：
+    - trusted_proxies=[]：直接用 request.client.host
+    - trusted_proxies 非空：仅当 request.client.host 命中 trusted 时才读 XFF
+    """
+    from myphoto import access  # lazy：避免模块级循环
+    cfg = request.app.state.config
+    host = access.get_client_ip(request, cfg.trusted_proxies)
     if not _is_lan_ip(host):
         raise AppError(
             "admin_fs_lan_only", 403,
