@@ -113,3 +113,45 @@ def test_default_template_contains_trash_section(tmp_path):
     data = tomllib.loads(p.read_text(encoding="utf-8"))
     assert "trash" in data
     assert data["trash"]["retention_days"] == 30
+
+
+# ---- P4: [security] section (spec §9) ----
+
+def test_security_defaults_when_missing(tmp_path):
+    """未指定 [security] 段时使用默认值。"""
+    p = tmp_path / "config.toml"
+    p.write_text(
+        '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n',
+        encoding="utf-8",
+    )
+    cfg = load_or_init(p)
+    assert cfg.trusted_proxies == []
+    assert cfg.login_lockout_threshold == 5
+    assert cfg.login_lockout_minutes == 15
+
+
+def test_security_section_is_read(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text(
+        '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n'
+        '[security]\n'
+        'trusted_proxies = ["127.0.0.1", "10.0.0.0/8", "::1"]\n'
+        'login_lockout_threshold = 10\n'
+        'login_lockout_minutes = 30\n',
+        encoding="utf-8",
+    )
+    cfg = load_or_init(p)
+    assert cfg.trusted_proxies == ["127.0.0.1", "10.0.0.0/8", "::1"]
+    assert cfg.login_lockout_threshold == 10
+    assert cfg.login_lockout_minutes == 30
+
+
+def test_default_template_contains_security_section(tmp_path):
+    """首启动自动生成的 config.toml 应包含 [security] 段。"""
+    p = tmp_path / "config.toml"
+    load_or_init(p)
+    data = tomllib.loads(p.read_text(encoding="utf-8"))
+    assert "security" in data
+    assert data["security"]["trusted_proxies"] == []
+    assert data["security"]["login_lockout_threshold"] == 5
+    assert data["security"]["login_lockout_minutes"] == 15

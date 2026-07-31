@@ -36,6 +36,10 @@ class AppConfig:
     trash_retention_days: int  # 回收站保留天数，默认 30；决定 purge_after
     trash_purge_hour: int      # 定时清理小时（P4 会用到；本 phase 只在启动时清理）
     trash_purge_minute: int    # 定时清理分钟
+    # P4: [security] section
+    trusted_proxies: list[str]        # CIDR / 单 IP；空 = 不信任 X-Forwarded-For
+    login_lockout_threshold: int      # 默认 5
+    login_lockout_minutes: int        # 默认 15
 
 
 _DEFAULT_TEMPLATE = """\
@@ -50,6 +54,11 @@ session_hours = 8
 retention_days = 30
 purge_hour = 3
 purge_minute = 30
+
+[security]
+trusted_proxies = []
+login_lockout_threshold = 5
+login_lockout_minutes = 15
 """
 
 
@@ -64,6 +73,7 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
     data = tomllib.loads(p.read_text(encoding="utf-8"))
     app_section = data.get("app", {})
     trash_section = data.get("trash", {})
+    security_section = data.get("security", {})
 
     # ---- data_dir resolution ----
     raw = app_section.get("data_dir")
@@ -85,4 +95,9 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
         trash_retention_days=int(trash_section.get("retention_days", 30)),
         trash_purge_hour=int(trash_section.get("purge_hour", 3)),
         trash_purge_minute=int(trash_section.get("purge_minute", 30)),
+        # P4: 解析 [security] 段；trusted_proxies 支持 CIDR 与单 IP，存为字符串列表
+        #     运行时由 access._ip_in_trusted() 解析为 ip_network
+        trusted_proxies=list(security_section.get("trusted_proxies", [])),
+        login_lockout_threshold=int(security_section.get("login_lockout_threshold", 5)),
+        login_lockout_minutes=int(security_section.get("login_lockout_minutes", 15)),
     )
