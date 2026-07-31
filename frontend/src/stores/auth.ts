@@ -7,12 +7,16 @@ export interface AuthUser {
   username: string
   role: "admin" | "viewer"
   access_scope: "lan_only" | "remote_allowed"
+  enabled?: number
+  last_login_at?: number | null
 }
 
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<AuthUser | null>(null)
   const loading = ref(false)
   const isAdmin = computed(() => user.value?.role === "admin")
+  /** 该账号被允许的访问域（来自 user.access_scope，而非当前请求的源 IP）。 */
+  const accessScope = computed(() => user.value?.access_scope ?? null)
 
   async function fetchMe() {
     loading.value = true
@@ -39,5 +43,5 @@ export const useAuthStore = defineStore("auth", () => {
     user.value = null
   }
 
-  return { user, loading, isAdmin, fetchMe, login, logout }
+  return { user, loading, isAdmin, accessScope, fetchMe, login, logout }
 })
