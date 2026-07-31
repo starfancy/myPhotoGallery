@@ -16,6 +16,17 @@
           :aria-expanded="open"
           aria-haspopup="menu"
           @click="open = !open">
+          <!-- P4: 访问域徽标（依账号的 access_scope 属性；不是当前请求的源 IP） -->
+          <span v-if="auth.accessScope === 'lan_only'"
+                class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs font-medium text-neutral-200"
+                :title="`账号仅限局域网访问`">
+            LAN
+          </span>
+          <span v-else-if="auth.accessScope === 'remote_allowed'"
+                class="rounded bg-orange-900/60 px-1.5 py-0.5 text-xs font-medium text-orange-200"
+                :title="`账号允许远程访问`">
+            远程
+          </span>
           <span>{{ auth.user.username }}</span>
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
                class="transition-transform"
