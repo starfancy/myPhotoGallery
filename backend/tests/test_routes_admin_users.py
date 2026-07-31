@@ -64,6 +64,23 @@ async def _count_user_galleries(app, uid):
         return len(rows)
 
 
+async def _last_audit(app, action=None):
+    """返回最近的审计行，可按 action 过滤。"""
+    from myphoto.models import AuditLog
+
+    async with app.state.sessionmaker() as s:
+        stmt = select(AuditLog).order_by(AuditLog.id.desc()).limit(1)
+        if action is not None:
+            stmt = (
+                select(AuditLog)
+                .where(AuditLog.action == action)
+                .order_by(AuditLog.id.desc())
+                .limit(1)
+            )
+        rows = (await s.execute(stmt)).scalars().all()
+        return rows[0] if rows else None
+
+
 # ---- fixture ----
 
 @pytest.fixture
@@ -444,3 +461,147 @@ def test_admin_promoting_viewer_preserves_active_count(admin_client):
     # 现在有 2 个 admin，删除初始 admin 应该成功
     r = c.delete("/api/admin/users/1")
     assert r.status_code == 204
+
+
+# ---- P4: audit + user_galleries write-through ----
+
+
+def test_audit_user_create(admin_client):
+    """创建用户 → audit user_create。"""
+    c, app, _ = admin_client
+    r = c.post("/api/admin/users", json={
+        "username": "audited_create",
+        "role": "viewer",
+        "access_scope": "remote_allowed",
+    })
+    assert r.status_code == 201
+    uid = r.json()["id"]
+
+    audit = c.portal.call(_last_audit, app, "user_create")
+    assert audit is not None
+    assert audit.target == f"user:{uid}"
+    assert audit.actor_user_id == 1
+    assert "username=audited_create" in (audit.detail or "")
+    assert "role=viewer" in (audit.detail or "")
+
+
+def test_audit_user_update_with_role_change(admin_client):
+    """PATCH role 变更 → audit user_update。"""
+    c, app, _ = admin_client
+    uid = c.portal.call(_add_viewer, app, "to_audit_update")
+    r = c.patch(f"/api/admin/users/{uid}", json={"role": "admin"})
+    assert r.status_code == 200
+
+    audit = c.portal.call(_last_audit, app, "user_update")
+    assert audit is not None
+    assert audit.target == f"user:{uid}"
+    assert "role=admin" in (audit.detail or "")
+
+
+def test_audit_user_disable_emits_user_disable_action(admin_client):
+    """PATCH enabled=0 单字段 → audit user_disable。"""
+    c, app, _ = admin_client
+    c.post("/api/admin/users", json={
+        "username": "to_audit_disable", "password": "disabler12",
+        "role": "admin", "access_scope": "remote_allowed",
+    })
+    uid = r2_id = c.get("/api/admin/users").json()[-1]["id"]
+
+    r = c.patch(f"/api/admin/users/{uid}", json={"enabled": 0})
+    assert r.status_code == 200
+
+    audit = c.portal.call(_last_audit, app, "user_disable")
+    assert audit is not None
+    assert audit.target == f"user:{uid}"
+    assert "enabled=0" in (audit.detail or "")
+
+
+def test_audit_user_enable_emits_user_enable_action(admin_client):
+    """PATCH enabled=1 单字段 → audit user_enable。"""
+    c, app, _ = admin_client
+    # 直接创建 disabled viewer
+    async def _seed():
+        return await _add_viewer(app, "to_audit_enable", enabled=0)
+    uid = c.portal.call(_seed)
+
+    r = c.patch(f"/api/admin/users/{uid}", json={"enabled": 1})
+    assert r.status_code == 200
+
+    audit = c.portal.call(_last_audit, app, "user_enable")
+    assert audit is not None
+    assert audit.target == f"user:{uid}"
+    assert "enabled=1" in (audit.detail or "")
+
+
+def test_audit_user_update_with_gallery_ids_sync(admin_client):
+    """PATCH gallery_ids → 事务内 delete-all-then-insert + audit user_update。"""
+    c, app, _ = admin_client
+    g1 = c.portal.call(_add_gallery, app, "gaudit1")
+    g2 = c.portal.call(_add_gallery, app, "gaudit2")
+    uid = c.portal.call(_add_viewer_with_gids, app, "v_audit", [g1])
+
+    r = c.patch(f"/api/admin/users/{uid}", json={"gallery_ids": [g2]})
+    assert r.status_code == 200
+
+    # DB: g1 应已删除，g2 已插入
+    count = c.portal.call(_count_user_galleries, app, uid)
+    assert count == 1
+
+    audit = c.portal.call(_last_audit, app, "user_update")
+    assert audit is not None
+    assert f"gallery_ids=[{g2}]" in (audit.detail or "")
+
+
+def test_audit_user_reset_password(admin_client):
+    """重置密码 → audit user_reset_password。"""
+    c, app, _ = admin_client
+    uid = c.portal.call(_add_viewer, app, "to_audit_pw")
+    r = c.post(f"/api/admin/users/{uid}/reset-password", json={"new_password": "audited12345"})
+    assert r.status_code == 200
+
+    audit = c.portal.call(_last_audit, app, "user_reset_password")
+    assert audit is not None
+    assert audit.target == f"user:{uid}"
+    assert audit.actor_user_id == 1
+
+
+def test_audit_user_delete(admin_client):
+    """删除用户 → audit user_delete。"""
+    c, app, _ = admin_client
+    uid = c.portal.call(_add_viewer, app, "to_audit_delete")
+    r = c.delete(f"/api/admin/users/{uid}")
+    assert r.status_code == 204
+
+    audit = c.portal.call(_last_audit, app, "user_delete")
+    assert audit is not None
+    assert audit.target == f"user:{uid}"
+    assert "username=to_audit_delete" in (audit.detail or "")
+
+
+def test_user_galleries_cascade_on_user_delete(admin_client):
+    """删除 viewer → user_galleries 行的 FK CASCADE 自动清理。"""
+    c, app, _ = admin_client
+    gid = c.portal.call(_add_gallery, app, "cascade_g")
+    uid = c.portal.call(_add_viewer_with_gids, app, "v_cascade", [gid])
+
+    # 删除前确认 user_galleries 行存在
+    assert c.portal.call(_count_user_galleries, app, uid) == 1
+
+    r = c.delete(f"/api/admin/users/{uid}")
+    assert r.status_code == 204
+
+    # 删除后 user_galleries 行消失
+    assert c.portal.call(_count_user_galleries, app, uid) == 0
+
+
+def test_audit_includes_actor_and_ip(admin_client):
+    """audit 行含 actor_user_id（操作者）和 actor_ip。"""
+    c, app, _ = admin_client
+    uid = c.portal.call(_add_viewer, app, "actor_check")
+    c.patch(f"/api/admin/users/{uid}", json={"role": "admin"})
+
+    audit = c.portal.call(_last_audit, app, "user_update")
+    assert audit is not None
+    assert audit.actor_user_id == 1  # logged-in admin id
+    assert audit.actor_ip is not None
+    assert audit.actor_ip != ""

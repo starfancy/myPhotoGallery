@@ -922,12 +922,16 @@ async def admin_update_user(
         will_be_active = (new_role == "admin" and new_enabled == 1)
         await _guard_last_admin(s, user, will_be_active_admin=will_be_active)
 
+        changed: list[str] = []
         if body.role is not None:
             user.role = body.role
+            changed.append(f"role={body.role}")
         if body.access_scope is not None:
             user.access_scope = body.access_scope
+            changed.append(f"access_scope={body.access_scope}")
         if body.enabled is not None:
             user.enabled = body.enabled
+            changed.append(f"enabled={body.enabled}")
 
         # gallery_ids：仅 viewer 角色生效；admin 忽略
         if body.gallery_ids is not None and user.role == "viewer":
@@ -936,10 +940,23 @@ async def admin_update_user(
                 s.add(UserGallery(
                     user_id=uid, gallery_id=gid, granted_at=int(time.time()),
                 ))
+            changed.append(f"gallery_ids={body.gallery_ids}")
+
+        # 审计 action 拆分：单独禁用 → user_disable；其他 → user_update
+        if (
+            len(changed) == 1
+            and body.enabled is not None
+            and body.role is None
+            and body.access_scope is None
+            and body.gallery_ids is None
+        ):
+            audit_action = "user_disable" if body.enabled == 0 else "user_enable"
+        else:
+            audit_action = "user_update"
 
         await write_audit(
-            s, "user_update", admin.id, _client_ip(request),
-            target=f"user:{uid}",
+            s, audit_action, admin.id, _client_ip(request),
+            target=f"user:{uid}", detail=",".join(changed) or None,
         )
         await s.commit()
 
