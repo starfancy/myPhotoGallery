@@ -161,8 +161,12 @@ async function loadGallery(silent = false) {
     const d = await apiGet<GalleryDetail>(`/api/admin/galleries/${gid}`)
     data.value = d
     galleryName.value = d.name
-    editName.value = d.name
-    editDescription.value = d.description ?? ""
+    // Background (silent) polls refresh scan progress but must not clobber
+    // in-progress edits to the name/description fields.
+    if (!silent) {
+      editName.value = d.name
+      editDescription.value = d.description ?? ""
+    }
   } catch (err) {
     error.value = (err as HttpError).message || "加载失败"
   } finally {

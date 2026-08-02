@@ -242,5 +242,40 @@ describe("AdminGalleryEdit", () => {
     expect(fetchFn).toHaveBeenCalledTimes(3)
 
     w.unmount()
+    // After unmount, a timer (if any leaked) must not fire another fetch.
+    vi.advanceTimersByTime(5000)
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+  })
+
+  it("silent poll does not clobber in-progress name edits", async () => {
+    vi.useFakeTimers()
+    const running = {
+      ...GALLERY,
+      roots: [{ ...GALLERY.roots[0], status: "running", total_files: 10, processed_files: 2 }],
+    }
+    const polled = {
+      ...running,
+      name: "Renamed By Server",
+      description: "changed by poll",
+      roots: [{ ...running.roots[0], processed_files: 3 }],
+    }
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockResolvedValueOnce(mockFetchOnce(running))
+      .mockResolvedValueOnce(mockFetchOnce(polled))
+    vi.stubGlobal("fetch", fetchFn)
+
+    const w = await mountView()
+    const nameInput = w.findAll("input")[0]
+    await nameInput.setValue("I am typing this")
+
+    vi.advanceTimersByTime(2000)
+    await flushPromises()
+
+    // User's in-progress edit survives the background poll.
+    expect((nameInput.element as HTMLInputElement).value).toBe("I am typing this")
+    // The header/gallery title may update, but the edit input is untouched.
+    w.unmount()
   })
 })
