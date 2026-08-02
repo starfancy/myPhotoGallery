@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import ctypes
 import os
 import secrets
 import shutil
 import string
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -412,22 +415,101 @@ class BrowseFsRequest(BaseModel):
     path: str = ""
 
 
+# Windows SetErrorMode flags used to suppress critical-error dialogs (e.g. an
+# empty CD/DVD drive or a dead network share) while querying volume info.
+_SEM_FAILCRITICALERRORS = 0x0001
+_SEM_NOOPENFILEERRORBOX = 0x8000
+
+# SetErrorMode is process-global, not thread-local; serialize the
+# set/use/restore sequence so concurrent browse-fs requests can't clobber
+# each other's error mode (see _drive_volume_label).
+_error_mode_lock = threading.Lock()
+
+# GetDriveTypeW return values -> Chinese display names.
+_DRIVE_TYPE_NAMES = {
+    2: "可移动磁盘",      # DRIVE_REMOVABLE
+    3: "本地磁盘",        # DRIVE_FIXED
+    4: "网络驱动器",      # DRIVE_REMOTE
+    5: "CD/DVD 驱动器",  # DRIVE_CDROM
+    6: "RAM 磁盘",       # DRIVE_RAMDISK
+}
+
+
+def _drive_volume_label(drive: str) -> str | None:
+    """Return the trimmed volume label for a Windows drive root (e.g. "C:\\"),
+    or None if it has no label or cannot be read.
+
+    Sets the process error mode around the call so an empty optical drive or
+    a dead network mount does not pop a system dialog. The error mode is
+    process-global, so the set/use/restore sequence is serialized via
+    _error_mode_lock.
+    """
+    try:
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    except AttributeError:
+        return None
+    prev = 0
+    with _error_mode_lock:
+        try:
+            prev = kernel32.SetErrorMode(
+                _SEM_FAILCRITICALERRORS | _SEM_NOOPENFILEERRORBOX
+            )
+            buf = ctypes.create_unicode_buffer(256)
+            ok = kernel32.GetVolumeInformationW(
+                drive, buf, ctypes.sizeof(buf) // ctypes.sizeof(ctypes.c_wchar),
+                None, None, None, None, 0,
+            )
+            if not ok:
+                return None
+            label = buf.value.strip()
+            return label or None
+        except (OSError, AttributeError):
+            return None
+        finally:
+            try:
+                kernel32.SetErrorMode(prev)
+            except (OSError, AttributeError):
+                pass
+
+
+def _drive_type_name(drive: str) -> str:
+    """Return a Chinese display name for a Windows drive's type. Never empty;
+    unknown types map to "驱动器"."""
+    try:
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        code = kernel32.GetDriveTypeW(drive)
+    except (OSError, AttributeError):
+        return "驱动器"
+    return _DRIVE_TYPE_NAMES.get(code, "驱动器")
+
+
 def _list_drive_letters() -> list[dict]:
     """Windows: return mounted drives via GetLogicalDrives bitmask.
 
     Uses the kernel32 bitmask rather than probing each letter with `os.path.exists`
-    so we do not wake removable media or block on dead network mounts.
+    so we do not wake removable media or block on dead network mounts. Each entry
+    carries a `label`: the volume label when available, otherwise the drive-type
+    name. Per-drive errors are isolated so one bad drive never drops the others.
     """
-    import ctypes
     try:
         bitmask = ctypes.windll.kernel32.GetLogicalDrives()  # type: ignore[attr-defined]
     except (AttributeError, OSError):
         return []
     out = []
     for i, letter in enumerate(string.ascii_uppercase):
-        if bitmask & (1 << i):
-            drive = f"{letter}:\\"
-            out.append({"name": f"{letter}:", "path": drive, "is_root": True})
+        if not (bitmask & (1 << i)):
+            continue
+        drive = f"{letter}:\\"
+        try:
+            label = _drive_volume_label(drive) or _drive_type_name(drive)
+        except Exception:
+            label = "驱动器"
+        out.append({
+            "name": f"{letter}:",
+            "path": drive,
+            "is_root": True,
+            "label": label,
+        })
     return out
 
 
@@ -492,7 +574,7 @@ async def admin_browse_fs(
         if not raw:
             # Default root
             if sys.platform == "win32":
-                entries = _list_drive_letters()
+                entries = await asyncio.to_thread(_list_drive_letters)
                 truncated = False
                 result_path = ""
             else:
