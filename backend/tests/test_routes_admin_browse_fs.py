@@ -85,6 +85,8 @@ def test_browse_fs_default_returns_root(client_as_admin):
             assert e["is_root"] is True
             # e.g. "C:" as name, "C:\\" as path
             assert re.fullmatch(r"[A-Z]:", e["name"])
+            assert isinstance(e["label"], str)
+            assert e["label"]  # non-empty: volume label or drive-type fallback
     else:
         assert data["path"] == "/"
         for e in data["entries"]:
@@ -226,3 +228,91 @@ def test_browse_fs_failed_call_still_audits(client_as_admin, tmp_path):
     latest = rows[0]
     assert latest.target == bad_path
     assert "error=" in (latest.detail or "")
+
+
+def test_browse_fs_windows_drive_labels(monkeypatch):
+    """Drive entries carry a volume label; a failed label query falls back to
+    the drive-type name. Uses a fake ctypes so it runs on every platform."""
+    import asyncio
+    from myphoto import routes_admin
+
+    SEM_FAILCRITICALERRORS = 0x0001
+    SEM_NOOPENFILEERRORBOX = 0x8000
+    expected_flags = SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX
+
+    class FakeKernel32:
+        def __init__(self):
+            self.error_mode = 0
+            self.error_mode_calls = []
+            # C: labeled, E: unreadable volume (CD-ROM type), F: removable
+            self.drives = {
+                "C:\\": ("系统", 3),    # DRIVE_FIXED
+                "E:\\": (None, 5),      # DRIVE_CDROM, GetVolumeInformation fails
+                "F:\\": ("", 2),        # DRIVE_REMOVABLE, empty label
+            }
+
+        def GetLogicalDrives(self):
+            # bits for C (1<<2), E (1<<4), F (1<<5)
+            return (1 << 2) | (1 << 4) | (1 << 5)
+
+        def SetErrorMode(self, mode):
+            self.error_mode_calls.append(mode)
+            self.error_mode = mode
+            return 0
+
+        def GetVolumeInformationW(self, root, _buf, _bsize, _a, _b, _c, _d, _e):
+            label, _ = self.drives[root]
+            if label is None:
+                return 0  # failure -> no label
+            _buf.value = label
+            return 1
+
+        def GetDriveTypeW(self, root):
+            return self.drives[root][1]
+
+    fake = FakeKernel32()
+
+    class FakeWindll:
+        kernel32 = fake
+
+    class FakeCtypes:
+        windll = FakeWindll()
+
+        class c_wchar:
+            pass
+
+        @staticmethod
+        def create_unicode_buffer(size):
+            class Buf:
+                def __init__(self):
+                    self.value = ""
+            return Buf()
+
+        @staticmethod
+        def sizeof(obj):
+            # The implementation divides buf size by c_wchar size to derive a
+            # character count; return 2 for both so the result is a sane int.
+            return 2
+
+    monkeypatch.setattr(routes_admin, "ctypes", FakeCtypes)
+    monkeypatch.setattr(routes_admin.sys, "platform", "win32")
+
+    entries = asyncio.run(routes_admin.asyncio.to_thread(routes_admin._list_drive_letters))
+    by_letter = {e["name"]: e for e in entries}
+
+    assert set(by_letter) == {"C:", "E:", "F:"}
+
+    # C: has a real label
+    assert by_letter["C:"]["label"] == "系统"
+    assert by_letter["C:"]["is_root"] is True
+    assert by_letter["C:"]["path"] == "C:\\"
+
+    # E: GetVolumeInformation failed -> fall back to drive type
+    assert by_letter["E:"]["label"] == "CD/DVD 驱动器"
+
+    # F: empty label string -> fall back to drive type
+    assert by_letter["F:"]["label"] == "可移动磁盘"
+
+    # The suppress flags were applied at least once and then restored to 0.
+    assert expected_flags in fake.error_mode_calls
+    assert fake.error_mode_calls[-1] == 0
