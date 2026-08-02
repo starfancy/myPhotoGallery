@@ -90,6 +90,7 @@ describe("AdminOverview", () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   it("shows loading state before fetch resolves", () => {
@@ -238,5 +239,78 @@ describe("AdminOverview", () => {
     await flushPromises()
     // Locale-agnostic shape check (exact digits depend on tz).
     expect(w.text()).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)
+  })
+
+  it("renders progress for a running root", async () => {
+    mockStatus({
+      stats: { images: 0, galleries: 0, roots: 0, users: 1 },
+      scan_statuses: [
+        {
+          root_id: 1, gallery_id: 1, label: "Main", absolute_path: "/photos",
+          enabled: true, status: "running", last_scan_at: null,
+          last_scan_status: null, last_scan_error: null,
+          phase: "hashing", total_files: 20, processed_files: 5,
+          current_path: "a/b.jpg", started_at: 1_700_000_000,
+        },
+      ],
+      recent_audit: [],
+    })
+    const w = mountView()
+    await flushPromises()
+
+    expect(w.text()).toContain("5 / 20")
+    expect(w.text()).toContain("25%")
+    expect(w.find('[role="progressbar"]').attributes("aria-valuenow")).toBe("25")
+  })
+
+  it("polls status while a scan is running and stops when idle", async () => {
+    vi.useFakeTimers()
+    const running = {
+      stats: { images: 0, galleries: 0, roots: 0, users: 1 },
+      scan_statuses: [
+        { root_id: 1, gallery_id: 1, label: "Main", absolute_path: "/photos",
+          enabled: true, status: "running", last_scan_at: null,
+          last_scan_status: null, last_scan_error: null,
+          total_files: 20, processed_files: 5 },
+      ],
+      recent_audit: [],
+    }
+    const idle = {
+      stats: { images: 0, galleries: 0, roots: 0, users: 1 },
+      scan_statuses: [
+        { root_id: 1, gallery_id: 1, label: "Main", absolute_path: "/photos",
+          enabled: true, status: "idle", last_scan_at: 1_700_000_000,
+          last_scan_status: "ok", last_scan_error: null },
+      ],
+      recent_audit: [],
+    }
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockResolvedValueOnce(new Response(JSON.stringify(running), { headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(running), { headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(idle), { headers: { "content-type": "application/json" } }))
+    vi.stubGlobal("fetch", fetchFn)
+
+    const w = mountView()
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(2000)
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+
+    vi.advanceTimersByTime(2000)
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+
+    vi.advanceTimersByTime(5000)
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+
+    w.unmount()
+    // No fetch may fire after unmount even if timers advance.
+    vi.advanceTimersByTime(5000)
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(3)
   })
 })
