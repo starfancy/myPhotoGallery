@@ -49,4 +49,19 @@ python -m uvicorn myphoto.main:app --app-dir backend --reload --host 127.0.0.1 -
 cd frontend && npx vite
 ```
 
+## Production frontend
+
+Build the frontend and serve the production bundle locally with Vite's
+preview server:
+
+```bash
+cd frontend
+pnpm build          # vue-tsc --noEmit && vite build -> frontend/dist/
+pnpm preview        # serves frontend/dist at http://localhost:4173
+```
+
+`pnpm preview` is intended for local verification of the production build, not
+as a public-facing server. For real deployments, host `frontend/dist/` behind
+Nginx/Caddy and reverse-proxy `/api` to the backend.
+
 See docs/superpowers/specs/ for design, docs/superpowers/plans/ for phase plans.
