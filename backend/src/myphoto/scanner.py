@@ -60,6 +60,19 @@ class _RootStatus:
     status: str = "idle"
     last_scan_at: int | None = None
     last_scan_error: str | None = None
+    # Live progress (in-memory only). phase is idle|walking|hashing|committing.
+    phase: str = "idle"
+    total_files: int = 0
+    processed_files: int = 0
+    current_path: str | None = None
+    started_at: int | None = None
+
+    def reset_progress(self) -> None:
+        self.phase = "idle"
+        self.total_files = 0
+        self.processed_files = 0
+        self.current_path = None
+        self.started_at = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +123,11 @@ class Scanner:
             "status": status.status,
             "last_scan_at": status.last_scan_at,
             "last_scan_error": status.last_scan_error,
+            "phase": status.phase,
+            "total_files": status.total_files,
+            "processed_files": status.processed_files,
+            "current_path": status.current_path,
+            "started_at": status.started_at,
         }
 
     async def _loop(self) -> None:
@@ -128,12 +146,18 @@ class Scanner:
         status = self._status.setdefault(root_id, _RootStatus())
         status.status = "running"
         status.last_scan_error = None
+        status.phase = "walking"
+        status.total_files = 0
+        status.processed_files = 0
+        status.current_path = None
+        status.started_at = int(time.time())
         try:
             await self._audit(root_id, "scan_start")
             try:
                 last_scan_at = await self._scan_transaction(root_id)
             except asyncio.CancelledError:
                 status.status = "idle"
+                status.reset_progress()
                 raise
             except Exception as exc:
                 error = str(exc)[:500]
@@ -141,10 +165,12 @@ class Scanner:
                 await self._record_scan_error(root_id, error)
                 status.status = "idle"
                 status.last_scan_error = error
+                status.reset_progress()
             else:
                 status.status = "idle"
                 status.last_scan_at = last_scan_at
                 status.last_scan_error = None
+                status.reset_progress()
                 await self._audit(
                     root_id, "scan_finish",
                     detail=f"last_scan_at={last_scan_at}",

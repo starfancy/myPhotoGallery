@@ -305,6 +305,19 @@ def test_extract_exif_json_survives_bad_values():
     assert data["ISOSpeedRatings"] == 1600
 
 
+async def test_status_exposes_progress_fields(env):
+    _, sm, root_id = env
+    scanner = Scanner(sm)
+
+    status = scanner.get_status(root_id)
+    # Idle baseline: keys present and zeroed/neutral.
+    assert status["phase"] == "idle"
+    assert status["total_files"] == 0
+    assert status["processed_files"] == 0
+    assert status["current_path"] is None
+    assert "started_at" in status
+
+
 async def test_scanner_writes_exif_json(env):
     root_dir, sm, root_id = env
     _jpg_with_exif(root_dir / "a.jpg")
