@@ -91,6 +91,7 @@ def test_browse_fs_default_returns_root(client_as_admin):
         assert data["path"] == "/"
         for e in data["entries"]:
             assert e["is_root"] is False
+            assert "label" not in e
 
 
 def test_browse_fs_omitted_path_treated_as_root(client_as_admin):
@@ -313,6 +314,6 @@ def test_browse_fs_windows_drive_labels(monkeypatch):
     # F: empty label string -> fall back to drive type
     assert by_letter["F:"]["label"] == "可移动磁盘"
 
-    # The suppress flags were applied at least once and then restored to 0.
-    assert expected_flags in fake.error_mode_calls
-    assert fake.error_mode_calls[-1] == 0
+    # Each drive sets the suppress flags then restores the previous mode,
+    # in drive enumeration order (C, E, F): set, restore, set, restore, ...
+    assert fake.error_mode_calls == [expected_flags, 0, expected_flags, 0, expected_flags, 0]

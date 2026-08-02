@@ -7,6 +7,7 @@ import secrets
 import shutil
 import string
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -419,6 +420,11 @@ class BrowseFsRequest(BaseModel):
 _SEM_FAILCRITICALERRORS = 0x0001
 _SEM_NOOPENFILEERRORBOX = 0x8000
 
+# SetErrorMode is process-global, not thread-local; serialize the
+# set/use/restore sequence so concurrent browse-fs requests can't clobber
+# each other's error mode (see _drive_volume_label).
+_error_mode_lock = threading.Lock()
+
 # GetDriveTypeW return values -> Chinese display names.
 _DRIVE_TYPE_NAMES = {
     2: "可移动磁盘",      # DRIVE_REMOVABLE
@@ -434,29 +440,36 @@ def _drive_volume_label(drive: str) -> str | None:
     or None if it has no label or cannot be read.
 
     Sets the process error mode around the call so an empty optical drive or
-    a dead network mount does not pop a system dialog.
+    a dead network mount does not pop a system dialog. The error mode is
+    process-global, so the set/use/restore sequence is serialized via
+    _error_mode_lock.
     """
     try:
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
     except AttributeError:
         return None
-    prev = kernel32.SetErrorMode(
-        _SEM_FAILCRITICALERRORS | _SEM_NOOPENFILEERRORBOX
-    )
-    try:
-        buf = ctypes.create_unicode_buffer(256)
-        ok = kernel32.GetVolumeInformationW(
-            drive, buf, ctypes.sizeof(buf) // ctypes.sizeof(ctypes.c_wchar),
-            None, None, None, None, 0,
-        )
-        if not ok:
+    prev = 0
+    with _error_mode_lock:
+        try:
+            prev = kernel32.SetErrorMode(
+                _SEM_FAILCRITICALERRORS | _SEM_NOOPENFILEERRORBOX
+            )
+            buf = ctypes.create_unicode_buffer(256)
+            ok = kernel32.GetVolumeInformationW(
+                drive, buf, ctypes.sizeof(buf) // ctypes.sizeof(ctypes.c_wchar),
+                None, None, None, None, 0,
+            )
+            if not ok:
+                return None
+            label = buf.value.strip()
+            return label or None
+        except (OSError, AttributeError):
             return None
-        label = buf.value.strip()
-        return label or None
-    except (OSError, AttributeError):
-        return None
-    finally:
-        kernel32.SetErrorMode(prev)
+        finally:
+            try:
+                kernel32.SetErrorMode(prev)
+            except (OSError, AttributeError):
+                pass
 
 
 def _drive_type_name(drive: str) -> str:
@@ -489,8 +502,8 @@ def _list_drive_letters() -> list[dict]:
         drive = f"{letter}:\\"
         try:
             label = _drive_volume_label(drive) or _drive_type_name(drive)
-        except OSError:
-            label = _drive_type_name(drive)
+        except Exception:
+            label = "驱动器"
         out.append({
             "name": f"{letter}:",
             "path": drive,
