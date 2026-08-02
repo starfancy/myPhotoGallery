@@ -54,6 +54,22 @@
                 <span :class="scanStatusClass(r.status)">{{ scanStatusLabel(r.status) }}</span>
                 <span v-if="!r.enabled" class="text-yellow-400">已禁用</span>
               </div>
+              <div v-if="isRunning(r)" class="mt-1 space-y-1">
+                <div class="h-1 w-full overflow-hidden rounded bg-neutral-800"
+                     role="progressbar"
+                     :aria-valuemin="0"
+                     :aria-valuemax="100"
+                     :aria-valuenow="scanPercent(r)">
+                  <div class="h-1 rounded bg-blue-500"
+                       :style="{ width: scanPercent(r) + '%' }"></div>
+                </div>
+                <div class="flex items-center justify-between gap-2 text-xs text-neutral-500">
+                  <span>{{ r.processed_files ?? 0 }} / {{ r.total_files ?? 0 }} ({{ scanPercent(r) }}%)</span>
+                  <span v-if="r.current_path" class="truncate" :title="r.current_path">
+                    {{ r.current_path }}
+                  </span>
+                </div>
+              </div>
               <div v-if="r.last_scan_at" class="text-xs text-neutral-500">
                 上次扫描: {{ formatTs(r.last_scan_at) }}
               </div>
@@ -92,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { onMounted, onUnmounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import AppHeader from "../components/AppHeader.vue"
 import DirectoryChooser from "../components/DirectoryChooser.vue"
@@ -108,6 +124,11 @@ interface RootInfo {
   last_scan_at: number | null
   last_scan_status: string | null
   last_scan_error: string | null
+  phase?: string
+  total_files?: number
+  processed_files?: number
+  current_path?: string | null
+  started_at?: number | null
 }
 
 interface GalleryDetail {
@@ -133,8 +154,8 @@ const saveError = ref("")
 
 const showChooser = ref(false)
 
-async function loadGallery() {
-  loading.value = true
+async function loadGallery(silent = false) {
+  if (!silent) loading.value = true
   error.value = ""
   try {
     const d = await apiGet<GalleryDetail>(`/api/admin/galleries/${gid}`)
@@ -145,8 +166,9 @@ async function loadGallery() {
   } catch (err) {
     error.value = (err as HttpError).message || "加载失败"
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
+  schedulePoll()
 }
 
 async function saveGallery() {
@@ -222,7 +244,40 @@ async function onPathChosen(path: string) {
   }
 }
 
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+function anyRootRunning(): boolean {
+  return data.value?.roots.some(
+    (r) => r.status === "queued" || r.status === "running",
+  ) ?? false
+}
+
+function schedulePoll() {
+  if (pollTimer !== null) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+  if (anyRootRunning()) {
+    pollTimer = setTimeout(() => {
+      void loadGallery(true)
+    }, 2000)
+  }
+}
+
+function isRunning(r: RootInfo): boolean {
+  return r.status === "queued" || r.status === "running"
+}
+
+function scanPercent(r: RootInfo): number {
+  if (!r.total_files || r.total_files <= 0) return 0
+  return Math.round(((r.processed_files ?? 0) / r.total_files) * 100)
+}
+
 onMounted(loadGallery)
+
+onUnmounted(() => {
+  if (pollTimer !== null) clearTimeout(pollTimer)
+})
 
 // ---- display helpers ----
 

@@ -75,6 +75,7 @@ describe("AdminGalleryEdit", () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   it("shows loading state then renders gallery info and roots", async () => {
@@ -180,5 +181,66 @@ describe("AdminGalleryEdit", () => {
     await addCard!.trigger("click")
     // The DirectoryChooser modal should now be visible.
     expect(w.text()).toContain("选择目录")
+  })
+
+  it("renders processed/total, percent and current path for a running root", async () => {
+    const running = {
+      ...GALLERY,
+      roots: [
+        {
+          ...GALLERY.roots[0],
+          status: "running",
+          phase: "hashing",
+          total_files: 10,
+          processed_files: 4,
+          current_path: "vacation/001.jpg",
+          started_at: 1_700_000_000,
+        },
+      ],
+    }
+    mockFetchSequence({ body: running })
+    const w = await mountView()
+
+    expect(w.text()).toContain("4 / 10")
+    expect(w.text()).toContain("40%")
+    expect(w.text()).toContain("vacation/001.jpg")
+    // progress bar exposes its percentage for assistive tech / tests
+    const bar = w.find('[role="progressbar"]')
+    expect(bar.exists()).toBe(true)
+    expect(bar.attributes("aria-valuenow")).toBe("40")
+  })
+
+  it("polls every 2s while a scan is running and stops when idle", async () => {
+    vi.useFakeTimers()
+    const running = {
+      ...GALLERY,
+      roots: [{ ...GALLERY.roots[0], status: "running", total_files: 10, processed_files: 1 }],
+    }
+    const idle = GALLERY
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockResolvedValueOnce(mockFetchOnce(running)) // onMounted load
+      .mockResolvedValueOnce(mockFetchOnce(running)) // first poll
+      .mockResolvedValueOnce(mockFetchOnce(idle))    // second poll -> idle
+    vi.stubGlobal("fetch", fetchFn)
+
+    const w = await mountView()
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(2000)
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+
+    vi.advanceTimersByTime(2000)
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+
+    // All roots idle -> no further polling.
+    vi.advanceTimersByTime(5000)
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalledTimes(3)
+
+    w.unmount()
   })
 })
