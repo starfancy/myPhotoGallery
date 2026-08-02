@@ -45,7 +45,11 @@
                       @click="selectEntry(e)"
                       :class="{ 'bg-neutral-800': selected === e.path }">
                 <span aria-hidden="true">{{ e.is_root ? "💽" : "📁" }}</span>
-                <span class="truncate">{{ e.name }}</span>
+                <span class="flex min-w-0 items-baseline">
+                  <span class="truncate min-w-0">{{ e.name }}</span>
+                  <span v-if="e.is_root && e.label"
+                        class="min-w-0 truncate text-neutral-500">（{{ e.label }}）</span>
+                </span>
               </button>
             </li>
           </ul>
@@ -94,6 +98,7 @@ interface DirEntry {
   name: string
   path: string
   is_root: boolean
+  label?: string
 }
 
 interface BrowseResponse {

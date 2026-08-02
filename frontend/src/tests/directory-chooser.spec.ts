@@ -119,6 +119,29 @@ describe("DirectoryChooser", () => {
     expect(buttons[0].attributes("disabled")).toBeDefined()
   })
 
+  it("renders the volume label for Windows drive entries", async () => {
+    mockFetchQueue([
+      {
+        body: {
+          path: "",
+          entries: [
+            { name: "C:", path: "C:\\", is_root: true, label: "系统" },
+            { name: "D:", path: "D:\\", is_root: true, label: "数据" },
+          ],
+          truncated: false,
+        },
+      },
+    ])
+    const w = mount(DirectoryChooser, {
+      props: { modelValue: true, startPath: "" },
+    })
+    await flushPromises()
+
+    expect(w.text()).toContain("C:")
+    expect(w.text()).toContain("（系统）")
+    expect(w.text()).toContain("（数据）")
+  })
+
   it("single-clicking a drive letter does NOT enable confirm", async () => {
     // Regression: previously any single-click populated `selected`, which
     // let the user confirm a bare drive root (e.g. "C:\\") as a gallery
