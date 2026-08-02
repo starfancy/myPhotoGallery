@@ -56,10 +56,18 @@ async def make_engine(db_url: str) -> AsyncEngine:
     # aiosqlite wraps a sync engine — listen on that for the per-connection
     # PRAGMA so cascade deletes actually fire.
     @event.listens_for(engine.sync_engine, "connect")
-    def _set_fk_pragma(dbapi_connection, _connection_record):
+    def _set_pragmas(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         try:
             cursor.execute("PRAGMA foreign_keys=ON")
+            # WAL allows readers while a writer is active; busy_timeout makes a
+            # writer wait for the lock instead of raising "database is locked"
+            # immediately. :memory: databases do not support WAL — tolerate that.
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=5000")
+            except Exception:
+                pass
         finally:
             cursor.close()
     return engine
