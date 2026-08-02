@@ -318,6 +318,24 @@ async def test_status_exposes_progress_fields(env):
     assert "started_at" in status
 
 
+async def test_progress_reset_on_audit_crash(env, monkeypatch):
+    _, sm, root_id = env
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("audit down")
+
+    scanner = Scanner(sm)
+    monkeypatch.setattr(scanner, "_audit", boom)
+
+    with pytest.raises(RuntimeError, match="audit down"):
+        await scanner.scan_root_now(root_id)
+
+    status = scanner.get_status(root_id)
+    assert status["status"] == "idle"
+    assert status["phase"] == "idle"
+    assert status["started_at"] is None
+
+
 async def test_scanner_writes_exif_json(env):
     root_dir, sm, root_id = env
     _jpg_with_exif(root_dir / "a.jpg")

@@ -180,6 +180,7 @@ class Scanner:
             # reset defensively before re-raising to the worker loop.
             if status.status == "running":
                 status.status = "idle"
+                status.reset_progress()
             raise
 
     async def _audit(self, root_id: int, action: str, detail: str | None = None) -> None:
