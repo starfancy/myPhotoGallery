@@ -15,3 +15,4 @@ backend/config.toml.bak
 .DS_Store
 .claude/
 *.egg-info/
+*.7z
