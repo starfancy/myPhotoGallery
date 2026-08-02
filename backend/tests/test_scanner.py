@@ -1,4 +1,6 @@
+import asyncio
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -352,3 +354,89 @@ async def test_scanner_writes_exif_json(env):
         assert data["Make"] == "Nikon"
         assert data["ExposureTime"] == "1/250"
         assert rows["b.jpg"].exif_json is None
+
+
+async def test_progress_advances_through_phases(env, monkeypatch):
+    root_dir, sm, root_id = env
+    for n in range(3):
+        _jpg(root_dir / f"{n}.jpg")
+
+    import myphoto.scanner as sc
+    gate = threading.Event()
+    calls = {"n": 0}
+    real_process = sc._process_file
+
+    def slow_process(path, is_raw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            gate.wait(timeout=5)
+        return real_process(path, is_raw)
+
+    monkeypatch.setattr(sc, "_process_file", slow_process)
+
+    scanner = Scanner(sm)
+    scan_task = asyncio.create_task(scanner.scan_root_now(root_id))
+
+    # Wait until the scan reaches the hashing phase on the first file.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        st = scanner.get_status(root_id)
+        if st["status"] == "running" and st["phase"] == "hashing":
+            break
+        await asyncio.sleep(0.01)
+
+    running = scanner.get_status(root_id)
+    assert running["phase"] == "hashing"
+    assert running["total_files"] == 3
+    assert running["processed_files"] == 0
+    assert running["current_path"] is not None
+    assert running["started_at"] is not None
+
+    gate.set()
+    await asyncio.wait_for(scan_task, timeout=5)
+
+    done = scanner.get_status(root_id)
+    assert done["status"] == "idle"
+    assert done["phase"] == "idle"
+    assert done["processed_files"] == 3
+    assert done["current_path"] is None
+
+
+async def test_concurrent_write_succeeds_during_hashing(env, monkeypatch):
+    """A2 guarantee: no write transaction is held while hashing files, so an
+    unrelated admin write must complete without 'database is locked'."""
+    root_dir, sm, root_id = env
+    for n in range(3):
+        _jpg(root_dir / f"{n}.jpg")
+
+    import myphoto.scanner as sc
+    gate = threading.Event()
+    real_process = sc._process_file
+
+    def slow_process(path, is_raw):
+        gate.wait(timeout=5)
+        return real_process(path, is_raw)
+
+    monkeypatch.setattr(sc, "_process_file", slow_process)
+
+    scanner = Scanner(sm)
+    scan_task = asyncio.create_task(scanner.scan_root_now(root_id))
+
+    # Wait until hashing starts (no DB transaction held).
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        st = scanner.get_status(root_id)
+        if st["phase"] == "hashing":
+            break
+        await asyncio.sleep(0.01)
+
+    # This write must not block: the scan returned its connection before hashing.
+    async def _concurrent_write():
+        async with sm() as session:
+            session.add(Gallery(name="Concurrent", created_at=int(time.time())))
+            await session.commit()
+
+    await asyncio.wait_for(_concurrent_write(), timeout=3)
+
+    gate.set()
+    await asyncio.wait_for(scan_task, timeout=5)
