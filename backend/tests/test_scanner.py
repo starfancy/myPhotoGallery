@@ -402,14 +402,41 @@ async def test_progress_advances_through_phases(env, monkeypatch):
     assert done["current_path"] is None
 
 
-async def test_concurrent_write_succeeds_during_hashing(env, monkeypatch):
+async def test_concurrent_write_succeeds_during_hashing(tmp_path, monkeypatch):
     """A2 guarantee: no write transaction is held while hashing files, so an
-    unrelated admin write must complete without 'database is locked'."""
-    root_dir, sm, root_id = env
+    unrelated write completes without 'database is locked'.
+
+    Uses a file-backed DB (not :memory:) so the two sessions use distinct
+    DBAPI connections and real SQLite write-lock contention applies. A
+    regression that holds the write txn across hashing blocks the concurrent
+    writer past busy_timeout and fails the wait_for.
+    """
+    import myphoto.scanner as sc
+    from myphoto.models import Gallery, GalleryRoot
+
+    db_path = tmp_path / "test.db"
+    engine = await make_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    await create_all(engine)
+    sm = await make_sessionmaker(engine)
+
+    root_dir = tmp_path / "photos"
+    root_dir.mkdir()
     for n in range(3):
         _jpg(root_dir / f"{n}.jpg")
 
-    import myphoto.scanner as sc
+    async with sm() as session:
+        gallery = Gallery(name="G", created_at=int(time.time()))
+        session.add(gallery)
+        await session.flush()
+        root = GalleryRoot(
+            gallery_id=gallery.id, label="R",
+            absolute_path=str(root_dir.resolve()), enabled=1,
+        )
+        session.add(root)
+        await session.commit()
+        await session.refresh(root)
+        root_id = root.id
+
     gate = threading.Event()
     real_process = sc._process_file
 
@@ -422,15 +449,17 @@ async def test_concurrent_write_succeeds_during_hashing(env, monkeypatch):
     scanner = Scanner(sm)
     scan_task = asyncio.create_task(scanner.scan_root_now(root_id))
 
-    # Wait until hashing starts (no DB transaction held).
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         st = scanner.get_status(root_id)
         if st["phase"] == "hashing":
             break
         await asyncio.sleep(0.01)
+    assert scanner.get_status(root_id)["phase"] == "hashing"
 
-    # This write must not block: the scan returned its connection before hashing.
+    # A second session/connection writes while hashing is blocked. The scan
+    # holds no write txn, so this commits immediately; a long-txn regression
+    # would block here until busy_timeout and trip the wait_for.
     async def _concurrent_write():
         async with sm() as session:
             session.add(Gallery(name="Concurrent", created_at=int(time.time())))
@@ -439,4 +468,7 @@ async def test_concurrent_write_succeeds_during_hashing(env, monkeypatch):
     await asyncio.wait_for(_concurrent_write(), timeout=3)
 
     gate.set()
-    await asyncio.wait_for(scan_task, timeout=5)
+    try:
+        await asyncio.wait_for(scan_task, timeout=10)
+    finally:
+        await engine.dispose()
