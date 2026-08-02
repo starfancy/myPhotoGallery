@@ -1,4 +1,6 @@
+import asyncio
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -305,6 +307,37 @@ def test_extract_exif_json_survives_bad_values():
     assert data["ISOSpeedRatings"] == 1600
 
 
+async def test_status_exposes_progress_fields(env):
+    _, sm, root_id = env
+    scanner = Scanner(sm)
+
+    status = scanner.get_status(root_id)
+    # Idle baseline: keys present and zeroed/neutral.
+    assert status["phase"] == "idle"
+    assert status["total_files"] == 0
+    assert status["processed_files"] == 0
+    assert status["current_path"] is None
+    assert "started_at" in status
+
+
+async def test_progress_reset_on_audit_crash(env, monkeypatch):
+    _, sm, root_id = env
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("audit down")
+
+    scanner = Scanner(sm)
+    monkeypatch.setattr(scanner, "_audit", boom)
+
+    with pytest.raises(RuntimeError, match="audit down"):
+        await scanner.scan_root_now(root_id)
+
+    status = scanner.get_status(root_id)
+    assert status["status"] == "idle"
+    assert status["phase"] == "idle"
+    assert status["started_at"] is None
+
+
 async def test_scanner_writes_exif_json(env):
     root_dir, sm, root_id = env
     _jpg_with_exif(root_dir / "a.jpg")
@@ -321,3 +354,121 @@ async def test_scanner_writes_exif_json(env):
         assert data["Make"] == "Nikon"
         assert data["ExposureTime"] == "1/250"
         assert rows["b.jpg"].exif_json is None
+
+
+async def test_progress_advances_through_phases(env, monkeypatch):
+    root_dir, sm, root_id = env
+    for n in range(3):
+        _jpg(root_dir / f"{n}.jpg")
+
+    import myphoto.scanner as sc
+    gate = threading.Event()
+    calls = {"n": 0}
+    real_process = sc._process_file
+
+    def slow_process(path, is_raw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            gate.wait(timeout=5)
+        return real_process(path, is_raw)
+
+    monkeypatch.setattr(sc, "_process_file", slow_process)
+
+    scanner = Scanner(sm)
+    scan_task = asyncio.create_task(scanner.scan_root_now(root_id))
+
+    # Wait until the scan reaches the hashing phase on the first file.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        st = scanner.get_status(root_id)
+        if st["status"] == "running" and st["phase"] == "hashing":
+            break
+        await asyncio.sleep(0.01)
+
+    running = scanner.get_status(root_id)
+    assert running["phase"] == "hashing"
+    assert running["total_files"] == 3
+    assert running["processed_files"] == 0
+    assert running["current_path"] is not None
+    assert running["started_at"] is not None
+
+    gate.set()
+    await asyncio.wait_for(scan_task, timeout=5)
+
+    done = scanner.get_status(root_id)
+    assert done["status"] == "idle"
+    assert done["phase"] == "idle"
+    assert done["processed_files"] == 3
+    assert done["current_path"] is None
+
+
+async def test_concurrent_write_succeeds_during_hashing(tmp_path, monkeypatch):
+    """A2 guarantee: no write transaction is held while hashing files, so an
+    unrelated write completes without 'database is locked'.
+
+    Uses a file-backed DB (not :memory:) so the two sessions use distinct
+    DBAPI connections and real SQLite write-lock contention applies. A
+    regression that holds the write txn across hashing blocks the concurrent
+    writer past busy_timeout and fails the wait_for.
+    """
+    import myphoto.scanner as sc
+    from myphoto.models import Gallery, GalleryRoot
+
+    db_path = tmp_path / "test.db"
+    engine = await make_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    await create_all(engine)
+    sm = await make_sessionmaker(engine)
+
+    root_dir = tmp_path / "photos"
+    root_dir.mkdir()
+    for n in range(3):
+        _jpg(root_dir / f"{n}.jpg")
+
+    async with sm() as session:
+        gallery = Gallery(name="G", created_at=int(time.time()))
+        session.add(gallery)
+        await session.flush()
+        root = GalleryRoot(
+            gallery_id=gallery.id, label="R",
+            absolute_path=str(root_dir.resolve()), enabled=1,
+        )
+        session.add(root)
+        await session.commit()
+        await session.refresh(root)
+        root_id = root.id
+
+    gate = threading.Event()
+    real_process = sc._process_file
+
+    def slow_process(path, is_raw):
+        gate.wait(timeout=5)
+        return real_process(path, is_raw)
+
+    monkeypatch.setattr(sc, "_process_file", slow_process)
+
+    scanner = Scanner(sm)
+    scan_task = asyncio.create_task(scanner.scan_root_now(root_id))
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        st = scanner.get_status(root_id)
+        if st["phase"] == "hashing":
+            break
+        await asyncio.sleep(0.01)
+    assert scanner.get_status(root_id)["phase"] == "hashing"
+
+    # A second session/connection writes while hashing is blocked. The scan
+    # holds no write txn, so this commits immediately; a long-txn regression
+    # would block here until busy_timeout and trip the wait_for.
+    async def _concurrent_write():
+        async with sm() as session:
+            session.add(Gallery(name="Concurrent", created_at=int(time.time())))
+            await session.commit()
+
+    await asyncio.wait_for(_concurrent_write(), timeout=3)
+
+    gate.set()
+    try:
+        await asyncio.wait_for(scan_task, timeout=10)
+    finally:
+        await engine.dispose()

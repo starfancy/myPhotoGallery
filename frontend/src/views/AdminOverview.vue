@@ -67,6 +67,22 @@
                   {{ s.last_scan_error }}
                 </span>
               </div>
+              <div v-if="isRunning(s)" class="mt-1 w-full">
+                <div class="h-1 w-full overflow-hidden rounded bg-neutral-800"
+                     role="progressbar"
+                     :aria-valuemin="0"
+                     :aria-valuemax="100"
+                     :aria-valuenow="scanPercent(s)">
+                  <div class="h-1 rounded bg-blue-500"
+                       :style="{ width: scanPercent(s) + '%' }"></div>
+                </div>
+                <div class="mt-1 text-xs text-neutral-500">
+                  {{ s.processed_files ?? 0 }} / {{ s.total_files ?? 0 }} ({{ scanPercent(s) }}%)
+                  <span v-if="s.current_path" class="ml-2 truncate" :title="s.current_path">
+                    {{ s.current_path }}
+                  </span>
+                </div>
+              </div>
             </li>
           </ul>
         </section>
@@ -113,7 +129,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { onMounted, onUnmounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiGet, HttpError } from "../api"
 
@@ -134,6 +150,11 @@ interface ScanStatus {
   last_scan_at: number | null
   last_scan_status: string | null
   last_scan_error: string | null
+  phase?: string
+  total_files?: number
+  processed_files?: number
+  current_path?: string | null
+  started_at?: number | null
 }
 
 interface AuditEntry {
@@ -156,14 +177,53 @@ const data = ref<StatusResponse | null>(null)
 const loading = ref(true)
 const error = ref("")
 
-onMounted(async () => {
+async function loadStatus(silent = false) {
+  if (!silent) loading.value = true
   try {
     data.value = await apiGet<StatusResponse>("/api/admin/status")
   } catch (err) {
     error.value = (err as HttpError).message || "加载失败"
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
+  schedulePoll()
+}
+
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+
+function anyScanRunning(): boolean {
+  return data.value?.scan_statuses.some(
+    (s) => s.status === "queued" || s.status === "running",
+  ) ?? false
+}
+
+function schedulePoll() {
+  if (pollTimer !== null) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+  if (anyScanRunning()) {
+    pollTimer = setTimeout(() => {
+      void loadStatus(true)
+    }, 2000)
+  }
+}
+
+function isRunning(s: ScanStatus): boolean {
+  return s.status === "queued" || s.status === "running"
+}
+
+function scanPercent(s: ScanStatus): number {
+  if (!s.total_files || s.total_files <= 0) return 0
+  return Math.round(((s.processed_files ?? 0) / s.total_files) * 100)
+}
+
+onMounted(() => {
+  void loadStatus()
+})
+
+onUnmounted(() => {
+  if (pollTimer !== null) clearTimeout(pollTimer)
 })
 
 // ---- display helpers ----

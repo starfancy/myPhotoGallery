@@ -21,6 +21,11 @@ from myphoto.models import Folder, GalleryRoot, Image
 
 log = logging.getLogger("myphoto.scanner")
 
+# Number of images upserted per short write transaction. Keeping this small
+# bounds how long the scanner holds SQLite's single-writer lock so concurrent
+# admin writes are not blocked for the whole scan.
+_SCAN_BATCH_SIZE = 200
+
 try:
     import pillow_heif  # type: ignore[import-not-found]
 
@@ -60,6 +65,19 @@ class _RootStatus:
     status: str = "idle"
     last_scan_at: int | None = None
     last_scan_error: str | None = None
+    # Live progress (in-memory only). phase is idle|walking|hashing|committing.
+    phase: str = "idle"
+    total_files: int = 0
+    processed_files: int = 0
+    current_path: str | None = None
+    started_at: int | None = None
+
+    def reset_progress(self) -> None:
+        # Reset the transient live-progress indicators back to idle, but retain
+        # total_files/processed_files as a summary of the most recent scan.
+        self.phase = "idle"
+        self.current_path = None
+        self.started_at = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +88,19 @@ class _WalkedFile:
     relative_dir: str
     mtime: int
     size_bytes: int
+
+
+@dataclass
+class _ScanRecord:
+    """One walked file prepared for persistence. Heavy work (sha1/exif) has
+    already completed outside any DB transaction."""
+    walked: _WalkedFile
+    changed: bool
+    sha1: str | None
+    width: int | None
+    height: int | None
+    taken_at: int | None
+    exif_json: str | None
 
 
 class Scanner:
@@ -110,6 +141,11 @@ class Scanner:
             "status": status.status,
             "last_scan_at": status.last_scan_at,
             "last_scan_error": status.last_scan_error,
+            "phase": status.phase,
+            "total_files": status.total_files,
+            "processed_files": status.processed_files,
+            "current_path": status.current_path,
+            "started_at": status.started_at,
         }
 
     async def _loop(self) -> None:
@@ -128,12 +164,18 @@ class Scanner:
         status = self._status.setdefault(root_id, _RootStatus())
         status.status = "running"
         status.last_scan_error = None
+        status.phase = "walking"
+        status.total_files = 0
+        status.processed_files = 0
+        status.current_path = None
+        status.started_at = int(time.time())
         try:
             await self._audit(root_id, "scan_start")
             try:
                 last_scan_at = await self._scan_transaction(root_id)
             except asyncio.CancelledError:
                 status.status = "idle"
+                status.reset_progress()
                 raise
             except Exception as exc:
                 error = str(exc)[:500]
@@ -141,10 +183,12 @@ class Scanner:
                 await self._record_scan_error(root_id, error)
                 status.status = "idle"
                 status.last_scan_error = error
+                status.reset_progress()
             else:
                 status.status = "idle"
                 status.last_scan_at = last_scan_at
                 status.last_scan_error = None
+                status.reset_progress()
                 await self._audit(
                     root_id, "scan_finish",
                     detail=f"last_scan_at={last_scan_at}",
@@ -154,6 +198,7 @@ class Scanner:
             # reset defensively before re-raising to the worker loop.
             if status.status == "running":
                 status.status = "idle"
+                status.reset_progress()
             raise
 
     async def _audit(self, root_id: int, action: str, detail: str | None = None) -> None:
@@ -177,15 +222,23 @@ class Scanner:
             log.exception("audit write failed for scanner action=%s root=%s", action, root_id)
 
     async def _scan_transaction(self, root_id: int) -> int:
+        status = self._status.setdefault(root_id, _RootStatus())
+
+        # --- Phase 1: resolve root, then walk the tree (no write txn held) ---
         async with self._sm() as session:
             root = await session.get(GalleryRoot, root_id)
             if root is None:
                 raise RuntimeError(f"root {root_id} not found")
-
             absolute_root = Path(root.absolute_path)
-            walked_dirs, walked_files = await asyncio.to_thread(
-                _walk_root, absolute_root
-            )
+
+        status.phase = "walking"
+        walked_dirs, walked_files = await asyncio.to_thread(_walk_root, absolute_root)
+        status.total_files = len(walked_files)
+        status.processed_files = 0
+
+        # Load existing rows in a short read session, then release the
+        # connection before the CPU/IO-heavy hashing phase.
+        async with self._sm() as session:
             existing_images = {
                 image.relative_path: image
                 for image in (
@@ -194,21 +247,26 @@ class Scanner:
                     )
                 ).scalars()
             }
-            folders = await _ensure_folders(session, root_id, walked_dirs)
-            indexed_paths: set[str] = set()
 
-            for relative_path, walked in walked_files.items():
-                existing = existing_images.get(relative_path)
-                folder_id = folders[walked.relative_dir].id
-                if (
-                    existing is not None
-                    and existing.mtime == walked.mtime
-                    and existing.size_bytes == walked.size_bytes
-                ):
-                    existing.folder_id = folder_id
-                    indexed_paths.add(relative_path)
-                    continue
-
+        # --- Phase 2: hash/EXIF work OUTSIDE any transaction ---
+        status.phase = "hashing"
+        records: list[_ScanRecord] = []
+        indexed_paths: set[str] = set()
+        for relative_path, walked in walked_files.items():
+            status.current_path = relative_path
+            existing = existing_images.get(relative_path)
+            unchanged = (
+                existing is not None
+                and existing.mtime == walked.mtime
+                and existing.size_bytes == walked.size_bytes
+            )
+            if unchanged:
+                records.append(_ScanRecord(
+                    walked=walked, changed=False,
+                    sha1=None, width=None, height=None,
+                    taken_at=None, exif_json=None,
+                ))
+            else:
                 try:
                     sha1, width, height, taken_at, exif_json = await asyncio.to_thread(
                         _process_file,
@@ -217,23 +275,48 @@ class Scanner:
                     )
                 except Exception as exc:
                     log.warning("skipping unreadable image %s: %s", walked.path, exc)
+                    status.processed_files += 1
                     continue
+                records.append(_ScanRecord(
+                    walked=walked, changed=True,
+                    sha1=sha1, width=width, height=height,
+                    taken_at=taken_at, exif_json=exif_json,
+                ))
+            indexed_paths.add(relative_path)
+            status.processed_files += 1
+        status.current_path = None
 
-                _upsert_image(
-                    session=session,
-                    existing=existing,
-                    root_id=root_id,
-                    folder_id=folder_id,
-                    walked=walked,
-                    sha1=sha1,
-                    width=width,
-                    height=height,
-                    taken_at=taken_at,
-                    exif_json=exif_json,
-                )
-                indexed_paths.add(relative_path)
+        # --- Phase 3a: create/update folders in one short write txn ---
+        status.phase = "committing"
+        async with self._sm() as session:
+            folders = await _ensure_folders(session, root_id, walked_dirs)
+            await session.commit()
+        folder_ids = {relative_path: folder.id for relative_path, folder in folders.items()}
 
-            for relative_path, image in existing_images.items():
+        # --- Phase 3b: upsert images in short batched transactions ---
+        for start in range(0, len(records), _SCAN_BATCH_SIZE):
+            batch = records[start:start + _SCAN_BATCH_SIZE]
+            await self._persist_batch(root_id, batch, folder_ids)
+
+        # --- Phase 3c: delete missing, prune folders, recompute, update root ---
+        async with self._sm() as session:
+            folders = {
+                folder.relative_path: folder
+                for folder in (
+                    await session.execute(
+                        select(Folder).where(Folder.root_id == root_id)
+                    )
+                ).scalars()
+            }
+            existing_now = {
+                image.relative_path: image
+                for image in (
+                    await session.execute(
+                        select(Image).where(Image.root_id == root_id)
+                    )
+                ).scalars()
+            }
+            for relative_path, image in existing_now.items():
                 if relative_path not in indexed_paths:
                     await session.delete(image)
             await session.flush()
@@ -242,11 +325,54 @@ class Scanner:
             _recompute_counts(folders, walked_dirs, indexed_paths)
 
             last_scan_at = int(time.time())
-            root.last_scan_at = last_scan_at
-            root.last_scan_status = "ok"
-            root.last_scan_error = None
+            root = await session.get(GalleryRoot, root_id)
+            if root is not None:
+                root.last_scan_at = last_scan_at
+                root.last_scan_status = "ok"
+                root.last_scan_error = None
             await session.commit()
-            return last_scan_at
+        return last_scan_at
+
+    async def _persist_batch(
+        self,
+        root_id: int,
+        batch: list[_ScanRecord],
+        folder_ids: dict[str, int],
+    ) -> None:
+        """Upsert one batch of records in a single short write transaction."""
+        async with self._sm() as session:
+            rel_paths = [record.walked.relative_path for record in batch]
+            existing = {
+                image.relative_path: image
+                for image in (
+                    await session.execute(
+                        select(Image).where(
+                            Image.root_id == root_id,
+                            Image.relative_path.in_(rel_paths),
+                        )
+                    )
+                ).scalars()
+            }
+            for record in batch:
+                target_folder_id = folder_ids[record.walked.relative_dir]
+                if record.changed:
+                    _upsert_image(
+                        session=session,
+                        existing=existing.get(record.walked.relative_path),
+                        root_id=root_id,
+                        folder_id=target_folder_id,
+                        walked=record.walked,
+                        sha1=record.sha1,
+                        width=record.width,
+                        height=record.height,
+                        taken_at=record.taken_at,
+                        exif_json=record.exif_json,
+                    )
+                else:
+                    image = existing.get(record.walked.relative_path)
+                    if image is not None and image.folder_id != target_folder_id:
+                        image.folder_id = target_folder_id
+            await session.commit()
 
     async def _record_scan_error(self, root_id: int, error: str) -> None:
         try:

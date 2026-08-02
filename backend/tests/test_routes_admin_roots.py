@@ -142,3 +142,28 @@ def test_root_not_in_wrong_gallery(client_with_gallery):
     gid2 = c.post("/api/admin/galleries", json={"name": "G2"}).json()["id"]
     r = c.get(f"/api/admin/galleries/{gid2}/roots/{rid}/scan-status")
     assert r.status_code == 404
+
+
+def test_scan_status_includes_progress_fields(client_with_gallery):
+    c, gid, photos, _ = client_with_gallery
+    rid = c.post(f"/api/admin/galleries/{gid}/roots", json={
+        "label": "R", "absolute_path": str(photos),
+    }).json()["id"]
+
+    r = c.get(f"/api/admin/galleries/{gid}/roots/{rid}/scan-status")
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("phase", "total_files", "processed_files", "current_path", "started_at"):
+        assert key in body
+
+
+def test_gallery_detail_includes_progress_fields(client_with_gallery):
+    c, gid, photos, _ = client_with_gallery
+    c.post(f"/api/admin/galleries/{gid}/roots", json={
+        "label": "R", "absolute_path": str(photos),
+    })
+    r = c.get(f"/api/admin/galleries/{gid}")
+    assert r.status_code == 200
+    root = r.json()["roots"][0]
+    for key in ("phase", "total_files", "processed_files", "current_path", "started_at"):
+        assert key in root

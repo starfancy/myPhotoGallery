@@ -131,6 +131,11 @@ async def admin_get_gallery(
                 "last_scan_at": live["last_scan_at"] if live["last_scan_at"] is not None else r.last_scan_at,
                 "last_scan_status": r.last_scan_status,
                 "last_scan_error": live["last_scan_error"] if live["last_scan_error"] is not None else r.last_scan_error,
+                "phase": live["phase"],
+                "total_files": live["total_files"],
+                "processed_files": live["processed_files"],
+                "current_path": live["current_path"],
+                "started_at": live["started_at"],
             })
 
         return {
@@ -405,6 +410,11 @@ async def admin_scan_status(
         "status": status["status"],
         "last_scan_at": status["last_scan_at"],
         "last_scan_error": status["last_scan_error"],
+        "phase": status["phase"],
+        "total_files": status["total_files"],
+        "processed_files": status["processed_files"],
+        "current_path": status["current_path"],
+        "started_at": status["started_at"],
     }
 
 
@@ -643,6 +653,11 @@ async def admin_status(
                 "last_scan_at": live["last_scan_at"] if live["last_scan_at"] is not None else r.last_scan_at,
                 "last_scan_status": r.last_scan_status,
                 "last_scan_error": live["last_scan_error"] if live["last_scan_error"] is not None else r.last_scan_error,
+                "phase": live["phase"],
+                "total_files": live["total_files"],
+                "processed_files": live["processed_files"],
+                "current_path": live["current_path"],
+                "started_at": live["started_at"],
             })
 
         recent = (
