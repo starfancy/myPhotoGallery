@@ -5,10 +5,10 @@
  * 整个 `photoswipe` 模块——把 PhotoSwipe 构造函数替成一个可控替身：
  * `init()` 立刻触发 `uiRegister`；`ui.registerElement()` 保存注册项供
  * 测试查询与手动 onClick。这样能在保留组件本身逻辑的前提下断言：
- *   - admin 才注册删除按钮
+ *   - admin 才注册更多操作按钮
  *   - EXIF 按钮 onClick 打开 body-level 面板
  *   - 面板消费 /api/images/{id}/exif 并渲染中文标签
- *   - 删除按钮 confirm → apiDelete → emit deleted
+ *   - 更多操作 → 下拉菜单中点击删除 → apiDelete → emit deleted
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
@@ -102,18 +102,19 @@ describe("ImageLightbox — EXIF panel & delete", () => {
     document.body.innerHTML = ""
   })
 
-  it("registers 'exif-info' and 'delete-image' buttons for admin", async () => {
+  it("registers 'exif-info' and 'more-actions' buttons for admin", async () => {
     await mountLightbox("admin")
     expect(findElement("original-image")).toBeDefined()
     expect(findElement("original-image-newtab")).toBeDefined()
     expect(findElement("exif-info")).toBeDefined()
-    expect(findElement("delete-image")).toBeDefined()
+    expect(findElement("more-actions")).toBeDefined()
+    expect(findElement("delete-image")).toBeUndefined()
   })
 
-  it("does NOT register delete-image for viewer", async () => {
+  it("does NOT register more-actions for viewer", async () => {
     await mountLightbox("viewer")
     expect(findElement("exif-info")).toBeDefined()
-    expect(findElement("delete-image")).toBeUndefined()
+    expect(findElement("more-actions")).toBeUndefined()
   })
 
   it("opens EXIF panel and renders 中文 labels from API response", async () => {
@@ -220,13 +221,26 @@ describe("ImageLightbox — EXIF panel & delete", () => {
     expect(document.querySelector(".lb-exif-panel")).toBeNull()
   })
 
-  it("delete button calls DELETE + emits deleted after confirm", async () => {
+  it("delete via dropdown calls DELETE + emits deleted after confirm", async () => {
     const w = await mountLightbox("admin")
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true))
     const fetchFn = vi.fn().mockResolvedValue(response(null, 204))
     vi.stubGlobal("fetch", fetchFn)
 
-    findElement("delete-image")!.onClick!()
+    // 模拟 PhotoSwipe 工具栏中真实渲染的 ⋮ 按钮（openMoreDropdown 需要它来定位）
+    const mockBtn = document.createElement("button")
+    mockBtn.className = "pswp__button--more-actions"
+    mockBtn.getBoundingClientRect = () => ({ top: 10, bottom: 44, left: 900, right: 944, width: 44, height: 34, x: 900, y: 10 } as DOMRect)
+    document.body.appendChild(mockBtn)
+
+    // 点击 ⋮ 展开下拉菜单
+    findElement("more-actions")!.onClick!()
+    await flushPromises()
+
+    // 下拉菜单应该出现在 DOM 中，点击删除项
+    const deleteItem = document.querySelector<HTMLButtonElement>(".lb-more-dropdown-item")
+    expect(deleteItem).not.toBeNull()
+    deleteItem!.click()
     await flushPromises()
 
     expect(window.confirm).toHaveBeenCalled()
@@ -238,15 +252,30 @@ describe("ImageLightbox — EXIF panel & delete", () => {
     const events = w.emitted("deleted") ?? []
     expect(events.length).toBe(1)
     expect(events[0]).toEqual([1])
+    // 删除后下拉菜单应关闭
+    expect(document.querySelector(".lb-more-dropdown")).toBeNull()
   })
 
-  it("delete button does not fire when confirm is cancelled", async () => {
+  it("delete via dropdown does not fire when confirm is cancelled", async () => {
     const w = await mountLightbox("admin")
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(false))
     const fetchFn = vi.fn()
     vi.stubGlobal("fetch", fetchFn)
 
-    findElement("delete-image")!.onClick!()
+    // 模拟 PhotoSwipe 工具栏中真实渲染的 ⋮ 按钮
+    const mockBtn = document.createElement("button")
+    mockBtn.className = "pswp__button--more-actions"
+    mockBtn.getBoundingClientRect = () => ({ top: 10, bottom: 44, left: 900, right: 944, width: 44, height: 34, x: 900, y: 10 } as DOMRect)
+    document.body.appendChild(mockBtn)
+
+    // 点击 ⋮ 展开下拉菜单
+    findElement("more-actions")!.onClick!()
+    await flushPromises()
+
+    // 点击删除项 → confirm 取消 → 不应发送请求
+    const deleteItem = document.querySelector<HTMLButtonElement>(".lb-more-dropdown-item")
+    expect(deleteItem).not.toBeNull()
+    deleteItem!.click()
     await flushPromises()
 
     expect(fetchFn).not.toHaveBeenCalled()

@@ -37,6 +37,8 @@ let originalPswp: PhotoSwipe | null = null
 let sidePanelsEl: HTMLElement | null = null
 let exifPanelEl: HTMLElement | null = null
 let histPanelEl: HTMLElement | null = null
+// "更多操作"下拉菜单 DOM
+let moreDropdownEl: HTMLElement | null = null
 // EXIF 缓存：image_id -> exif dict（避免翻页反复请求同一张）
 const exifCache = new Map<number, Record<string, unknown>>()
 // 直方图缓存：image_id -> Histogram（RGB 256 桶）
@@ -432,6 +434,80 @@ async function onDeleteClicked() {
   pswp?.close()
 }
 
+// ---------- more dropdown ----------
+
+function getPswpRoot(): HTMLElement | null {
+  return (pswp as unknown as { template?: HTMLElement })?.template ?? null
+}
+
+function closeMoreDropdown() {
+  if (!moreDropdownEl) return
+  moreDropdownEl.remove()
+  moreDropdownEl = null
+  document.removeEventListener("click", onDocClickForMore)
+  getPswpRoot()?.classList.remove("pswp--more-open")
+}
+
+function onDocClickForMore(e: MouseEvent) {
+  if (!moreDropdownEl) return
+  const t = e.target as HTMLElement
+  // 点击下拉菜单内部或 ⋮ 按钮本身时不关闭
+  if (moreDropdownEl.contains(t)) return
+  if (t.closest(".pswp__button--more-actions")) return
+  closeMoreDropdown()
+}
+
+function openMoreDropdown() {
+  if (moreDropdownEl) return
+  const btn = document.querySelector<HTMLElement>(".pswp__button--more-actions")
+  if (!btn) return
+
+  const dropdown = document.createElement("div")
+  dropdown.className = "lb-more-dropdown"
+  dropdown.setAttribute("role", "menu")
+  dropdown.innerHTML = `
+    <button class="lb-more-dropdown-item" role="menuitem">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+        <path d="M10 11v6" />
+        <path d="M14 11v6" />
+        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      </svg>
+      <span>移入回收站</span>
+    </button>`
+
+  // 定位：对齐到 ⋮ 按钮右边缘的正下方
+  const rect = btn.getBoundingClientRect()
+  dropdown.style.position = "fixed"
+  dropdown.style.top = `${rect.bottom + 6}px`
+  dropdown.style.right = `${window.innerWidth - rect.right}px`
+
+  dropdown.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest(".lb-more-dropdown-item")) {
+      closeMoreDropdown()
+      onDeleteClicked()
+    }
+  })
+
+  document.body.appendChild(dropdown)
+  moreDropdownEl = dropdown
+  getPswpRoot()?.classList.add("pswp--more-open")
+
+  // 下一帧再绑定 outside-click，避免本次点击立即触发关闭
+  requestAnimationFrame(() => {
+    document.addEventListener("click", onDocClickForMore)
+  })
+}
+
+function toggleMoreDropdown() {
+  if (moreDropdownEl) {
+    closeMoreDropdown()
+  } else {
+    openMoreDropdown()
+  }
+}
+
 function open() {
   const idx = props.items.findIndex((it) => it.id === props.startId)
   if (idx < 0) return
@@ -450,10 +526,13 @@ function open() {
   })
   pswp.on("change", () => {
     if (pswp) emit("change", props.items[pswp.currIndex].id)
+    // 切图时自动折叠下拉菜单，避免下一张误触
+    closeMoreDropdown()
     refreshExifPanelIfOpen()
     refreshHistPanelIfOpen()
   })
   pswp.on("close", () => {
+    closeMoreDropdown()
     closeAllSidePanels()
     emit("close")
   })
@@ -515,21 +594,19 @@ function open() {
       </svg>`,
       onClick: () => openHistPanel(),
     })
-    // 删除按钮：仅 admin 可见
+    // "更多操作"折叠按钮——仅 admin 可见，点击在正下方弹出下拉菜单
     if (auth.isAdmin) {
       pswp!.ui!.registerElement({
-        name: "delete-image",
-        ariaLabel: "移入回收站",
+        name: "more-actions",
+        ariaLabel: "更多操作",
         order: 12,
         isButton: true,
-        html: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6" />
-          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-          <path d="M10 11v6" />
-          <path d="M14 11v6" />
-          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+        html: `<svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+          <circle cx="5" cy="12" r="2" />
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="19" cy="12" r="2" />
         </svg>`,
-        onClick: () => onDeleteClicked(),
+        onClick: () => toggleMoreDropdown(),
       })
     }
   })
@@ -542,6 +619,7 @@ function open() {
 onMounted(open)
 
 onUnmounted(() => {
+  closeMoreDropdown()
   closeAllSidePanels()
   originalPswp?.destroy()
   originalPswp = null
@@ -567,6 +645,46 @@ watch(
 </script>
 
 <style>
+/* ---- "更多操作"下拉菜单 ---- */
+
+/* ⋮ 按钮激活态：蓝色高亮背景，与常态形成明显区分 */
+.pswp--more-open .pswp__button--more-actions {
+  background: rgba(59, 130, 246, 0.35);
+  border-radius: 6px;
+}
+
+/* 下拉菜单容器：浮在灯箱工具栏正下方 */
+.lb-more-dropdown {
+  z-index: 100020; /* 高于侧边面板的 100010 */
+  background: rgba(24, 24, 27, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  padding: 4px;
+  min-width: 160px;
+}
+.lb-more-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #fca5a5; /* 红色调提示这是危险操作 */
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.lb-more-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.lb-more-dropdown-item:active {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 /* 侧边面板共享容器：附着在 body 顶层，右上角固定，浮在 PhotoSwipe 之上。
    内部子面板（EXIF、直方图）垂直排列，宽度一致。 */
 .lb-side-panels {
