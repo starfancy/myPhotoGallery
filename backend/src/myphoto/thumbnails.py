@@ -4,7 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from PIL import Image as PILImage, UnidentifiedImageError
+from PIL import Image as PILImage, ImageOps, UnidentifiedImageError
 
 log = logging.getLogger("myphoto.thumbnails")
 
@@ -52,7 +52,14 @@ def _render_thumb(source: str, size: int, out: Path, is_raw: bool) -> None:
 
 def _render_regular(source: str, size: int, out: Path) -> None:
     with PILImage.open(source) as im:
-        im = im.convert("RGB") if im.mode not in ("RGB", "L") else im
+        # 相机直出 JPEG/HEIC 的像素按传感器方向存储（传感器通常为横版），
+        # 竖拍仅靠 EXIF Orientation 标签标记；Pillow 不会自动旋转。必须先
+        # 按标签转正再缩放——转出的 JPEG 不带 EXIF，浏览器也无法补救。
+        # （Photoshop 等后期软件导出时已把旋转烘焙进像素、Orientation=1，
+        # 不受影响。）
+        im = ImageOps.exif_transpose(im)
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
         im.thumbnail((size, size), PILImage.Resampling.LANCZOS)
         im.save(out, "JPEG", quality=85, optimize=True)
 
@@ -66,6 +73,8 @@ def _render_raw(source: str, size: int, out: Path) -> None:
                 if thumb.format.name == "JPEG":
                     from io import BytesIO
                     with PILImage.open(BytesIO(thumb.data)) as im:
+                        # 内嵌预览 JPEG 同样带 EXIF Orientation，需先转正
+                        im = ImageOps.exif_transpose(im)
                         im.thumbnail((size, size), PILImage.Resampling.LANCZOS)
                         im.save(out, "JPEG", quality=85, optimize=True)
                     return

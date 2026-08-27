@@ -473,11 +473,29 @@ def _read_image_meta(
     with PILImage.open(path) as image:
         image.verify()
     with PILImage.open(path) as image:
-        width, height = image.size
+        width, height = _oriented_size(image)
         exif = image.getexif()
         taken_at = _taken_at_from_exif(exif)
         exif_json = _extract_exif_json(exif)
     return width, height, taken_at, exif_json
+
+
+def _oriented_size(image: PILImage.Image) -> tuple[int, int]:
+    """返回按 EXIF Orientation 转正后的 (width, height)。
+
+    相机直出图片的像素按传感器方向存储（横版），竖拍仅靠 Orientation
+    标签标记：5–8 表示 90°/270° 旋转，宽高需要交换。image.size 是未
+    旋转的像素尺寸，直接入库会让前端网格/灯箱把竖版照片按横版排版。
+    （后期软件导出时通常已把旋转烘焙进像素并置 Orientation=1。）
+    """
+    width, height = image.size
+    try:
+        orientation = image.getexif().get(0x0112)
+    except Exception:  # pragma: no cover - defensive: 缺 EXIF 不阻断扫描
+        orientation = None
+    if orientation in (5, 6, 7, 8):
+        return height, width
+    return width, height
 
 
 def _read_raw_meta(path: Path) -> tuple[int, int, int | None, str | None]:

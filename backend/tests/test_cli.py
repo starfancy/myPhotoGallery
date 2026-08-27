@@ -29,6 +29,15 @@ def _jpg_with_exif(p: Path):
     img.save(p, "JPEG", exif=exif.tobytes())
 
 
+def _jpg_oriented(p: Path, orientation: int = 6, size=(60, 40)):
+    """像素横版 + EXIF Orientation（模拟相机竖拍）。"""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    img = PILImage.new("RGB", size, (0, 0, 0))
+    exif = img.getexif()
+    exif[0x0112] = orientation
+    img.save(p, "JPEG", exif=exif.tobytes())
+
+
 def test_add_gallery_and_root_and_rescan(tmp_path):
     photos = tmp_path / "photos"
     _jpg(photos / "a.jpg")
@@ -268,3 +277,66 @@ def test_rescan_exif_missing_file_counts_as_missing(tmp_path):
     r = runner.invoke(cli, ["--config", str(cfg), "rescan-exif"])
     assert r.exit_code == 0, r.output
     assert "missing=1" in r.output
+
+
+def _read_dims(cfg: Path) -> dict[str, tuple[int | None, int | None]]:
+    from sqlalchemy import select
+
+    from myphoto.config import load_or_init
+    from myphoto.db import make_engine, make_sessionmaker
+    from myphoto.models import Image
+
+    async def _run():
+        c = load_or_init(cfg)
+        db_path = Path(c.data_dir) / "app.db"
+        engine = await make_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+        sm = await make_sessionmaker(engine)
+        async with sm() as s:
+            rows = (await s.execute(select(Image))).scalars().all()
+            out = {r.filename: (r.width, r.height) for r in rows}
+        await engine.dispose()
+        return out
+
+    return asyncio.run(_run())
+
+
+def test_rescan_exif_force_corrects_oriented_dimensions(tmp_path):
+    photos = tmp_path / "photos"
+    _jpg_oriented(photos / "v.jpg", orientation=6)  # 像素 60x40，竖拍
+    cfg = tmp_path / "config.toml"
+    runner = CliRunner()
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "H"])
+    runner.invoke(cli, [
+        "--config", str(cfg), "add-root", "H", "R", str(photos.resolve())
+    ])
+    assert runner.invoke(cli, ["--config", str(cfg), "rescan"]).exit_code == 0
+
+    # 修复后的扫描已按 Orientation 交换宽高 → (40, 60)
+    assert _read_dims(cfg) == {"v.jpg": (40, 60)}
+
+    # 模拟旧版本入库的错误宽高（未交换，横版）
+    from sqlalchemy import update
+
+    from myphoto.config import load_or_init
+    from myphoto.db import make_engine, make_sessionmaker
+    from myphoto.models import Image
+
+    async def _corrupt():
+        c = load_or_init(cfg)
+        engine = await make_engine(
+            f"sqlite+aiosqlite:///{(Path(c.data_dir) / 'app.db').as_posix()}"
+        )
+        sm = await make_sessionmaker(engine)
+        async with sm() as s:
+            await s.execute(update(Image).values(width=999, height=111))
+            await s.commit()
+        await engine.dispose()
+
+    asyncio.run(_corrupt())
+    assert _read_dims(cfg) == {"v.jpg": (999, 111)}
+
+    # rescan-exif --force 重读元数据并修正宽高
+    r = runner.invoke(cli, ["--config", str(cfg), "rescan-exif", "--force"])
+    assert r.exit_code == 0, r.output
+    assert "updated=1" in r.output
+    assert _read_dims(cfg) == {"v.jpg": (40, 60)}
