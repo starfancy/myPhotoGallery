@@ -25,8 +25,8 @@ cd frontend && pnpm install && pnpm build && cd ..
 myphoto add-gallery Home
 myphoto add-root Home Main /path/to/photos
 myphoto rescan Home
-# run
-python -m uvicorn myphoto.main:app --app-dir backend --host 0.0.0.0 --port 8080
+# run (host/port come from config.toml: 0.0.0.0:8080 by default)
+myphoto serve
 ```
 
 Open <http://localhost:8080>. The initial admin password is printed to
@@ -35,15 +35,16 @@ stdout on first startup — save it. Change it via the UI.
 Override examples:
 
 ```bash
-MYPHOTO_CONFIG=/path/to/config.toml python -m uvicorn myphoto.main:app --app-dir backend
+myphoto serve --host 127.0.0.1 --port 9000
+MYPHOTO_CONFIG=/path/to/config.toml myphoto serve   # or: myphoto --config /path/to/config.toml serve
 myphoto --config /path/to/config.toml list
 ```
 
 ## Development
 
 ```bash
-# backend (auto-reload)
-python -m uvicorn myphoto.main:app --app-dir backend --reload --host 127.0.0.1 --port 8080
+# backend (auto-reload; watches backend/ only)
+myphoto serve --reload
 
 # frontend dev server (proxies /api -> 8080)
 cd frontend && npx vite

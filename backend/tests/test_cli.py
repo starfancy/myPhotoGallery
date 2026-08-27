@@ -110,6 +110,53 @@ def test_reset_password_unknown_user(tmp_path):
     assert "user 'nobody' not found" in r.output
 
 
+def test_serve_uses_config_host_port_and_pins_config_env(tmp_path, monkeypatch):
+    import os
+
+    import uvicorn
+
+    cfg = tmp_path / "config.toml"
+    calls: list[tuple] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: calls.append((a, kw)))
+    monkeypatch.delenv("MYPHOTO_CONFIG", raising=False)
+
+    r = CliRunner().invoke(cli, ["--config", str(cfg), "serve"])
+    assert r.exit_code == 0, r.output
+
+    args, kw = calls[0]
+    assert args[0] == "myphoto.main:app"
+    assert kw["host"] == "0.0.0.0"  # config.toml template default
+    assert kw["port"] == 8080
+    assert kw["reload"] is False
+    assert kw["reload_dirs"] is None
+    # resolved (absolute) config path follows uvicorn / reload subprocesses
+    assert os.environ["MYPHOTO_CONFIG"] == str(cfg.resolve())
+
+
+def test_serve_overrides_host_port_and_reload(tmp_path, monkeypatch):
+    import uvicorn
+
+    cfg = tmp_path / "config.toml"
+    calls: list[dict] = []
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: calls.append(kw))
+
+    r = CliRunner().invoke(
+        cli,
+        ["--config", str(cfg), "serve", "--host", "127.0.0.1", "--port", "9999", "--reload"],
+    )
+    assert r.exit_code == 0, r.output
+
+    kw = calls[0]
+    assert kw["host"] == "127.0.0.1"
+    assert kw["port"] == 9999
+    assert kw["reload"] is True
+    # reload watches the backend/ tree only, not cwd (which may be project root)
+    assert kw["reload_dirs"] is not None
+    assert len(kw["reload_dirs"]) == 1
+    assert Path(kw["reload_dirs"][0]).is_dir()
+    assert (Path(kw["reload_dirs"][0]) / "src" / "myphoto").is_dir()
+
+
 def test_cli_passes_explicit_config(tmp_path, monkeypatch):
     cfg = tmp_path / "config.toml"
     seen: list[str | None] = []

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
 import time
 from pathlib import Path
 
 import click
+import uvicorn
 from sqlalchemy import func, select
 
 from myphoto.audit import write_audit
@@ -288,6 +290,28 @@ def reset_password(ctx, username, password):
             await engine.dispose()
 
     _run(_run_it())
+
+
+@cli.command("serve")
+@click.option("--host", default=None, help="覆盖 config.toml 中的 listen_host")
+@click.option("--port", default=None, type=int, help="覆盖 config.toml 中的 listen_port")
+@click.option("--reload", "reload", is_flag=True, default=False, help="开发模式：代码变更自动重启")
+@click.pass_context
+def serve(ctx, host, port, reload):
+    """启动 Web 服务；host/port 默认取 config.toml [app] 段。"""
+    cfg_path = resolve_config_path(ctx.obj["config_path"])
+    cfg = load_or_init(cfg_path)
+    # main.py 在 import 时读 MYPHOTO_CONFIG；--reload 的子进程会重新 import app，
+    # 把解析后的绝对路径钉进环境变量，保证自定义 --config 在 reload 后依然生效
+    os.environ["MYPHOTO_CONFIG"] = str(cfg_path)
+    uvicorn.run(
+        "myphoto.main:app",
+        host=host or cfg.listen_host,
+        port=port or cfg.listen_port,
+        reload=reload,
+        # 只监视 backend/ 目录，避免从项目根启动时 watch .venv、frontend/node_modules
+        reload_dirs=[str(Path(__file__).resolve().parents[2])] if reload else None,
+    )
 
 
 # Console-script entry point declared in pyproject.toml (`myphoto = "myphoto.cli:main"`).
