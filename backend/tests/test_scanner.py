@@ -249,6 +249,35 @@ def test_process_file_returns_none_exif_for_plain_jpg(tmp_path):
     assert exif_json is None
 
 
+def _jpg_oriented(path: Path, orientation: int, size=(60, 40)) -> Path:
+    """像素为横版 size、带指定 EXIF Orientation 的 JPEG（模拟相机竖拍）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = PILImage.new("RGB", size, (0, 0, 0))
+    exif = img.getexif()
+    exif[0x0112] = orientation
+    img.save(path, "JPEG", exif=exif.tobytes())
+    return path
+
+
+def test_read_image_meta_swaps_dims_for_rotated_orientation(tmp_path):
+    # Orientation 5–8（90°/270° 旋转）：入库宽高必须交换为竖版
+    for orientation in (5, 6, 7, 8):
+        w, h, _taken, exif_json = _read_image_meta(
+            _jpg_oriented(tmp_path / f"o{orientation}.jpg", orientation)
+        )
+        assert (w, h) == (40, 60), f"orientation={orientation}"
+        assert json.loads(exif_json)["Orientation"] == orientation
+
+
+def test_read_image_meta_keeps_dims_for_upright_orientation(tmp_path):
+    # Orientation 1/3（0°/180°）：宽高不交换
+    for orientation in (1, 3):
+        w, h, _taken, _exif = _read_image_meta(
+            _jpg_oriented(tmp_path / f"o{orientation}.jpg", orientation)
+        )
+        assert (w, h) == (60, 40), f"orientation={orientation}"
+
+
 def test_extract_exif_json_serializes_only_whitelist(tmp_path):
     """确保未纳入白名单的 tag 不会被序列化。"""
     p = tmp_path / "extra.jpg"

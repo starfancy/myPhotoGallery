@@ -145,11 +145,13 @@ def rescan(ctx, gallery_name, root_label):
 )
 @click.pass_context
 def rescan_exif(ctx, gallery_name, root_label, force):
-    """回填已入库图片的 exif_json 字段。
+    """回填已入库图片的 exif_json 字段，并修正 width/height。
 
-    与 [rescan] 不同：不改 sha1/mtime/size，也不重算目录 count；只逐张
-    重新读一次 EXIF 并更新 images 表。默认只处理 `exif_json IS NULL` 的
-    图片；`--force` 全量重跑。图片文件不存在或读取失败时跳过。
+    与 [rescan] 不同：不改 sha1/mtime/size/taken_at，也不重算目录 count；
+    只逐张重新读一次元数据，更新 images 表的 exif_json 与宽高（宽高按
+    EXIF Orientation 转正，用于修复历史入库的竖版照片宽高颠倒）。默认只
+    处理 `exif_json IS NULL` 的图片；`--force` 全量重跑。图片文件不存在
+    或读取失败时跳过。
     """
 
     async def _run_it():
@@ -218,8 +220,9 @@ async def _rescan_exif_root(
                 missing += 1
                 continue
             try:
-                # 只用 EXIF 结果；sha1/w/h/taken_at 已在 rescan 时算过，本命令
-                # 只回填 exif_json，避免把 taken_at 意外覆盖为空
+                # sha1/taken_at 已在 rescan 时算过，本命令不覆盖（避免把
+                # taken_at 意外置空）；exif_json 回填，width/height 顺带按
+                # EXIF Orientation 修正（历史入库的竖版照片宽高可能颠倒）。
                 _sha1, _w, _h, _taken, exif_json = await asyncio.to_thread(
                     _process_file,
                     path,
@@ -233,6 +236,9 @@ async def _rescan_exif_root(
                 # 无 EXIF 又本就是空，无需变更；也不算 "updated"
                 continue
             image.exif_json = exif_json
+            if _w and _h:
+                image.width = _w
+                image.height = _h
             updated += 1
         await s.commit()
     return updated, skipped, missing
