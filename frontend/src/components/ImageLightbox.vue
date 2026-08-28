@@ -137,7 +137,7 @@ function openOriginal() {
   originalPswp = new PhotoSwipe({
     dataSource: [{
       src: url,
-      // 先用已经加载好的 1600 缩略图作为占位，等原图下载后自动切换
+      // 使用的 1600 缩略图作为占位，等原图下载后自动切换
       msrc: `/api/thumb/${it.sha1}?size=1600`,
       width: it.width ?? 1600,
       height: it.height ?? 1200,
@@ -524,12 +524,20 @@ function open() {
     appendToEl: document.body,
     showHideAnimationType: "fade",
   })
+  // 序号右侧的文件名标签（uiRegister 时创建元素）
+  let filenameEl: HTMLElement | null = null
+  const updateFilenameLabel = () => {
+    if (!filenameEl || !pswp) return
+    const it = props.items[pswp.currIndex]
+    filenameEl.textContent = it ? it.filename : ""
+  }
   pswp.on("change", () => {
     if (pswp) emit("change", props.items[pswp.currIndex].id)
     // 切图时自动折叠下拉菜单，避免下一张误触
     closeMoreDropdown()
     refreshExifPanelIfOpen()
     refreshHistPanelIfOpen()
+    updateFilenameLabel()
   })
   pswp.on("close", () => {
     closeMoreDropdown()
@@ -537,6 +545,18 @@ function open() {
     emit("close")
   })
   pswp.on("uiRegister", () => {
+    // 序号（内置 counter，order=5）右侧显示当前图片文件名
+    pswp!.ui!.registerElement({
+      name: "filename-label",
+      order: 6,
+      isButton: false,
+      tagName: "span",
+      className: "pswp__filename-label",
+      onInit: (el) => {
+        filenameEl = el
+        updateFilenameLabel()
+      },
+    })
     // 在原页弹窗中显示 100% 原图（默认操作）
     pswp!.ui!.registerElement({
       name: "original-image",
@@ -645,6 +665,26 @@ watch(
 </script>
 
 <style>
+/* ---- 序号右侧的文件名标签 ---- */
+
+/* 视觉对齐内置 .pswp__counter（同字号/行高/颜色）；margin-inline-start
+   留出与序号之间约一个空格的间距，长文件名截断省略 */
+.pswp__filename-label {
+  height: 30px;
+  margin-top: 15px;
+  margin-inline-start: 12px;
+  font-size: 14px;
+  line-height: 30px;
+  color: var(--pswp-icon-color);
+  text-shadow: 1px 1px 3px var(--pswp-icon-color-secondary);
+  opacity: 0.85;
+  user-select: none;
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- "更多操作"下拉菜单 ---- */
 
 /* ⋮ 按钮激活态：蓝色高亮背景，与常态形成明显区分 */
