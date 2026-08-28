@@ -109,7 +109,7 @@
         </section>
 
         <!-- Manage galleries link (moved to end per plan wording) -->
-        <section class="flex flex-wrap gap-2">
+        <section class="flex flex-wrap items-center gap-2">
           <router-link to="/admin/galleries"
             class="inline-flex items-center rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500">
             管理图库
@@ -122,6 +122,16 @@
             class="inline-flex items-center rounded bg-neutral-700 px-3 py-2 text-sm hover:bg-neutral-600">
             用户管理
           </router-link>
+          <button type="button"
+                  class="inline-flex items-center rounded bg-red-700 px-3 py-2 text-sm hover:bg-red-600 disabled:opacity-50"
+                  :disabled="purging"
+                  @click="purgeThumbCache">
+            {{ purging ? "清理中..." : "清理缩略图缓存" }}
+          </button>
+          <span v-if="purgeError" class="text-sm text-red-400">{{ purgeError }}</span>
+          <span v-else-if="purgeDone" class="text-sm text-green-400">
+            已清理，缩略图将在下次浏览时自动重新生成
+          </span>
         </section>
       </template>
     </main>
@@ -131,7 +141,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
-import { apiGet, HttpError } from "../api"
+import { apiGet, apiPost, HttpError } from "../api"
 
 interface Stats {
   images: number
@@ -187,6 +197,32 @@ async function loadStatus(silent = false) {
     if (!silent) loading.value = false
   }
   schedulePoll()
+}
+
+// ---- 清理缩略图缓存 ----
+// 只删服务端 .cache/thumbnails，不碰原图；下次浏览时按新代码懒重新生成。
+// 注意：浏览器对缩略图是 immutable 长缓存，清理后用户仍需硬刷新一次。
+const purging = ref(false)
+const purgeError = ref("")
+const purgeDone = ref(false)
+
+async function purgeThumbCache() {
+  if (!window.confirm(
+    "确定清空缩略图缓存？\n\n不会删除任何原图；下次浏览照片时缩略图会自动重新生成（首次加载会稍慢）。",
+  )) return
+  purging.value = true
+  purgeError.value = ""
+  purgeDone.value = false
+  try {
+    await apiPost("/api/admin/thumb-cache/purge")
+    purgeDone.value = true
+    // 静默刷新，让审计列表出现本次 thumb_cache_purge 记录
+    await loadStatus(true)
+  } catch (err) {
+    purgeError.value = (err as HttpError).message || "清理失败"
+  } finally {
+    purging.value = false
+  }
 }
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
