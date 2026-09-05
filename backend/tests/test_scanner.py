@@ -417,7 +417,10 @@ async def test_progress_advances_through_phases(env, monkeypatch):
     running = scanner.get_status(root_id)
     assert running["phase"] == "hashing"
     assert running["total_files"] == 3
-    assert running["processed_files"] == 0
+    # The first worker blocks on the gate; the other two files may already
+    # have finished on the concurrent pool, so the invariant while hashing is
+    # in flight is "not all files processed" rather than an exact count.
+    assert running["processed_files"] < 3
     assert running["current_path"] is not None
     assert running["started_at"] is not None
 
@@ -501,3 +504,40 @@ async def test_concurrent_write_succeeds_during_hashing(tmp_path, monkeypatch):
         await asyncio.wait_for(scan_task, timeout=10)
     finally:
         await engine.dispose()
+
+
+async def test_hashing_phase_processes_files_concurrently(env, monkeypatch):
+    """Hash/EXIF work runs on a bounded pool: N files must be in flight at the
+    same time. A threading.Barrier that all N workers must reach together
+    breaks (and the scan ends with no indexed images) if the phase regresses
+    to serial execution."""
+    root_dir, sm, root_id = env
+
+    import myphoto.scanner as sc
+
+    workers = sc._HASH_WORKERS
+    if workers < 2:
+        pytest.skip("hash pool has fewer than 2 workers on this host")
+    n = min(workers, 4)
+    for i in range(n):
+        _jpg(root_dir / f"{i}.jpg")
+
+    barrier = threading.Barrier(n, timeout=10)
+    real_process = sc._process_file
+
+    def parallel_process(path, is_raw):
+        # Raises BrokenBarrierError if the N files are never processed at once
+        # (i.e. execution serialised); the scanner then logs and skips every
+        # file, so the indexed-count assertion below fails.
+        barrier.wait()
+        return real_process(path, is_raw)
+
+    monkeypatch.setattr(sc, "_process_file", parallel_process)
+
+    await asyncio.wait_for(Scanner(sm).scan_root_now(root_id), timeout=30)
+
+    async with sm() as session:
+        indexed = (
+            await session.execute(select(Image).where(Image.root_id == root_id))
+        ).scalars().all()
+    assert len(indexed) == n

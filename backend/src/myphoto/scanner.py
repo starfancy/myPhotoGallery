@@ -26,6 +26,13 @@ log = logging.getLogger("myphoto.scanner")
 # admin writes are not blocked for the whole scan.
 _SCAN_BATCH_SIZE = 200
 
+# Max files hashed/EXIF-read concurrently during a scan. hashlib and the
+# Pillow/rawpy decoders release the GIL around their heavy work, so wall-clock
+# scales with cores up to this cap. Kept small to avoid seek thrashing on
+# HDD/network mounts and to leave default-executor threads for other
+# asyncio.to_thread callers.
+_HASH_WORKERS = min(8, (os.cpu_count() or 4))
+
 try:
     import pillow_heif  # type: ignore[import-not-found]
 
@@ -249,11 +256,14 @@ class Scanner:
             }
 
         # --- Phase 2: hash/EXIF work OUTSIDE any transaction ---
+        # Files with unchanged (mtime, size) keep their stored sha1/EXIF and
+        # skip the heavy read entirely; the rest are processed concurrently on
+        # a bounded worker pool (see _HASH_WORKERS).
         status.phase = "hashing"
         records: list[_ScanRecord] = []
         indexed_paths: set[str] = set()
+        pending: list[_WalkedFile] = []
         for relative_path, walked in walked_files.items():
-            status.current_path = relative_path
             existing = existing_images.get(relative_path)
             unchanged = (
                 existing is not None
@@ -266,7 +276,31 @@ class Scanner:
                     sha1=None, width=None, height=None,
                     taken_at=None, exif_json=None,
                 ))
+                indexed_paths.add(relative_path)
             else:
+                pending.append(walked)
+
+        # Unchanged files count as already processed; workers bump the counter
+        # as they finish so live progress keeps advancing during the pool phase.
+        status.processed_files = len(records)
+        # Show the first pending file synchronously: between phase="hashing"
+        # and the first worker step there is otherwise an await gap where the
+        # progress UI would report hashing with no current file.
+        if pending:
+            status.current_path = pending[0].relative_path
+        pool = asyncio.Semaphore(_HASH_WORKERS)
+
+        async def _hash_one(
+            walked: _WalkedFile,
+        ) -> _ScanRecord | tuple[_WalkedFile, BaseException]:
+            """Hash + read EXIF for one file on a worker thread.
+
+            Per-file failures are returned (not raised) so one unreadable image
+            cannot abort the scan; CancelledError is not an Exception subclass
+            and propagates, which lets gather cancel the whole pool.
+            """
+            async with pool:
+                status.current_path = walked.relative_path
                 try:
                     sha1, width, height, taken_at, exif_json = await asyncio.to_thread(
                         _process_file,
@@ -274,16 +308,24 @@ class Scanner:
                         classify(walked.filename) == "raw",
                     )
                 except Exception as exc:
-                    log.warning("skipping unreadable image %s: %s", walked.path, exc)
+                    return walked, exc
+                finally:
                     status.processed_files += 1
-                    continue
-                records.append(_ScanRecord(
-                    walked=walked, changed=True,
-                    sha1=sha1, width=width, height=height,
-                    taken_at=taken_at, exif_json=exif_json,
-                ))
-            indexed_paths.add(relative_path)
-            status.processed_files += 1
+            return _ScanRecord(
+                walked=walked, changed=True,
+                sha1=sha1, width=width, height=height,
+                taken_at=taken_at, exif_json=exif_json,
+            )
+
+        # gather preserves input order, so records stay in walk order.
+        results = await asyncio.gather(*(_hash_one(walked) for walked in pending))
+        for outcome in results:
+            if isinstance(outcome, tuple):
+                walked, exc = outcome
+                log.warning("skipping unreadable image %s: %s", walked.path, exc)
+                continue
+            records.append(outcome)
+            indexed_paths.add(outcome.walked.relative_path)
         status.current_path = None
 
         # --- Phase 3a: create/update folders in one short write txn ---
@@ -459,12 +501,14 @@ def _process_file(
     return sha1, width, height, taken_at, exif_json
 
 
-def _sha1_of(path: Path, buffer_size: int = 64 * 1024) -> str:
-    digest = hashlib.sha1()
+def _sha1_of(path: Path) -> str:
+    # hashlib.file_digest (3.11+) streams through a 256 KiB readinto buffer —
+    # far fewer read syscalls and no per-chunk bytes allocation than a manual
+    # 64 KiB read loop. Output is the same SHA-1 either way; like the loop it
+    # runs off the event loop via asyncio.to_thread and releases the GIL
+    # during hashing.
     with path.open("rb") as file:
-        while chunk := file.read(buffer_size):
-            digest.update(chunk)
-    return digest.hexdigest()
+        return hashlib.file_digest(file, "sha1").hexdigest()
 
 
 def _read_image_meta(
