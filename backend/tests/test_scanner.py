@@ -541,3 +541,16 @@ async def test_hashing_phase_processes_files_concurrently(env, monkeypatch):
             await session.execute(select(Image).where(Image.root_id == root_id))
         ).scalars().all()
     assert len(indexed) == n
+
+
+async def test_scanner_hash_workers_override(env):
+    """并发数可由配置 ([scanner].hash_workers) 覆盖；None/非正数回退源码默认。"""
+    import myphoto.scanner as sc
+
+    _root_dir, sm, _root_id = env
+
+    assert Scanner(sm)._hash_workers == sc._HASH_WORKERS
+    assert Scanner(sm, hash_workers=None)._hash_workers == sc._HASH_WORKERS
+    assert Scanner(sm, hash_workers=0)._hash_workers == sc._HASH_WORKERS
+    assert Scanner(sm, hash_workers=-2)._hash_workers == sc._HASH_WORKERS
+    assert Scanner(sm, hash_workers=3)._hash_workers == 3

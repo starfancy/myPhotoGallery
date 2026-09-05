@@ -37,7 +37,7 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         if created and pw:
             # printed once to stdout so operator can grab it
             print(f"[myphoto] initial admin created. username=admin password={pw}", flush=True)
-        scanner = Scanner(sm)
+        scanner = Scanner(sm, hash_workers=cfg.scanner_hash_workers)
         await scanner.start()
         async with sm() as session:
             roots = (
