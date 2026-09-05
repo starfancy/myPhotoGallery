@@ -26,11 +26,12 @@ log = logging.getLogger("myphoto.scanner")
 # admin writes are not blocked for the whole scan.
 _SCAN_BATCH_SIZE = 200
 
-# Max files hashed/EXIF-read concurrently during a scan. hashlib and the
-# Pillow/rawpy decoders release the GIL around their heavy work, so wall-clock
-# scales with cores up to this cap. Kept small to avoid seek thrashing on
-# HDD/network mounts and to leave default-executor threads for other
-# asyncio.to_thread callers.
+# Source-default cap on files hashed/EXIF-read concurrently during a scan.
+# hashlib and the Pillow/rawpy decoders release the GIL around their heavy
+# work, so wall-clock scales with cores up to this cap. Kept small to avoid
+# seek thrashing on HDD/network mounts and to leave default-executor threads
+# for other asyncio.to_thread callers. Config ([scanner].hash_workers in
+# config.toml) overrides this; see Scanner.__init__.
 _HASH_WORKERS = min(8, (os.cpu_count() or 4))
 
 try:
@@ -111,8 +112,15 @@ class _ScanRecord:
 
 
 class Scanner:
-    def __init__(self, sessionmaker):
+    def __init__(self, sessionmaker, hash_workers: int | None = None):
         self._sm = sessionmaker
+        # [scanner].hash_workers override from config.toml; None/non-positive
+        # falls back to the source default _HASH_WORKERS.
+        self._hash_workers = (
+            hash_workers
+            if isinstance(hash_workers, int) and hash_workers >= 1
+            else _HASH_WORKERS
+        )
         self._queue: asyncio.Queue[int] = asyncio.Queue()
         self._enqueued: set[int] = set()
         self._worker: asyncio.Task[None] | None = None
@@ -258,7 +266,8 @@ class Scanner:
         # --- Phase 2: hash/EXIF work OUTSIDE any transaction ---
         # Files with unchanged (mtime, size) keep their stored sha1/EXIF and
         # skip the heavy read entirely; the rest are processed concurrently on
-        # a bounded worker pool (see _HASH_WORKERS).
+        # a bounded worker pool (size from config [scanner].hash_workers,
+        # defaulting to the source constant _HASH_WORKERS).
         status.phase = "hashing"
         records: list[_ScanRecord] = []
         indexed_paths: set[str] = set()
@@ -288,7 +297,7 @@ class Scanner:
         # progress UI would report hashing with no current file.
         if pending:
             status.current_path = pending[0].relative_path
-        pool = asyncio.Semaphore(_HASH_WORKERS)
+        pool = asyncio.Semaphore(self._hash_workers)
 
         async def _hash_one(
             walked: _WalkedFile,

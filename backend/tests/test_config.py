@@ -155,3 +155,50 @@ def test_default_template_contains_security_section(tmp_path):
     assert data["security"]["trusted_proxies"] == []
     assert data["security"]["login_lockout_threshold"] == 5
     assert data["security"]["login_lockout_minutes"] == 15
+
+
+# ---- [scanner] section ----
+
+def test_scanner_defaults_when_missing(tmp_path):
+    """未指定 [scanner] 段时 hash_workers 为 None（沿用源码内置默认）。"""
+    p = tmp_path / "config.toml"
+    p.write_text(
+        '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n',
+        encoding="utf-8",
+    )
+    cfg = load_or_init(p)
+    assert cfg.scanner_hash_workers is None
+
+
+def test_scanner_section_is_read(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text(
+        '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n'
+        '[scanner]\nhash_workers = 4\n',
+        encoding="utf-8",
+    )
+    cfg = load_or_init(p)
+    assert cfg.scanner_hash_workers == 4
+
+
+def test_scanner_non_positive_workers_falls_back_to_none(tmp_path):
+    """0 或负数视为未配置，回退源码默认。"""
+    p = tmp_path / "config.toml"
+    p.write_text(
+        '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n'
+        '[scanner]\nhash_workers = 0\n',
+        encoding="utf-8",
+    )
+    cfg = load_or_init(p)
+    assert cfg.scanner_hash_workers is None
+
+
+def test_default_template_contains_scanner_section(tmp_path):
+    """首启动自动生成的 config.toml 应包含 [scanner] 段；key 默认注释掉，
+    由源码默认值生效。"""
+    p = tmp_path / "config.toml"
+    load_or_init(p)
+    data = tomllib.loads(p.read_text(encoding="utf-8"))
+    assert "scanner" in data
+    assert data["scanner"].get("hash_workers") is None
+    assert load_or_init(p).scanner_hash_workers is None

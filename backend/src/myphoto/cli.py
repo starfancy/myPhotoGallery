@@ -111,7 +111,7 @@ def add_root(ctx, gallery_name, label, absolute_path):
 @click.pass_context
 def rescan(ctx, gallery_name, root_label):
     async def _run_it():
-        engine, sm, _ = await _bootstrap(ctx.obj["config_path"])
+        engine, sm, cfg = await _bootstrap(ctx.obj["config_path"])
         try:
             async with sm() as s:
                 q = select(GalleryRoot).where(GalleryRoot.enabled == 1)
@@ -123,7 +123,7 @@ def rescan(ctx, gallery_name, root_label):
                 if root_label:
                     q = q.where(GalleryRoot.label == root_label)
                 roots = (await s.execute(q)).scalars().all()
-            scanner = Scanner(sm)
+            scanner = Scanner(sm, hash_workers=cfg.scanner_hash_workers)
             for r in roots:
                 click.echo(f"scanning {r.label} ({r.absolute_path})...")
                 await scanner.scan_root_now(r.id)

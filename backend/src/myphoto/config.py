@@ -40,6 +40,8 @@ class AppConfig:
     trusted_proxies: list[str]        # CIDR / 单 IP；空 = 不信任 X-Forwarded-For
     login_lockout_threshold: int      # 默认 5
     login_lockout_minutes: int        # 默认 15
+    # [scanner] section
+    scanner_hash_workers: int | None  # 扫描并发哈希/EXIF 线程数；None = 源码默认 min(8, CPU 核数)
 
 
 _DEFAULT_TEMPLATE = """\
@@ -59,6 +61,12 @@ purge_minute = 30
 trusted_proxies = []
 login_lockout_threshold = 5
 login_lockout_minutes = 15
+
+[scanner]
+# 扫描时并发计算 sha1 / 读取 EXIF 的工作线程数。
+# 保持注释（默认）= 源码内置 min(8, CPU 核数)；
+# 机械硬盘或网络盘（SMB/NFS）随机读抖动时可调小，如 2。
+# hash_workers = 8
 """
 
 
@@ -74,6 +82,18 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
     app_section = data.get("app", {})
     trash_section = data.get("trash", {})
     security_section = data.get("security", {})
+    scanner_section = data.get("scanner", {})
+
+    # None / 缺失 / 非正数 → None，表示沿用源码内置默认（scanner._HASH_WORKERS）。
+    hash_workers_raw = scanner_section.get("hash_workers")
+    try:
+        scanner_hash_workers = (
+            int(hash_workers_raw) if hash_workers_raw is not None else None
+        )
+    except (TypeError, ValueError):
+        scanner_hash_workers = None
+    if scanner_hash_workers is not None and scanner_hash_workers < 1:
+        scanner_hash_workers = None
 
     # ---- data_dir resolution ----
     raw = app_section.get("data_dir")
@@ -100,4 +120,5 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
         trusted_proxies=list(security_section.get("trusted_proxies", [])),
         login_lockout_threshold=int(security_section.get("login_lockout_threshold", 5)),
         login_lockout_minutes=int(security_section.get("login_lockout_minutes", 15)),
+        scanner_hash_workers=scanner_hash_workers,
     )
