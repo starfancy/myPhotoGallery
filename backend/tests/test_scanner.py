@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -16,6 +18,7 @@ from myphoto.scanner import (
     _extract_exif_json,
     _process_file,
     _read_image_meta,
+    _sha1_of,
 )
 
 
@@ -541,6 +544,84 @@ async def test_hashing_phase_processes_files_concurrently(env, monkeypatch):
             await session.execute(select(Image).where(Image.root_id == root_id))
         ).scalars().all()
     assert len(indexed) == n
+
+
+def test_sha1_of_matches_sha1_of_contents(tmp_path):
+    """顺序读打开方式不得改变哈希结果。"""
+    import myphoto.scanner as sc
+
+    payload = b"sequential scan hint " * 5000
+    p = tmp_path / "a.jpg"
+    p.write_bytes(payload)
+    assert _sha1_of(p) == hashlib.sha1(payload).hexdigest()
+
+    empty = tmp_path / "empty.jpg"
+    empty.write_bytes(b"")
+    assert _sha1_of(empty) == hashlib.sha1(b"").hexdigest()
+
+
+def test_sha1_open_carries_sequential_hint(tmp_path, monkeypatch):
+    """打开标志必须携带平台可用的顺序读提示。"""
+    import myphoto.scanner as sc
+
+    p = tmp_path / "a.jpg"
+    p.write_bytes(b"x" * 100_000)
+
+    captured: dict = {}
+    real_open = os.open
+
+    def spy_open(path, flags, *args, **kwargs):
+        captured["flags"] = flags
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(sc.os, "open", spy_open)
+    _sha1_of(p)
+
+    assert captured["flags"] & os.O_RDONLY == os.O_RDONLY
+    # Windows: CPython's pseudo-flag O_SEQUENTIAL maps to
+    # FILE_FLAG_SEQUENTIAL_SCAN; Linux uses posix_fadvise instead.
+    if hasattr(os, "O_SEQUENTIAL"):
+        assert captured["flags"] & os.O_SEQUENTIAL
+
+
+def test_sha1_uses_posix_fadvise_sequential(tmp_path, monkeypatch):
+    """Linux 上应以 POSIX_FADV_SEQUENTIAL 通知内核预读。"""
+    import myphoto.scanner as sc
+
+    if not hasattr(os, "posix_fadvise"):
+        pytest.skip("posix_fadvise not available on this platform")
+
+    p = tmp_path / "a.jpg"
+    p.write_bytes(b"x" * 100_000)
+    calls = []
+
+    def spy_fadvise(fd, offset, length, advice):
+        calls.append((offset, length, advice))
+        return None  # advisory; don't touch the real fd state
+
+    monkeypatch.setattr(sc.os, "posix_fadvise", spy_fadvise)
+    _sha1_of(p)
+
+    # (offset=0, len=0) means the advice applies to the whole file
+    assert calls == [(0, 0, os.POSIX_FADV_SEQUENTIAL)]
+
+
+def test_sha1_sequential_fadvise_failure_is_non_fatal(tmp_path, monkeypatch):
+    """posix_fadvise 被文件系统拒绝（OSError）时仍能正常算出哈希。"""
+    import myphoto.scanner as sc
+
+    if not hasattr(os, "posix_fadvise"):
+        pytest.skip("posix_fadvise not available on this platform")
+
+    p = tmp_path / "a.jpg"
+    payload = b"abc" * 1000
+    p.write_bytes(payload)
+
+    def boom(fd, offset, length, advice):
+        raise OSError("inadvisable filesystem")
+
+    monkeypatch.setattr(sc.os, "posix_fadvise", boom)
+    assert _sha1_of(p) == hashlib.sha1(payload).hexdigest()
 
 
 async def test_scanner_hash_workers_override(env):

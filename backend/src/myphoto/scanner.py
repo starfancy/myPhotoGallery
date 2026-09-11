@@ -510,13 +510,43 @@ def _process_file(
     return sha1, width, height, taken_at, exif_json
 
 
+def _open_sequential(path: Path):
+    """Open a file for a single start-to-finish streaming read.
+
+    Hints the OS cache manager to read ahead aggressively rather than
+    demand-paging each 256 KiB hash chunk: FILE_FLAG_SEQUENTIAL_SCAN on
+    Windows (CPython exposes it as os.O_SEQUENTIAL) and
+    posix_fadvise(SEQUENTIAL) on Linux. With hash_workers=1 on mechanical
+    disks this keeps the drive streaming contiguous sectors instead of
+    alternating short reads and seeks; it is harmless on SSDs. Caller is
+    responsible for closing the returned file.
+    """
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_SEQUENTIAL", 0))
+    try:
+        fadvise = getattr(os, "posix_fadvise", None)
+        if fadvise is not None:
+            try:
+                fadvise(fd, 0, 0, os.POSIX_FADV_SEQUENTIAL)
+            except OSError:
+                # Advisory only; some filesystems (e.g. certain network mounts)
+                # reject it — hashing with a plain open must still work.
+                pass
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        # fdopen takes ownership of the fd only on success; if it (or the
+        # fadvise wrapper above) failed, the fd would otherwise leak.
+        os.close(fd)
+        raise
+
+
 def _sha1_of(path: Path) -> str:
     # hashlib.file_digest (3.11+) streams through a 256 KiB readinto buffer —
     # far fewer read syscalls and no per-chunk bytes allocation than a manual
     # 64 KiB read loop. Output is the same SHA-1 either way; like the loop it
     # runs off the event loop via asyncio.to_thread and releases the GIL
-    # during hashing.
-    with path.open("rb") as file:
+    # during hashing. The sequential-open hint helps mechanical disks keep
+    # reading ahead instead of seeking between chunks (see _open_sequential).
+    with _open_sequential(path) as file:
         return hashlib.file_digest(file, "sha1").hexdigest()
 
 
