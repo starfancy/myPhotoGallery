@@ -178,6 +178,52 @@ def test_images_cursor_pagination_no_duplicates(client_with_many_images):
     assert page2_names == ["img03.jpg", "img04.jpg", "img05.jpg"]
 
 
+def test_images_offset_pagination(client_with_many_images):
+    c, gid, rid = client_with_many_images
+
+    # 第一页
+    r1 = c.get(
+        f"/api/galleries/{gid}/roots/{rid}/images",
+        params={"path": "batch", "sort": "name_asc", "limit": 3, "offset": 0},
+    )
+    assert r1.status_code == 200
+    body1 = r1.json()
+    assert [i["filename"] for i in body1["items"]] == [
+        "img00.jpg", "img01.jpg", "img02.jpg",
+    ]
+    # offset 模式返回总数（游标同时返回，前端忽略）
+    assert body1["total"] == 12
+
+    # 第二页
+    r2 = c.get(
+        f"/api/galleries/{gid}/roots/{rid}/images",
+        params={"path": "batch", "sort": "name_asc", "limit": 3, "offset": 3},
+    )
+    body2 = r2.json()
+    assert [i["filename"] for i in body2["items"]] == [
+        "img03.jpg", "img04.jpg", "img05.jpg",
+    ]
+    assert body2["total"] == 12
+
+    # offset 越过总数：空页但总数仍在
+    r3 = c.get(
+        f"/api/galleries/{gid}/roots/{rid}/images",
+        params={"path": "batch", "limit": 3, "offset": 12},
+    )
+    body3 = r3.json()
+    assert body3["items"] == []
+    assert body3["total"] == 12
+
+
+def test_images_negative_offset_rejected(client_with_many_images):
+    c, gid, rid = client_with_many_images
+    r = c.get(
+        f"/api/galleries/{gid}/roots/{rid}/images",
+        params={"path": "batch", "offset": -1},
+    )
+    assert r.status_code == 422
+
+
 def test_unauthenticated_blocked(tmp_path):
     app = build_app(config_path=str(tmp_path / "config.toml"))
     with TestClient(app) as c:

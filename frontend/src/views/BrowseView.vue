@@ -25,15 +25,17 @@
       </div>
 
       <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid" />
-      <JustifiedGrid v-if="images.length" :items="images" :can-load-more="!!nextCursor"
+      <JustifiedGrid v-if="images.length" :items="images"
                      :selection-mode="selectionMode"
                      :selected-ids="selectedIds"
-                     @open="onOpen" @load-more="onLoadMore"
+                     @open="onOpen"
                      @menu-action="onGridMenuAction"
                      @toggle-select="onToggleSelect" />
       <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-neutral-500">
         此目录暂无图片
       </div>
+      <PaginationBar v-if="totalPages > 1" :page="page" :total-pages="totalPages"
+                     @change="changePage" />
 
       <!-- 选择模式底部浮动工具条 -->
       <div v-if="selectionMode"
@@ -67,9 +69,10 @@ import AppHeader from "../components/AppHeader.vue"
 import Breadcrumb from "../components/Breadcrumb.vue"
 import SubfolderStrip from "../components/SubfolderStrip.vue"
 import JustifiedGrid from "../components/JustifiedGrid.vue"
+import PaginationBar from "../components/PaginationBar.vue"
 import ImageLightbox from "../components/ImageLightbox.vue"
 import { apiGet, apiDelete, apiPost, HttpError } from "../api"
-import { useBrowseStore, type ImageRow } from "../stores/browse"
+import { useBrowseStore, PAGE_SIZE, type BrowseKey, type ImageRow } from "../stores/browse"
 import { useAuthStore } from "../stores/auth"
 
 const route = useRoute()
@@ -99,10 +102,16 @@ const sort = ref("name_asc")
 const crumbs = ref<{ name: string; relative_path: string }[]>([])
 const folders = ref<any[]>([])
 const images = ref<ImageRow[]>([])
-const nextCursor = ref<string | null>(null)
+const page = ref(1)
+const total = ref(0)
 const loading = ref(false)
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 
 const browse = useBrowseStore()
+
+function currentKey(): BrowseKey {
+  return { gid: gid.value, rid: rid.value, path: path.value, sort: sort.value }
+}
 
 // ---------- selection mode ----------
 
@@ -151,10 +160,7 @@ async function onBatchDelete() {
       { image_ids: ids },
     )
     if (r.deleted.length > 0) {
-      const key = { gid: gid.value, rid: rid.value, path: path.value, sort: sort.value }
-      browse.removeImages(key, r.deleted)
-      const entry = browse.get(key)
-      images.value = entry ? entry.items : []
+      await reloadAfterChange()
     }
     if (r.failed.length > 0) {
       window.alert(`部分删除失败：${r.failed.length} 项`)
@@ -170,11 +176,15 @@ async function onBatchDelete() {
 
 // ---------- single-image actions ----------
 
-function onImageDeleted(id: number) {
-  const key = { gid: gid.value, rid: rid.value, path: path.value, sort: sort.value }
-  browse.removeImages(key, [id])
-  const entry = browse.get(key)
-  images.value = entry ? entry.items : []
+async function onImageDeleted(_id: number) {
+  await reloadAfterChange()
+}
+
+/** 删除等导致后续页位移的操作后：丢弃缓存页并重新拉取当前页。 */
+async function reloadAfterChange() {
+  const key = currentKey()
+  browse.invalidate(key)
+  await renderPage(key, page.value)
 }
 
 async function onGridMenuAction(id: number, action: "delete") {
@@ -190,25 +200,24 @@ async function onGridMenuAction(id: number, action: "delete") {
     window.alert(`删除失败：${m}`)
     return
   }
-  onImageDeleted(id)
+  await onImageDeleted(id)
 }
 
 async function loadAll() {
   loading.value = true
   try {
-    const key = { gid: gid.value, rid: rid.value, path: path.value, sort: sort.value }
+    const key = currentKey()
     const [c, f] = await Promise.all([
       apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/breadcrumbs?path=${encodeURIComponent(path.value)}`),
       apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/folders?path=${encodeURIComponent(path.value)}`),
     ])
     crumbs.value = c
     folders.value = f
-    await browse.load(key)
-    const entry = browse.get(key)!
-    images.value = entry.items
-    nextCursor.value = entry.nextCursor
+    page.value = 1
+    await renderPage(key, 1)
     // restore scroll
-    if (entry.scrollY) {
+    const entry = browse.get(key)
+    if (entry?.scrollY) {
       requestAnimationFrame(() => window.scrollTo({ top: entry.scrollY }))
     }
   } finally {
@@ -216,17 +225,35 @@ async function loadAll() {
   }
 }
 
+/**
+ * 拉取并渲染某一页。末页仅剩的图片被删时，请求的页会变空，
+ * 此时自动回退到上一页。
+ */
+async function renderPage(key: BrowseKey, p: number) {
+  const r = await browse.loadPage(key, p)
+  if (r.items.length === 0 && p > 1) {
+    page.value = p - 1
+    const r2 = await browse.loadPage(key, p - 1)
+    images.value = r2.items
+    total.value = r2.total
+    return
+  }
+  images.value = r.items
+  total.value = r.total
+}
+
+async function changePage(p: number) {
+  if (p === page.value || p < 1 || p > totalPages.value) return
+  exitSelectionMode()
+  const key = currentKey()
+  page.value = p
+  await renderPage(key, p)
+  window.scrollTo({ top: 0 })
+}
+
 function onOpen(id: number) {
   const suffix = path.value ? `/${path.value}` : ""
   router.push(`/galleries/${gid.value}/r/${rid.value}${suffix}/image/${id}`)
-}
-
-async function onLoadMore() {
-  const key = { gid: gid.value, rid: rid.value, path: path.value, sort: sort.value }
-  await browse.loadMore(key)
-  const entry = browse.get(key)!
-  images.value = entry.items
-  nextCursor.value = entry.nextCursor
 }
 
 function onScroll() {

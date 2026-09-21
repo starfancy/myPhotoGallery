@@ -50,6 +50,7 @@ vi.mock("photoswipe", () => {
       if (evt === "uiRegister") mockState.uiRegisterHandler = cb
       if (evt === "change") mockState.changeHandler = cb
     }
+    addFilter() {}
     init() {
       mockState.uiRegisterHandler?.()
     }
