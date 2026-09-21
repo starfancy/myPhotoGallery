@@ -39,13 +39,29 @@ function makeRouter() {
 }
 
 async function mountView(role: "admin" | "viewer" = "admin") {
+  // 模拟服务端图片状态：删除/批量删除会修改它，重新拉取时反映出来
+  const serverImages = IMAGES.map((x) => ({ ...x }))
   const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : (input as Request).url ?? String(input)
     const method = init?.method ?? "GET"
     if (method === "GET" && url.includes("/breadcrumbs")) return response(CRUMBS)
     if (method === "GET" && url.includes("/folders")) return response(FOLDERS)
     if (method === "GET" && url.includes("/images")) {
-      return response({ items: IMAGES, next_cursor: null })
+      return response({ items: serverImages, total: serverImages.length })
+    }
+    if (method === "DELETE" && /\/api\/images\/\d+$/.test(url)) {
+      const id = Number(url.split("/").pop())
+      const i = serverImages.findIndex((x) => x.id === id)
+      if (i >= 0) serverImages.splice(i, 1)
+      return response(null, 204)
+    }
+    if (method === "POST" && url.includes("/api/images/batch-delete")) {
+      const { image_ids } = JSON.parse(init?.body as string)
+      for (const id of image_ids) {
+        const i = serverImages.findIndex((x) => x.id === id)
+        if (i >= 0) serverImages.splice(i, 1)
+      }
+      return response({ deleted: image_ids, failed: [] })
     }
     return response({ error: { code: "not_found", message: "not mocked" } }, 404)
   })
@@ -95,8 +111,6 @@ describe("BrowseView delete flows", () => {
   it("deletes a single image via three-dot menu after confirmation", async () => {
     const { w, fetchFn } = await mountView("admin")
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true))
-
-    fetchFn.mockResolvedValueOnce(response(null, 204))
 
     const menuBtn = w.findAll('button[aria-label^="更多操作"]')[0]
     await menuBtn.trigger("click")
@@ -153,7 +167,6 @@ describe("BrowseView delete flows", () => {
 
     expect(w.text()).toContain("已选 2 项")
 
-    fetchFn.mockResolvedValueOnce(response({ deleted: [1, 2], failed: [] }))
     const batchBtn = w.findAll("button").find((b) => b.text().includes("移入回收站"))!
     await batchBtn.trigger("click")
     await flushPromises()

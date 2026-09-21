@@ -49,9 +49,6 @@
         </button>
       </div>
     </div>
-    <button v-if="canLoadMore" class="mx-auto my-4 block rounded bg-neutral-800 px-4 py-2 text-sm"
-            @click="$emit('loadMore')">加载更多</button>
-
     <!-- 单例弹出菜单 -->
     <div v-if="menu"
          class="lb-cell-menu"
@@ -73,7 +70,6 @@ import { useAuthStore } from "../stores/auth"
 
 const props = defineProps<{
   items: ImageRow[]
-  canLoadMore: boolean
   targetHeight?: number
   selectionMode?: boolean
   /** 已选图片 id。父组件保持权威状态；此组件仅发出 toggle 事件。 */
@@ -82,7 +78,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "open", id: number): void
-  (e: "loadMore"): void
   (e: "menuAction", id: number, action: "delete"): void
   (e: "toggleSelect", id: number): void
 }>()

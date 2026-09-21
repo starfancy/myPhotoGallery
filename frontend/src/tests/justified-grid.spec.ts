@@ -25,7 +25,7 @@ async function mountGrid(role: "admin" | "viewer") {
     user: { id: 1, username: "u", role, access_scope: "lan_only" },
   })
   const w = mount(JustifiedGrid, {
-    props: { items, canLoadMore: false },
+    props: { items },
   })
   await flushPromises()
   return w

@@ -21,12 +21,16 @@ export interface BrowseKey {
 }
 
 interface CacheEntry {
-  items: ImageRow[]
-  nextCursor: string | null
+  /** 页码（1 起）→ 该页图片行 */
+  pages: Map<number, ImageRow[]>
+  total: number
   scrollY: number
   keyString: string
   atime: number
 }
+
+/** 每页图片数；文件夹图片超过此值时底部分页。 */
+export const PAGE_SIZE = 200
 
 const CACHE_MAX = 20
 
@@ -60,31 +64,41 @@ export const useBrowseStore = defineStore("browse", () => {
     return cache.value.get(keyOf(k)) ?? null
   }
 
-  async function load(k: BrowseKey, opts: { force?: boolean } = {}) {
+  /** 加载指定文件夹的第 page 页（1 起）。已缓存的页不重复请求。 */
+  async function loadPage(
+    k: BrowseKey,
+    page: number,
+  ): Promise<{ items: ImageRow[]; total: number }> {
     const key = keyOf(k)
-    if (!opts.force && cache.value.has(key)) {
-      touch(cache.value.get(key)!)
-      return
+    let entry = cache.value.get(key)
+    if (!entry) {
+      entry = { pages: new Map(), total: 0, scrollY: 0, keyString: key, atime: Date.now() }
+      cache.value.set(key, entry)
+      evict()
     }
-    const params = new URLSearchParams({ path: k.path, sort: k.sort })
-    const r = await apiGet<{ items: ImageRow[]; next_cursor: string | null }>(
+    const cached = entry.pages.get(page)
+    if (cached) {
+      touch(entry)
+      return { items: cached, total: entry.total }
+    }
+    const params = new URLSearchParams({
+      path: k.path,
+      sort: k.sort,
+      limit: String(PAGE_SIZE),
+      offset: String((page - 1) * PAGE_SIZE),
+    })
+    const r = await apiGet<{ items: ImageRow[]; total: number }>(
       `/api/galleries/${k.gid}/roots/${k.rid}/images?${params}`,
     )
-    cache.value.set(key, { items: r.items, nextCursor: r.next_cursor, scrollY: 0, keyString: key, atime: Date.now() })
-    evict()
+    entry.pages.set(page, r.items)
+    entry.total = r.total
+    touch(entry)
+    return { items: r.items, total: r.total }
   }
 
-  async function loadMore(k: BrowseKey): Promise<boolean> {
-    const entry = get(k)
-    if (!entry || !entry.nextCursor) return false
-    const params = new URLSearchParams({ path: k.path, sort: k.sort, cursor: entry.nextCursor })
-    const r = await apiGet<{ items: ImageRow[]; next_cursor: string | null }>(
-      `/api/galleries/${k.gid}/roots/${k.rid}/images?${params}`,
-    )
-    entry.items.push(...r.items)
-    entry.nextCursor = r.next_cursor
-    touch(entry)
-    return r.items.length > 0
+  /** 使某视图的全部缓存页失效（删除图片后调用，避免后续页 offset 漂移）。 */
+  function invalidate(k: BrowseKey) {
+    cache.value.delete(keyOf(k))
   }
 
   function saveScroll(k: BrowseKey, y: number) {
@@ -95,14 +109,5 @@ export const useBrowseStore = defineStore("browse", () => {
     }
   }
 
-  /** 从当前视图（缓存条目）中移除一张图片。批量删除时也可用。 */
-  function removeImages(k: BrowseKey, imageIds: number[]) {
-    const e = get(k)
-    if (!e) return
-    const set = new Set(imageIds)
-    e.items = e.items.filter((it) => !set.has(it.id))
-    touch(e)
-  }
-
-  return { cache, get, load, loadMore, saveScroll, removeImages }
+  return { cache, get, loadPage, invalidate, saveScroll }
 })
