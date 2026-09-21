@@ -30,8 +30,8 @@ const auth = useAuthStore()
 
 const rootEl = ref<HTMLElement | null>(null)
 let pswp: PhotoSwipe | null = null
-// 100% 原图查看器（内嵌一个独立的 PhotoSwipe 实例，天然支持双指捏合、拖动、双击缩放）
-let originalPswp: PhotoSwipe | null = null
+/** pswp.currSlide 的类型（Slide 类未从 photoswipe 顶层导出） */
+type Slide = NonNullable<PhotoSwipe["currSlide"]>
 
 // EXIF 侧边面板 DOM——附着在 body 上，只有当前 lightbox 打开时才存在
 let sidePanelsEl: HTMLElement | null = null
@@ -130,51 +130,157 @@ function currentSlideItem(): ImageRow | null {
   return props.items[pswp.currIndex] ?? null
 }
 
-function openOriginal() {
-  const it = currentSlideItem()
-  if (!it || originalPswp) return
-  const url = `/api/image/${it.id}`
-  originalPswp = new PhotoSwipe({
-    dataSource: [{
-      src: url,
-      // 使用的 1600 缩略图作为占位，等原图下载后自动切换
-      msrc: `/api/thumb/${it.sha1}?size=1600`,
-      width: it.width ?? 1600,
-      height: it.height ?? 1200,
-      alt: it.filename,
-    }],
-    index: 0,
-    // 初始按 1:1 显示（即 100% 原始尺寸），用户可再捏合放大/缩小
-    initialZoomLevel: 1,
-    secondaryZoomLevel: "fit",
-    maxZoomLevel: 4,
-    appendToEl: document.body,
-    showHideAnimationType: "fade",
-    bgOpacity: 0.95,
-    // 关闭滑动手势，避免和外层灯箱冲突
-    closeOnVerticalDrag: false,
-    pinchToClose: false,
-    // 加一个自定义类，样式里用它渲染浅色外框，与外层灯箱视觉区分
-    mainClass: "pswp--original",
-  })
-  originalPswp.on("uiRegister", () => {
-    originalPswp!.ui!.registerElement({
-      name: "open-newtab",
-      ariaLabel: "在新标签页打开",
-      order: 8,
-      isButton: true,
-      html: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-        <polyline points="15 3 21 3 21 9" />
-        <line x1="10" y1="14" x2="21" y2="3" />
-      </svg>`,
-      onClick: () => window.open(url, "_blank", "noopener"),
-    })
-  })
-  originalPswp.on("destroy", () => {
-    originalPswp = null
-  })
-  originalPswp.init()
+// ---------- 原图按需加载（放大换图）+ 空闲预取 ----------
+//
+// 外层灯箱默认显示 1600 长边缩略图。放大到显示尺寸超过缩略图实际像素时，
+// 把该幻灯片的源切换为 /api/image/{id} 原图：PhotoSwipe 的 content reload
+// 会新建一个 img 元素下载原图，加载完成前旧缩略图继续显示，到位后再替换。
+// 缩略图加载完成后，若网络与体积条件允许，在空闲时间预取当前这一张原图，
+// 使用户放大时直接命中浏览器缓存。
+
+/** 灯箱内每张幻灯片附带的换图/预取状态（SlideData 允许任意附加字段）。 */
+interface LightboxSlideData {
+  src: string
+  image_id: number
+  thumbSrc: string
+  /** 1600 缩略图的实际像素尺寸（长边缩到 1600） */
+  thumbW: number
+  thumbH: number
+  /** 原图 URL；浏览器无法直接显示的格式（RAW/HEIC 等）为 null */
+  originalSrc: string | null
+  sizeBytes: number
+  originalLoading: boolean
+  originalLoaded: boolean
+  prefetched: boolean
+  /** 换图期间保存旧缩略图元素，原图到位后移除 */
+  oldThumbEl?: HTMLImageElement
+}
+
+const THUMB_LONG_EDGE = 1600
+/** 预取原图的体积上限：超过则只在真正放大时按需下载 */
+const PREFETCH_MAX_BYTES = 5 * 1024 * 1024
+/** 显示尺寸超过缩略图像素该比例才换图，留余量避免边界抖动 */
+const UPGRADE_RATIO = 1.05
+/** 浏览器可直接渲染的原图格式；RAW 与多数环境下的 HEIC 不在其中 */
+const DISPLAYABLE_ORIGINAL_RE = /\.(jpe?g|png|webp|gif)$/i
+
+/** 将幻灯片从缩略图切换为原图；新图加载完成前旧图继续显示。 */
+function upgradeToOriginal(slide: Slide) {
+  const d = slide.data as LightboxSlideData
+  if (!d.originalSrc || d.originalLoading || d.originalLoaded) return
+  d.originalLoading = true
+  d.oldThumbEl = slide.content.element as HTMLImageElement | undefined
+  d.src = d.originalSrc
+  // reload：新建 img 元素下载原图，onload 后才 append，旧图在此期间继续显示
+  slide.content.load(false, true)
+}
+
+function onImageSizeChange(slide: Slide, width: number, height: number) {
+  const d = slide.data as LightboxSlideData
+  if (!d.originalSrc || d.originalLoading || d.originalLoaded) return
+  if (width > d.thumbW * UPGRADE_RATIO || height > d.thumbH * UPGRADE_RATIO) {
+    upgradeToOriginal(slide)
+  }
+}
+
+function onLoadComplete(slide: Slide, isError: boolean | undefined) {
+  const d = slide.data as LightboxSlideData
+  // 通用：reload 产生的新 element 不会被 PhotoSwipe 自动挂载——Content
+  // 的 isAttached 首次 append 后恒为 true，append() 直接 no-op。这里统一
+  // 把新 element 挂到 placeholder（或旧元素）的位置，否则画面会空白。
+  // 正常首次加载时 element 已挂载，此分支不会触发。
+  const el = slide.content.element as HTMLElement | undefined
+  if (el && !el.parentNode) {
+    const placeholderEl = slide.content.placeholder?.element
+    if (placeholderEl?.parentNode) {
+      placeholderEl.parentNode.insertBefore(el, placeholderEl)
+    } else {
+      slide.container.insertBefore(el, d.oldThumbEl ?? null)
+    }
+  }
+  if (d.src === d.originalSrc && !isError && d.originalLoading) {
+    // 原图加载完成：移除旧缩略图
+    d.originalLoaded = true
+    d.originalLoading = false
+    if (d.oldThumbEl && d.oldThumbEl !== el) {
+      d.oldThumbEl.remove()
+    }
+    d.oldThumbEl = undefined
+    return
+  }
+  // 缩略图加载完成：仅为当前正在查看的幻灯片调度预取
+  if (!isError && pswp && pswp.currIndex === slide.index) schedulePrefetch(slide)
+}
+
+function onLoadError(slide: Slide) {
+  const d = slide.data as LightboxSlideData
+  if (!d.originalLoading) return
+  // 原图加载失败：回退到缩略图，避免停留在错误界面。
+  // displayError 已清空 container（旧缩略图也没了）并挂上错误提示层，先移除。
+  d.originalLoading = false
+  d.oldThumbEl = undefined
+  slide.container.querySelector(".pswp__error-msg-container")?.remove()
+  d.src = d.thumbSrc
+  slide.content.load(false, true)
+}
+
+// ---------- 预取 ----------
+
+let prefAbort: AbortController | null = null
+let prefIdleHandle: number | null = null
+
+type NetworkNavigator = Navigator & {
+  saveData?: boolean
+  connection?: { effectiveType?: string; saveData?: boolean }
+}
+
+function canPrefetch(d: LightboxSlideData): boolean {
+  if (!d.originalSrc || d.originalLoading || d.originalLoaded || d.prefetched) return false
+  if (d.sizeBytes > PREFETCH_MAX_BYTES) return false
+  const nav = navigator as NetworkNavigator
+  if (nav.saveData || nav.connection?.saveData) return false
+  // 无 Network Information API（常见于桌面浏览器）时放行；
+  // 有 effectiveType 时只在 4g 网络预取
+  const effType = nav.connection?.effectiveType
+  if (effType && effType !== "4g") return false
+  return true
+}
+
+function schedulePrefetch(slide: Slide) {
+  const d = slide.data as LightboxSlideData
+  if (!canPrefetch(d)) return
+  cancelPrefetch()
+  const run = () => {
+    prefIdleHandle = null
+    // 等待期间用户可能已切走或已手动放大
+    if (!pswp || pswp.currIndex !== slide.index) return
+    if (!canPrefetch(d) || d.originalLoading || d.originalLoaded) return
+    const abort = new AbortController()
+    prefAbort = abort
+    const originalUrl = d.originalSrc
+    if (!originalUrl) return
+    // fetch 的 default 缓存模式会把带缓存头的响应写入 HTTP 缓存，
+    // 随后 content reload 用 <img> 请求同一 URL 即可命中
+    fetch(originalUrl, { signal: abort.signal })
+      .then(async (r) => {
+        if (!r.ok) return
+        await r.arrayBuffer() // 读完响应体才确保完整进缓存
+        d.prefetched = true
+      })
+      .catch(() => {}) // 中止或失败均静默：放大时再按需加载
+  }
+  const ric = window.requestIdleCallback
+  prefIdleHandle = ric ? ric(run) : window.setTimeout(run, 200)
+}
+
+function cancelPrefetch() {
+  prefAbort?.abort()
+  prefAbort = null
+  if (prefIdleHandle !== null) {
+    if (window.cancelIdleCallback) window.cancelIdleCallback(prefIdleHandle)
+    else clearTimeout(prefIdleHandle)
+    prefIdleHandle = null
+  }
 }
 
 // ---------- side panels container ----------
@@ -511,18 +617,38 @@ function toggleMoreDropdown() {
 function open() {
   const idx = props.items.findIndex((it) => it.id === props.startId)
   if (idx < 0) return
-  const dataSource = props.items.map((it) => ({
-    src: `/api/thumb/${it.sha1}?size=1600`,
-    width: it.width ?? 1600,
-    height: it.height ?? 1200,
-    alt: it.filename,
-    image_id: it.id,
-  }))
+  const dataSource = props.items.map((it) => {
+    const w = it.width ?? THUMB_LONG_EDGE
+    const h = it.height ?? 1200
+    const thumbSrc = `/api/thumb/${it.sha1}?size=${THUMB_LONG_EDGE}`
+    // 缩略图按长边缩到 1600，算出其实际像素作为换图阈值
+    const thumbScale = Math.min(1, THUMB_LONG_EDGE / Math.max(w, h))
+    return {
+      src: thumbSrc,
+      width: w,
+      height: h,
+      alt: it.filename,
+      image_id: it.id,
+      thumbSrc,
+      thumbW: Math.round(w * thumbScale),
+      thumbH: Math.round(h * thumbScale),
+      originalSrc: DISPLAYABLE_ORIGINAL_RE.test(it.filename) ? `/api/image/${it.id}` : null,
+      sizeBytes: it.size_bytes,
+      originalLoading: false,
+      originalLoaded: false,
+      prefetched: false,
+    }
+  })
   pswp = new PhotoSwipe({
     dataSource,
     index: idx,
     appendToEl: document.body,
     showHideAnimationType: "fade",
+  })
+  // reload 原图时禁止 PhotoSwipe 新建 placeholder——它会被 append 到容器
+  // 末尾盖住旧缩略图，导致原图下载期间画面空白。旧缩略图本身即占位图。
+  pswp.addFilter("useContentPlaceholder", (useIt, content) => {
+    return (content.data as LightboxSlideData).originalLoading ? false : useIt
   })
   // 序号右侧的文件名标签（uiRegister 时创建元素）
   let filenameEl: HTMLElement | null = null
@@ -531,13 +657,41 @@ function open() {
     const it = props.items[pswp.currIndex]
     filenameEl.textContent = it ? it.filename : ""
   }
+  // 右下角显示比例：currZoomLevel 即显示尺寸/原图尺寸（1 = 原图 100%）
+  let zoomRatioEl: HTMLElement | null = null
+  const updateZoomRatio = () => {
+    if (!zoomRatioEl) return
+    const slide = pswp?.currSlide
+    zoomRatioEl.textContent = slide
+      ? `${Math.round(slide.currZoomLevel * 100)}%`
+      : ""
+  }
+  pswp.on("imageSizeChange", ({ slide, width, height }) => {
+    onImageSizeChange(slide, width, height)
+  })
+  pswp.on("loadComplete", ({ slide, isError }) => {
+    onLoadComplete(slide, isError)
+  })
+  pswp.on("loadError", ({ slide }) => {
+    onLoadError(slide)
+  })
+  pswp.on("zoomPanUpdate", ({ slide }) => {
+    // 缩放（含捏合过程）实时刷新比例；仅当前幻灯片需要更新
+    if (pswp && slide === pswp.currSlide) updateZoomRatio()
+  })
   pswp.on("change", () => {
     if (pswp) emit("change", props.items[pswp.currIndex].id)
-    // 切图时自动折叠下拉菜单，避免下一张误触
+    // 切图时自动折叠下拉菜单、取消上一张的原图预取
     closeMoreDropdown()
+    cancelPrefetch()
     refreshExifPanelIfOpen()
     refreshHistPanelIfOpen()
     updateFilenameLabel()
+    updateZoomRatio()
+    // 相邻幻灯片的缩略图可能已预加载完成（不会再有 loadComplete），补调度预取
+    const currSlide = pswp?.currSlide
+    const currImg = currSlide?.content?.element as HTMLImageElement | undefined
+    if (currSlide && currImg?.complete) schedulePrefetch(currSlide)
   })
   pswp.on("close", () => {
     closeMoreDropdown()
@@ -557,7 +711,21 @@ function open() {
         updateFilenameLabel()
       },
     })
-    // 在原页弹窗中显示 100% 原图（默认操作）
+    // 右下角：当前显示比例（相对原图）。appendTo wrapper 挂到全屏
+    // scrollWrap——默认的 'bar' 是顶部 60px 高的顶栏，bottom 定位会落在右上角
+    pswp!.ui!.registerElement({
+      name: "zoom-ratio-label",
+      order: 20,
+      isButton: false,
+      tagName: "span",
+      className: "pswp__zoom-ratio-label",
+      appendTo: "wrapper",
+      onInit: (el) => {
+        zoomRatioEl = el
+        updateZoomRatio()
+      },
+    })
+    // 缩放到 100% 自然尺寸（会触发 imageSizeChange 自动换原图）；再次点击收回
     pswp!.ui!.registerElement({
       name: "original-image",
       ariaLabel: "查看原图",
@@ -569,7 +737,15 @@ function open() {
         <line x1="21" y1="3" x2="14" y2="10" />
         <line x1="3" y1="21" x2="10" y2="14" />
       </svg>`,
-      onClick: () => openOriginal(),
+      onClick: () => {
+        const slide = pswp?.currSlide
+        if (!slide) return
+        if (slide.currZoomLevel >= 0.999) {
+          pswp!.zoomTo(slide.zoomLevels.initial)
+        } else {
+          pswp!.zoomTo(1)
+        }
+      },
     })
     // 在新标签页打开原图
     pswp!.ui!.registerElement({
@@ -641,8 +817,7 @@ onMounted(open)
 onUnmounted(() => {
   closeMoreDropdown()
   closeAllSidePanels()
-  originalPswp?.destroy()
-  originalPswp = null
+  cancelPrefetch()
   pswp?.destroy()
   pswp = null
 })
@@ -683,6 +858,26 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- 右下角显示比例 ---- */
+
+/* 元素挂在全屏 scrollWrap 上（appendTo:"wrapper"），定位其右下角。
+   右下角无其他内置控件（缩放按钮在顶部栏），靠右贴边即可。
+   带 pswp__hide-on-close，随 UI 的 idle 隐藏逻辑自动淡入淡出。 */
+.pswp__zoom-ratio-label {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  line-height: 20px;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+  user-select: none;
 }
 
 /* ---- "更多操作"下拉菜单 ---- */
