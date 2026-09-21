@@ -237,6 +237,7 @@ async def list_images(
     path: str = "",
     sort: Sort = "name_asc",
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
     cursor: str | None = None,
     _user: User = Depends(gallery_scope_guard),
 ):
@@ -253,7 +254,14 @@ async def list_images(
             )
         ).scalar_one_or_none()
         if folder is None:
-            return {"items": [], "next_cursor": None}
+            return {"items": [], "next_cursor": None, "total": 0}
+        total = (
+            await s.execute(
+                select(func.count())
+                .select_from(Image)
+                .where(Image.folder_id == folder.id)
+            )
+        ).scalar_one()
         q = select(Image).where(Image.folder_id == folder.id)
         if sort == "name_asc":
             q = q.order_by(Image.filename.asc(), Image.id.asc())
@@ -303,6 +311,9 @@ async def list_images(
                     Image.size_bytes < int(last_val),
                     and_(Image.size_bytes == int(last_val), Image.id < last_id)
                 ))
+        # cursor 为旧的“加载更多” keyset 分页；不传时按 offset 分页（页码跳转）
+        if not cursor:
+            q = q.offset(offset)
         q = q.limit(limit + 1)
         rows = (await s.execute(q)).scalars().all()
         has_more = len(rows) > limit
@@ -331,5 +342,5 @@ async def list_images(
                 )
             else:  # size_desc
                 next_cursor = _encode_cursor(sort, str(rows[-1].size_bytes), rows[-1].id)
-            return {"items": items, "next_cursor": next_cursor}
-        return {"items": items, "next_cursor": None}
+            return {"items": items, "next_cursor": next_cursor, "total": total}
+        return {"items": items, "next_cursor": None, "total": total}
