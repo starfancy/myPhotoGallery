@@ -195,9 +195,8 @@ function onLongPress(id: number, ev: MouseEvent) {
 </script>
 
 <style scoped>
-.lb-grid-cell {
-  /* hover 时才让子按钮出现 */
-}
+/* .lb-grid-cell 基础类无需样式；hover 显示子按钮的规则见下方
+   .lb-grid-cell:hover .lb-cell-menu-btn */
 .lb-grid-cell--selected {
   outline: 3px solid rgb(37 99 235);
   outline-offset: -3px;

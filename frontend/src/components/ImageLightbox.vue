@@ -1046,6 +1046,6 @@ watch(
   font-variant-numeric: tabular-nums;
 }
 
-/* 独立 EXIF 面板（旧类名兼容）——当只有 EXIF 打开时视觉一致 */
-.lb-exif-panel { /* 现在只是 .lb-side-panel 的一个变体，无需重复背景等 */ }
+/* .lb-exif-panel 为旧类名（ensureExifPanel 仍作为标记类挂在元素上、测试选择器
+   也用它），样式完全由 .lb-side-panel 提供，因此这里没有对应规则。 */
 </style>
