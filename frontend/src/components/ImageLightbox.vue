@@ -193,7 +193,11 @@ function onLoadComplete(slide: Slide, isError: boolean | undefined) {
   if (el && !el.parentNode) {
     const placeholderEl = slide.content.placeholder?.element
     if (placeholderEl?.parentNode) {
-      placeholderEl.parentNode.insertBefore(el, placeholderEl)
+      // 插到占位元素之后（上层）：打开瞬间自动换原图时，不透明的 #222 占位
+      // div 可能仍在容器中，若插到它之前，原图会被盖住直到占位 1s 后延迟
+      // 销毁——表现为图片晚显示约 850ms（占位创建/销毁时序见 photoswipe
+      // Content.removePlaceholder）。
+      placeholderEl.parentNode.insertBefore(el, placeholderEl.nextSibling)
     } else {
       slide.container.insertBefore(el, d.oldThumbEl ?? null)
     }
