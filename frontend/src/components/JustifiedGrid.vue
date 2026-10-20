@@ -1,7 +1,7 @@
 <template>
   <div ref="rootEl" class="w-full">
     <div v-for="(row, ri) in rows" :key="ri"
-         class="flex gap-1"
+         class="flex gap-2"
          :style="{ marginBottom: `${gap}px` }">
       <div v-for="cell in row.items" :key="cell.id"
            class="lb-grid-cell relative overflow-hidden bg-neutral-800"
@@ -104,7 +104,7 @@ onUnmounted(() => {
   window.removeEventListener("click", closeMenu)
 })
 
-const gap = 4
+const gap = 8
 
 const rows = computed(() => {
   const input: (LayoutInput & { id: number; sha1: string; filename: string })[] = props.items.map((it) => ({
