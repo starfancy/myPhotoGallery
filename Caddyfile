@@ -1,0 +1,62 @@
+# myPhotoGallery —— Caddy 配置
+#
+# 作用：
+#   1. 直接托管 frontend/dist 中的前端编译产物（含 vue-router history 模式回退）
+#   2. 把 /api/* 反向代理到本机 FastAPI 后端（127.0.0.1:8080）
+#
+# 使用方式（在项目根目录 e:\code\claude\myPhotoGallery 下执行）：
+#   caddy run            # 前台运行（看日志用）
+#   caddy start          # 后台运行
+#   caddy reload         # 修改本文件后热加载
+#   caddy validate       # 检查配置语法
+#
+# 前置条件：
+#   - 已执行 pnpm --dir frontend build（或 cd frontend && pnpm build）
+#   - 后端已启动：myphoto serve（读取 config.toml，监听 8080）
+
+# :80 = 监听所有网卡的 80 端口、仅 HTTP，适合局域网部署。
+# 若有公网域名并希望自动签发/续期 HTTPS 证书，只需把下面的 ':80' 改成域名，例如：
+#
+#   photos.example.com {
+#
+# Caddy 会自动申请 Let's Encrypt 证书并把 HTTP 跳转到 HTTPS，块内其余内容无需改动。
+:80 {
+	# 前端构建产物根目录；相对路径相对于「启动 caddy 时的工作目录」，
+	# 所以请在项目根目录启动；用绝对路径（如 E:/code/claude/myPhotoGallery/frontend/dist）亦可。
+	root * ./frontend/dist
+
+	# 文本资源压缩（JS/CSS/SVG/JSON 等）
+	encode gzip zstd
+
+	# 访问日志（默认输出到 stderr，caddy run 时可直接看到）
+	log
+
+	# ---- 后端反向代理：/api/* -> FastAPI ----
+	# 注意用 handle 而不是 handle_path：后端路由本身就带 /api 前缀，不能剥离。
+	# Caddy 会自动追加 X-Forwarded-For / X-Forwarded-Proto，
+	# 并透传 Connection/Upgrade（如以后有 WebSocket 需求无需额外配置）。
+	# 大文件（原图/视频）上传下载、流式响应也无需特殊设置。
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# ---- 前端静态文件 + SPA 回退 ----
+	# route 内按书写顺序执行，确保先重写再设响应头。
+	handle {
+		route {
+			# Vite 构建出的资源文件名均带内容哈希，永久强缓存
+			@assets path /assets/*
+			header @assets Cache-Control "public, max-age=31536000, immutable"
+
+			# 文件/目录存在则直接返回；不存在的路径一律回退 index.html，
+			# 否则刷新 /browse/xxx 这类前端路由会 404。
+			try_files {path} /index.html
+
+			# index.html 不缓存：发版后新哈希资源能立即被引用，避免白屏
+			@index path /index.html
+			header @index Cache-Control "no-cache"
+
+			file_server
+		}
+	}
+}
