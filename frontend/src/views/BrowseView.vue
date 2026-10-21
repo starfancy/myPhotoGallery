@@ -213,6 +213,9 @@ async function loadAll() {
     ])
     crumbs.value = c
     folders.value = f
+    // 空文件夹（自身无图、后代有图）借用直接子文件夹封面：fire-and-forget，
+    // 不阻塞分页加载；单项失败在函数内静默处理。
+    void enrichBorrowedCovers()
     page.value = 1
     await renderPage(key, 1)
     // restore scroll
@@ -223,6 +226,36 @@ async function loadAll() {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 自身无图但后代有图的文件夹，补查其直接子文件夹并借用第一个自身含图
+ * 子项的封面，同时在封面标注来源子文件夹名。仅查直接子级，不递归。
+ * folders.value 中的项是响应式代理，直接改属性即可触发卡片更新。
+ */
+async function enrichBorrowedCovers() {
+  const candidates = folders.value.filter(
+    (f) => f.image_count === 0 && f.descendant_count > 0,
+  )
+  if (candidates.length === 0) return
+  await Promise.all(
+    candidates.map(async (folder) => {
+      try {
+        const children = await apiGet<any[]>(
+          `/api/galleries/${gid.value}/roots/${rid.value}/folders?path=${encodeURIComponent(folder.relative_path)}`,
+        )
+        const donor = children.find(
+          (ch) => ch.image_count > 0 && ch.cover_thumb_sha1 != null,
+        )
+        if (donor) {
+          folder.cover_thumb_sha1 = donor.cover_thumb_sha1
+          folder.cover_source_name = donor.name
+        }
+      } catch {
+        // 补查失败：该文件夹保持灰色占位，不影响其余内容
+      }
+    }),
+  )
 }
 
 /**

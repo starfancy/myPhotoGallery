@@ -3,7 +3,7 @@
     <router-link v-for="f in folders" :key="f.relative_path"
                  :to="linkFor(f.relative_path)"
                  class="group flex w-32 flex-none flex-col overflow-hidden rounded bg-neutral-800 text-sm hover:ring-2 hover:ring-blue-500">
-      <div class="h-24 w-full overflow-hidden bg-neutral-700">
+      <div class="relative h-24 w-full overflow-hidden bg-neutral-700">
         <img v-if="f.cover_thumb_sha1"
              :src="`/api/thumb/${f.cover_thumb_sha1}?size=200`"
              class="h-full w-full"
@@ -11,6 +11,12 @@
              loading="lazy"
              :alt="f.name"
              @load="onCoverLoad(f.cover_thumb_sha1, $event)" />
+        <!-- 封面借自某个直接子文件夹时，图底渐变条标注来源名 -->
+        <div v-if="f.cover_source_name"
+             class="lb-folder-source pointer-events-none absolute inset-x-0 bottom-0 flex h-8 items-end px-1.5 pb-0.5"
+             :title="f.cover_source_name">
+          <span class="truncate text-xs text-white">{{ f.cover_source_name }}</span>
+        </div>
       </div>
       <div class="truncate p-2">
         <div class="truncate font-medium">{{ f.name }}</div>
@@ -30,6 +36,7 @@ const props = defineProps<{
     image_count: number
     descendant_count: number
     cover_thumb_sha1: string | null
+    cover_source_name?: string | null
   }>
   gid: number
   rid: number
@@ -48,3 +55,10 @@ function linkFor(rel: string) {
   return `/galleries/${props.gid}/r/${props.rid}/${rel}`
 }
 </script>
+
+<style scoped>
+/* 借来的封面：图底黑色渐变，托住白色来源名 */
+.lb-folder-source {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));
+}
+</style>
