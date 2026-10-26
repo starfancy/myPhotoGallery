@@ -1,8 +1,8 @@
 <template>
   <div ref="rootEl" class="w-full">
     <div v-for="(row, ri) in rows" :key="ri"
-         class="flex gap-2"
-         :style="{ marginBottom: `${gap}px` }">
+         class="flex"
+         :style="{ gap: `${gap}px`, marginBottom: `${gap}px` }">
       <PhotoCell v-for="cell in row.items" :key="cell.id"
                  :id="cell.id"
                  :sha1="cell.sha1"
@@ -66,7 +66,7 @@ onUnmounted(() => {
   ro?.disconnect()
 })
 
-const gap = 8
+const gap = 12
 
 const rows = computed(() => {
   const input: (LayoutInput & { id: number; sha1: string; filename: string })[] = props.items.map((it) => ({

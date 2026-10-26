@@ -1,8 +1,8 @@
 <template>
-  <div v-if="folders.length" class="flex flex-wrap gap-3 px-1 py-2">
+  <div v-if="folders.length" class="lb-folder-grid py-2">
     <router-link v-for="f in folders" :key="f.relative_path"
                  :to="linkFor(f.relative_path)"
-                 class="group flex w-32 flex-none flex-col overflow-hidden rounded bg-neutral-800 text-sm hover:ring-2 hover:ring-blue-500">
+                 class="group flex w-full flex-col overflow-hidden rounded bg-neutral-800 text-sm hover:ring-2 hover:ring-blue-500">
       <div class="relative h-24 w-full overflow-hidden bg-neutral-700">
         <img v-if="f.cover_thumb_sha1"
              :src="`/api/thumb/${f.cover_thumb_sha1}?size=200`"
@@ -57,6 +57,16 @@ function linkFor(rel: string) {
 </script>
 
 <style scoped>
+/*
+ * auto-fill + 1fr：卡片等比拉伸铺满整行，左右边缘与图片网格
+ * （JustifiedGrid/MasonryGrid 均为内容区满宽）严格对齐；
+ * 最小列宽 128（原 w-32），间距与图片网格同为 12px。
+ */
+.lb-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 12px;
+}
 /* 借来的封面：图底黑色渐变，托住白色来源名 */
 .lb-folder-source {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));

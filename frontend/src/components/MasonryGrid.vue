@@ -63,7 +63,7 @@ onUnmounted(() => {
   ro?.disconnect()
 })
 
-const gap = 8
+const gap = 12
 
 const layout = computed(() => {
   const input = props.items.map((it) => ({
