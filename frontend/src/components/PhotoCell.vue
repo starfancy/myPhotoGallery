@@ -1,0 +1,142 @@
+<template>
+  <div class="lb-grid-cell relative h-full w-full overflow-hidden bg-neutral-800"
+       :class="{ 'lb-grid-cell--selected': selected }"
+       :style="cellStyle">
+    <button type="button"
+            class="absolute inset-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            @click="$emit('activate')"
+            @contextmenu.prevent="$emit('contextmenu', $event)"
+            @touchstart="onTouchStart"
+            @touchend="onTouchEnd"
+            @touchmove="onTouchEnd">
+      <img :src="`/api/thumb/${sha1}?size=400`"
+           :srcset="`/api/thumb/${sha1}?size=200 200w, /api/thumb/${sha1}?size=400 400w`"
+           sizes="(max-width: 640px) 200px, 400px"
+           loading="lazy"
+           :alt="filename"
+           class="h-full w-full object-cover" />
+    </button>
+    <!-- 选择模式：左上角勾选圈；非选择模式也保留一个可显示的空框，避免选择切换后布局跳动 -->
+    <button v-if="selectionMode"
+            type="button"
+            :aria-label="`选择 ${filename}`"
+            :aria-pressed="selected"
+            class="lb-cell-check"
+            :class="{ 'lb-cell-check--on': selected }"
+            @click.stop="$emit('toggleSelect')">
+      <svg v-if="selected" width="14" height="14" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="3"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    </button>
+    <!-- Admin-only 三点菜单：选择模式下隐藏，避免与勾选交互冲突 -->
+    <button v-if="showMenu"
+            type="button"
+            :aria-label="`更多操作 ${filename}`"
+            class="lb-cell-menu-btn"
+            @click.stop="$emit('menu', $event)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <circle cx="5" cy="12" r="2" />
+        <circle cx="12" cy="12" r="2" />
+        <circle cx="19" cy="12" r="2" />
+      </svg>
+    </button>
+  </div>
+</template>
+
+<script setup lang="ts">
+const props = defineProps<{
+  id: number
+  sha1: string
+  filename: string
+  selected?: boolean
+  selectionMode?: boolean
+  /** 是否显示三点菜单（admin 且非选择模式） */
+  showMenu?: boolean
+  /** 单元格尺寸/定位样式：行排版给宽高，列排版给 grid-row span */
+  cellStyle?: Record<string, string | number>
+}>()
+
+const emit = defineEmits<{
+  (e: "activate"): void
+  (e: "toggleSelect"): void
+  (e: "menu", ev: MouseEvent): void
+  (e: "contextmenu", ev: MouseEvent): void
+  (e: "longpress", p: { x: number; y: number }): void
+}>()
+
+// ---------- 移动端长按 ----------
+
+let pressTimer: number | null = null
+let pressStartXY: { x: number; y: number } | null = null
+
+function onTouchStart(_ev: TouchEvent) {
+  if (!props.showMenu) return
+  const t = _ev.touches[0]
+  pressStartXY = { x: t.clientX, y: t.clientY }
+  pressTimer = window.setTimeout(() => {
+    if (!pressStartXY) return
+    emit("longpress", { x: pressStartXY.x, y: pressStartXY.y })
+    pressTimer = null
+  }, 550)
+}
+
+function onTouchEnd() {
+  if (pressTimer !== null) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
+  pressStartXY = null
+}
+</script>
+
+<style scoped>
+.lb-grid-cell--selected {
+  outline: 3px solid rgb(37 99 235);
+  outline-offset: -3px;
+}
+.lb-cell-menu-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 0;
+  z-index: 2;
+}
+.lb-grid-cell:hover .lb-cell-menu-btn,
+.lb-cell-menu-btn:focus-visible {
+  display: flex;
+}
+.lb-cell-menu-btn:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+.lb-cell-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  z-index: 2;
+}
+.lb-cell-check--on {
+  background: rgb(37 99 235);
+  border-color: rgb(37 99 235);
+}
+</style>

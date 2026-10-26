@@ -6,26 +6,29 @@
       </template>
     </AppHeader>
     <main class="p-3">
-      <!-- 选择模式工具栏（admin only） -->
-      <div v-if="auth.isAdmin && images.length" class="mb-2 flex items-center gap-2 text-sm">
-        <button v-if="!selectionMode"
-                type="button"
-                class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
-                @click="enterSelectionMode">
-          选择
-        </button>
-        <template v-else>
-          <span class="text-neutral-400">已选 {{ selectedIds.size }} 项</span>
-          <button type="button"
+      <!-- 工具栏：左侧选择操作（admin only），右侧排版切换 -->
+      <div v-if="images.length" class="mb-2 flex items-center gap-2 text-sm">
+        <template v-if="auth.isAdmin">
+          <button v-if="!selectionMode"
+                  type="button"
                   class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
-                  @click="selectAll">
-            {{ isAllSelected ? "取消全选" : "全选" }}
+                  @click="enterSelectionMode">
+            选择
           </button>
+          <template v-else>
+            <span class="text-neutral-400">已选 {{ selectedIds.size }} 项</span>
+            <button type="button"
+                    class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
+                    @click="selectAll">
+              {{ isAllSelected ? "取消全选" : "全选" }}
+            </button>
+          </template>
         </template>
+        <GridLayoutSwitch v-model="gridLayout" class="ml-auto" />
       </div>
 
       <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid" />
-      <JustifiedGrid v-if="images.length" :items="images"
+      <component :is="gridComponent" v-if="images.length" :items="images"
                      :selection-mode="selectionMode"
                      :selected-ids="selectedIds"
                      @open="onOpen"
@@ -69,6 +72,9 @@ import AppHeader from "../components/AppHeader.vue"
 import Breadcrumb from "../components/Breadcrumb.vue"
 import SubfolderStrip from "../components/SubfolderStrip.vue"
 import JustifiedGrid from "../components/JustifiedGrid.vue"
+import MasonryGrid from "../components/MasonryGrid.vue"
+import GridLayoutSwitch from "../components/GridLayoutSwitch.vue"
+import type { GridLayout } from "../components/GridLayoutSwitch.vue"
 import PaginationBar from "../components/PaginationBar.vue"
 import ImageLightbox from "../components/ImageLightbox.vue"
 import { apiGet, apiDelete, apiPost, HttpError } from "../api"
@@ -112,6 +118,21 @@ const browse = useBrowseStore()
 function currentKey(): BrowseKey {
   return { gid: gid.value, rid: rid.value, path: path.value, sort: sort.value }
 }
+
+// ---------- grid layout preference ----------
+
+const GRID_LAYOUT_KEY = "browse.grid.layout"
+
+function loadGridLayout(): GridLayout {
+  return localStorage.getItem(GRID_LAYOUT_KEY) === "masonry" ? "masonry" : "justified"
+}
+
+const gridLayout = ref<GridLayout>(loadGridLayout())
+watch(gridLayout, (v) => localStorage.setItem(GRID_LAYOUT_KEY, v))
+
+const gridComponent = computed(() =>
+  gridLayout.value === "masonry" ? MasonryGrid : JustifiedGrid,
+)
 
 // ---------- selection mode ----------
 
