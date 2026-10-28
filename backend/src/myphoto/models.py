@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -18,6 +18,9 @@ class User(Base):
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
     last_login_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # P5: 删用户时 ORM 把 exclusions.excluded_by 置空（无 passive_deletes，
+    # UOW 主动发 UPDATE；DB 层 ON DELETE SET NULL 作为兜底）
+    exclusions: Mapped[list["Exclusion"]] = relationship("Exclusion")
 
 
 class Gallery(Base):
@@ -131,3 +134,27 @@ class UserGallery(Base):
         ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True,
     )
     granted_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class Exclusion(Base):
+    """P5: 扫描时整体跳过的 root 子目录（spec §4.7）。
+
+    - relative_path 为相对 root 的 posix 路径；该目录及其子孙全部跳过
+    - 删 root 级联删除；删用户把 excluded_by 置空（排除规则保留）
+    """
+    __tablename__ = "exclusions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    root_id: Mapped[int] = mapped_column(
+        ForeignKey("gallery_roots.id", ondelete="CASCADE"), nullable=False,
+    )
+    relative_path: Mapped[str] = mapped_column(String, nullable=False)
+    excluded_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+    excluded_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    __table_args__ = (
+        UniqueConstraint("root_id", "relative_path",
+                         name="uq_exclusion_path_per_root"),
+        Index("ix_exclusion_root", "root_id"),
+    )

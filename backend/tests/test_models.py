@@ -3,7 +3,7 @@ import time
 
 import pytest
 from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import Gallery, GalleryRoot, Image, Trash, User, UserGallery
+from myphoto.models import Exclusion, Gallery, GalleryRoot, Image, Trash, User, UserGallery
 
 
 @pytest.fixture
@@ -279,3 +279,71 @@ async def test_user_gallery_table_created_by_create_all():
             )
     finally:
         await engine.dispose()
+
+
+# ---- P5: Exclusion (spec §4.7) ----
+
+async def test_exclusion_cascades_when_root_deleted(session):
+    now = int(time.time())
+    g = Gallery(name="ExG", created_at=now)
+    session.add(g)
+    await session.flush()
+    r = GalleryRoot(gallery_id=g.id, label="l", absolute_path="/x", enabled=1)
+    session.add(r)
+    await session.flush()
+    session.add(Exclusion(
+        root_id=r.id, relative_path="tmp",
+        excluded_by=None, excluded_at=now, reason=None,
+    ))
+    await session.commit()
+
+    await session.delete(r)
+    await session.commit()
+
+    from sqlalchemy import select as _select
+    assert (await session.execute(_select(Exclusion))).scalars().all() == []
+
+
+async def test_exclusion_excluded_by_set_null_when_user_deleted(session):
+    from sqlalchemy import select as _select
+    now = int(time.time())
+    u = User(username="ex-admin", password_hash="x", role="admin",
+             access_scope="lan_only", enabled=1, created_at=now)
+    session.add(u)
+    g = Gallery(name="ExG2", created_at=now)
+    session.add(g)
+    await session.flush()
+    r = GalleryRoot(gallery_id=g.id, label="l", absolute_path="/x", enabled=1)
+    session.add(r)
+    await session.flush()
+    ex = Exclusion(root_id=r.id, relative_path="tmp",
+                   excluded_by=u.id, excluded_at=now, reason=None)
+    session.add(ex)
+    await session.commit()
+    ex_id = ex.id
+
+    await session.delete(u)
+    await session.commit()
+
+    remaining = (await session.execute(
+        _select(Exclusion).where(Exclusion.id == ex_id)
+    )).scalar_one()
+    assert remaining.excluded_by is None
+    assert remaining.relative_path == "tmp"
+
+
+async def test_exclusion_unique_path_per_root(session):
+    now = int(time.time())
+    g = Gallery(name="ExG3", created_at=now)
+    session.add(g)
+    await session.flush()
+    r = GalleryRoot(gallery_id=g.id, label="l", absolute_path="/x", enabled=1)
+    session.add(r)
+    await session.flush()
+    session.add(Exclusion(root_id=r.id, relative_path="dup",
+                          excluded_by=None, excluded_at=now))
+    session.add(Exclusion(root_id=r.id, relative_path="dup",
+                          excluded_by=None, excluded_at=now))
+    from sqlalchemy.exc import IntegrityError
+    with pytest.raises(IntegrityError):
+        await session.commit()
