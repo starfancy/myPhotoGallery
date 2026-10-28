@@ -103,18 +103,23 @@ vi.mock("photoswipe/style.css", () => ({}))
 
 import ImageLightbox from "../components/ImageLightbox.vue"
 import { useAuthStore } from "../stores/auth"
+import type { ImageRow } from "../stores/browse"
+import { formatDateTime } from "../utils/datetime"
 
-const JPG = {
+// 用本地时区构造时间戳，断言时同样走 formatDateTime，避免时区依赖
+const MTIME_A = Math.floor(new Date(2024, 4, 1, 14, 30).getTime() / 1000)
+const TAKEN_B = Math.floor(new Date(2023, 8, 9, 8, 5).getTime() / 1000)
+const JPG: ImageRow = {
   id: 1, filename: "a.jpg", width: 4000, height: 3000, sha1: "sha-a",
-  size_bytes: 3 * 1024 * 1024, taken_at: null, is_raw: false,
+  size_bytes: 3 * 1024 * 1024, taken_at: null, mtime: MTIME_A, is_raw: false,
 }
-const BIG_JPG = {
+const BIG_JPG: ImageRow = {
   id: 2, filename: "big.jpg", width: 6000, height: 4000, sha1: "sha-b",
-  size_bytes: 8 * 1024 * 1024, taken_at: null, is_raw: false,
+  size_bytes: 8 * 1024 * 1024, taken_at: TAKEN_B, mtime: MTIME_A, is_raw: false,
 }
-const RAW = {
+const RAW: ImageRow = {
   id: 3, filename: "c.CR2", width: 4000, height: 3000, sha1: "sha-c",
-  size_bytes: 30 * 1024 *1024, taken_at: null, is_raw: true,
+  size_bytes: 30 * 1024 *1024, taken_at: null, mtime: MTIME_A, is_raw: true,
 }
 
 /** 构造一个绑定到 dataSource 第 dataIndex 项的测试 slide。 */
@@ -434,5 +439,26 @@ describe("ImageLightbox — 右下角显示比例", () => {
 
     inst.dispatch("change")
     expect(label.textContent).toBe("20%")
+  })
+})
+
+describe("ImageLightbox — 左下角拍摄时间", () => {
+  it("无 EXIF 时回退文件修改时间，切到有 EXIF 的图后刷新", async () => {
+    const { inst } = await mountLightbox([JPG, BIG_JPG])
+    const reg = findRegistered(inst, "capture-time-label")
+    expect(reg).toBeDefined()
+    // 必须挂全屏 wrapper 才能定位左下角
+    expect(reg!.appendTo).toBe("wrapper")
+    const label = document.querySelector<HTMLElement>(".pswp__capture-time-label")!
+
+    // 初始第 1 张（JPG）：taken_at 为 null，回退 mtime
+    expect(label.textContent).toBe(formatDateTime(MTIME_A))
+    expect(label.title).toBe("文件修改时间")
+
+    // 切到第 2 张（BIG_JPG）：显示 EXIF 拍摄时间
+    inst.currIndex = 1
+    inst.dispatch("change")
+    expect(label.textContent).toBe(formatDateTime(TAKEN_B))
+    expect(label.title).toBe("拍摄时间（EXIF）")
   })
 })

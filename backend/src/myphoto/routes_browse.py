@@ -327,6 +327,7 @@ async def list_images(
                 "sha1": r.sha1,
                 "size_bytes": r.size_bytes,
                 "taken_at": r.taken_at,
+                "mtime": r.mtime,
                 "is_raw": bool(r.is_raw),
             }
             for r in rows

@@ -93,6 +93,10 @@ def test_images_endpoint_root(client_with_data):
     assert r.headers["cache-control"] == "no-store"
     body = r.json()
     assert [i["filename"] for i in body["items"]] == ["a.jpg"]
+    # 文件修改时间随列表返回，供前端在无 EXIF 拍摄时间时回退显示
+    item = body["items"][0]
+    assert isinstance(item["mtime"], int)
+    assert item["mtime"] > 0
 
 
 def test_images_endpoint_subdir(client_with_data):

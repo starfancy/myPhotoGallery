@@ -14,8 +14,8 @@ beforeAll(() => {
 })
 
 const items = [
-  { id: 1, filename: "a.jpg", width: 400, height: 300, sha1: "sha1", size_bytes: 1, taken_at: null, is_raw: false },
-  { id: 2, filename: "b.jpg", width: 300, height: 400, sha1: "sha2", size_bytes: 1, taken_at: null, is_raw: false },
+  { id: 1, filename: "a.jpg", width: 400, height: 300, sha1: "sha1", size_bytes: 1, taken_at: null, mtime: 0, is_raw: false },
+  { id: 2, filename: "b.jpg", width: 300, height: 400, sha1: "sha2", size_bytes: 1, taken_at: null, mtime: 0, is_raw: false },
 ]
 
 async function mountGrid(role: "admin" | "viewer") {
@@ -55,6 +55,18 @@ describe("MasonryGrid", () => {
   it("does not render the three-dot menu button for viewer", async () => {
     const w = await mountGrid("viewer")
     expect(w.findAll('button[aria-label^="更多操作"]').length).toBe(0)
+  })
+
+  it("shows bottom filename captions only when showFilename is set", async () => {
+    const off = await mountGrid("viewer")
+    expect(off.findAll(".lb-cell-filename").length).toBe(0)
+
+    setActivePinia(createPinia())
+    const on = mount(MasonryGrid, { props: { items, showFilename: true } })
+    await flushPromises()
+    const caps = on.findAll(".lb-cell-filename")
+    expect(caps.length).toBe(items.length)
+    expect(caps[0].text()).toBe("a.jpg")
   })
 
   it("renders the three-dot menu button for admin", async () => {

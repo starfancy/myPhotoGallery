@@ -14,6 +14,7 @@ import {
   drawHistogram,
   type Histogram,
 } from "../lib/histogram"
+import { formatDateTime } from "../utils/datetime"
 
 const props = defineProps<{
   items: ImageRow[]
@@ -670,6 +671,20 @@ function open() {
       ? `${Math.round(slide.currZoomLevel * 100)}%`
       : ""
   }
+  // 左下角拍摄时间：优先 EXIF 拍摄时间，无则回退文件修改时间
+  let captureTimeEl: HTMLElement | null = null
+  const updateCaptureTime = () => {
+    if (!captureTimeEl) return
+    const it = pswp ? props.items[pswp.currIndex] : undefined
+    if (!it) {
+      captureTimeEl.textContent = ""
+      captureTimeEl.removeAttribute("title")
+      return
+    }
+    const fromExif = it.taken_at != null
+    captureTimeEl.textContent = formatDateTime(it.taken_at ?? it.mtime)
+    captureTimeEl.title = fromExif ? "拍摄时间（EXIF）" : "文件修改时间"
+  }
   pswp.on("imageSizeChange", ({ slide, width, height }) => {
     onImageSizeChange(slide, width, height)
   })
@@ -692,6 +707,7 @@ function open() {
     refreshHistPanelIfOpen()
     updateFilenameLabel()
     updateZoomRatio()
+    updateCaptureTime()
     // 相邻幻灯片的缩略图可能已预加载完成（不会再有 loadComplete），补调度预取
     const currSlide = pswp?.currSlide
     const currImg = currSlide?.content?.element as HTMLImageElement | undefined
@@ -727,6 +743,19 @@ function open() {
       onInit: (el) => {
         zoomRatioEl = el
         updateZoomRatio()
+      },
+    })
+    // 左下角：拍摄时间（EXIF 缺失时回退文件修改时间），同样挂到 wrapper
+    pswp!.ui!.registerElement({
+      name: "capture-time-label",
+      order: 21,
+      isButton: false,
+      tagName: "span",
+      className: "pswp__capture-time-label",
+      appendTo: "wrapper",
+      onInit: (el) => {
+        captureTimeEl = el
+        updateCaptureTime()
       },
     })
     // 缩放到 100% 自然尺寸（会触发 imageSizeChange 自动换原图）；再次点击收回
@@ -872,6 +901,23 @@ watch(
 .pswp__zoom-ratio-label {
   position: absolute;
   right: 12px;
+  bottom: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  line-height: 20px;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+  user-select: none;
+}
+
+/* ---- 左下角拍摄时间（与右下角比例同款胶囊样式，镜像到左侧） ---- */
+
+.pswp__capture-time-label {
+  position: absolute;
+  left: 12px;
   bottom: 10px;
   padding: 2px 8px;
   border-radius: 4px;

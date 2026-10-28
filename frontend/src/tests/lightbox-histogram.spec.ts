@@ -77,8 +77,8 @@ import ImageLightbox from "../components/ImageLightbox.vue"
 import { useAuthStore } from "../stores/auth"
 
 const IMAGES = [
-  { id: 1, filename: "a.jpg", width: 400, height: 300, sha1: "sha-a", size_bytes: 1, taken_at: null, is_raw: false },
-  { id: 2, filename: "b.jpg", width: 400, height: 300, sha1: "sha-b", size_bytes: 1, taken_at: null, is_raw: false },
+  { id: 1, filename: "a.jpg", width: 400, height: 300, sha1: "sha-a", size_bytes: 1, taken_at: null, mtime: 0, is_raw: false },
+  { id: 2, filename: "b.jpg", width: 400, height: 300, sha1: "sha-b", size_bytes: 1, taken_at: null, mtime: 0, is_raw: false },
 ]
 
 function fakeHist(mean = 128) {

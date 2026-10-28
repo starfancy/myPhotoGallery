@@ -10,6 +10,8 @@ export interface ImageRow {
   sha1: string
   size_bytes: number
   taken_at: number | null
+  /** 文件修改时间（Unix 秒）；taken_at 缺失时作为拍摄时间的回退显示 */
+  mtime: number
   is_raw: boolean
 }
 
