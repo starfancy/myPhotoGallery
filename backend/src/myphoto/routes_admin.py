@@ -18,7 +18,7 @@ from sqlalchemy import delete, func, select
 from myphoto.audit import write_audit
 from myphoto.deps import admin_required, require_lan_ip
 from myphoto.errors import AppError
-from myphoto.models import AuditLog, Gallery, GalleryRoot, Image, User, UserGallery
+from myphoto.models import AuditLog, Exclusion, Gallery, GalleryRoot, Image, User, UserGallery
 from myphoto.security import hash_password
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -416,6 +416,170 @@ async def admin_scan_status(
         "current_path": status["current_path"],
         "started_at": status["started_at"],
     }
+
+
+# ---- exclusions (P5) ----
+
+
+class ExclusionCreate(BaseModel):
+    absolute_path: str = Field(min_length=1, max_length=4096)
+    reason: str | None = Field(None, max_length=500)
+
+
+async def _get_root_or_404(s, gid: int, rid: int) -> GalleryRoot:
+    r = (
+        await s.execute(
+            select(GalleryRoot).where(
+                GalleryRoot.id == rid, GalleryRoot.gallery_id == gid
+            )
+        )
+    ).scalar_one_or_none()
+    if r is None:
+        raise AppError("not_found", 404, "root not found")
+    return r
+
+
+def _exclusion_payload(e: Exclusion, username: str | None) -> dict:
+    return {
+        "id": e.id,
+        "relative_path": e.relative_path,
+        "reason": e.reason,
+        "excluded_by": e.excluded_by,
+        "excluded_by_username": username,
+        "excluded_at": e.excluded_at,
+    }
+
+
+def _validate_path_within_root(raw_path: str, root: GalleryRoot) -> tuple[Path, str]:
+    """Resolve an admin-supplied path and enforce it is a real directory
+    strictly inside the root. Returns (resolved, posix relative path)."""
+    # Rule 5 (mirrors browse-fs): reject any '..' segment before resolution
+    # so traversal attempts are refused as invalid rather than normalized away.
+    if any(part == ".." for part in raw_path.replace("\\", "/").split("/")):
+        raise AppError("path_invalid", 400, "path must not contain '..' segments")
+    raw = Path(raw_path)
+    try:
+        if raw.is_symlink():
+            raise AppError("path_invalid", 400, "symlinks are not permitted")
+    except OSError:
+        raise AppError("path_not_readable", 400, f"path not readable: {raw_path}")
+    root_p = Path(root.absolute_path).resolve()
+    p = raw.resolve()
+    if p == root_p:
+        raise AppError("path_invalid", 400, "cannot exclude the root itself")
+    try:
+        rel = p.relative_to(root_p)
+    except ValueError:
+        raise AppError("path_invalid", 400, "path is outside the root")
+    if not p.exists() or not p.is_dir():
+        raise AppError("path_not_readable", 400, f"path not readable: {raw_path}")
+    return p, rel.as_posix()
+
+
+@router.get("/galleries/{gid}/roots/{rid}/exclusions")
+async def admin_list_exclusions(
+    gid: int,
+    rid: int,
+    request: Request,
+    response: Response,
+    _admin: User = Depends(admin_required),
+):
+    response.headers["Cache-Control"] = "no-store"
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        await _get_root_or_404(s, gid, rid)
+        rows = (
+            await s.execute(
+                select(Exclusion, User.username)
+                .join(User, User.id == Exclusion.excluded_by, isouter=True)
+                .where(Exclusion.root_id == rid)
+                .order_by(Exclusion.id)
+            )
+        ).all()
+        return {
+            "root_id": rid,
+            "entries": [_exclusion_payload(e, username) for e, username in rows],
+        }
+
+
+@router.post("/galleries/{gid}/roots/{rid}/exclusions", status_code=201)
+async def admin_create_exclusion(
+    gid: int,
+    rid: int,
+    body: ExclusionCreate,
+    request: Request,
+    admin: User = Depends(admin_required),
+):
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        root = await _get_root_or_404(s, gid, rid)
+        _, rel_posix = _validate_path_within_root(body.absolute_path, root)
+
+        dup = (
+            await s.execute(
+                select(Exclusion).where(
+                    Exclusion.root_id == rid,
+                    Exclusion.relative_path == rel_posix,
+                )
+            )
+        ).scalar_one_or_none()
+        if dup is not None:
+            raise AppError("conflict", 409, "this directory is already excluded")
+
+        reason = body.reason.strip() if body.reason and body.reason.strip() else None
+        e = Exclusion(
+            root_id=rid,
+            relative_path=rel_posix,
+            excluded_by=admin.id,
+            excluded_at=int(time.time()),
+            reason=reason,
+        )
+        s.add(e)
+        await s.flush()
+        detail = f"root={rid} path={rel_posix}"
+        if reason:
+            detail += f" reason={reason}"
+        await write_audit(
+            s, "exclusion_add", admin.id, _client_ip(request),
+            target=f"exclusion:{e.id}", detail=detail[:200],
+        )
+        await s.commit()
+        payload = _exclusion_payload(e, admin.username)
+
+    await request.app.state.scanner.request_rescan(rid)
+    return payload
+
+
+@router.delete("/galleries/{gid}/roots/{rid}/exclusions/{eid}", status_code=204)
+async def admin_delete_exclusion(
+    gid: int,
+    rid: int,
+    eid: int,
+    request: Request,
+    admin: User = Depends(admin_required),
+):
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        await _get_root_or_404(s, gid, rid)
+        e = (
+            await s.execute(
+                select(Exclusion).where(
+                    Exclusion.id == eid, Exclusion.root_id == rid
+                )
+            )
+        ).scalar_one_or_none()
+        if e is None:
+            raise AppError("not_found", 404, "exclusion not found")
+        rel_posix = e.relative_path
+        await write_audit(
+            s, "exclusion_remove", admin.id, _client_ip(request),
+            target=f"exclusion:{eid}",
+            detail=f"root={rid} path={rel_posix}"[:200],
+        )
+        await s.delete(e)
+        await s.commit()
+
+    await request.app.state.scanner.request_rescan(rid)
 
 
 # ---- browse-fs (directory chooser) ----
