@@ -152,20 +152,25 @@ class Scanner:
         await self._queue.put(root_id)
 
     async def request_rescan(self, root_id: int) -> None:
-        """P5: 排除变更触发的重扫请求。
+        """P5: 排除变更触发的重扫请求（保证不丢请求）。
 
-        - root 空闲/排队：等同 enqueue（排队中由 _enqueued 去重）
-        - 扫描进行中：打 redirty 标记，本轮 worker 结束后自动再跑一遍，
-          避免 enqueue 的进行中去重把变更静默吞掉。
+        单临界区判定（消除两次加锁间的 TOCTOU）：
+        - 不在 _enqueued（真空闲）：直接入队；
+        - 在 _enqueued 且 status=="queued"：该轮尚未开始、扫描开头会重新读取
+          排除集合，变更自然被看到，无需额外重跑；
+        - 在 _enqueued 且 status=="running" 或已翻 "idle"（扫描结束窗口：
+          scan_finish 审计 await 期间 worker 尚未清 _enqueued）：打 redirty
+          标记，worker 收尾后保证再跑一遍。
         """
         async with self._lock:
-            status = self._status.get(root_id)
-            running = status is not None and status.status == "running"
-        if running:
-            async with self._lock:
+            if root_id in self._enqueued:
+                status = self._status.get(root_id)
+                state = status.status if status is not None else None
+                if state == "queued":
+                    return
                 self._redirty.add(root_id)
-        else:
-            await self.enqueue(root_id)
+                return
+        await self.enqueue(root_id)
 
     def get_status(self, root_id: int) -> dict[str, str | int | None]:
         status = self._status.get(root_id, _RootStatus())

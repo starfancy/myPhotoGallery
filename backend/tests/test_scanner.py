@@ -15,6 +15,7 @@ from myphoto.db import create_all, make_engine, make_sessionmaker
 from myphoto.models import Exclusion, Folder, Gallery, GalleryRoot, Image
 from myphoto.scanner import (
     Scanner,
+    _RootStatus,
     _extract_exif_json,
     _process_file,
     _read_image_meta,
@@ -761,3 +762,111 @@ async def test_request_rescan_while_running_marks_redirty(env, monkeypatch):
     await scanner.stop()
     assert runs == 2
     assert scanner.get_status(root_id)["status"] == "idle"
+
+
+async def test_request_rescan_in_end_window_marks_redirty(env):
+    """Scan-end limbo (the exact drop race): the worker still holds the
+    _enqueued entry (its finally runs only after the scan_finish audit await),
+    while status has already flipped to "idle". A rescan request in that window
+    must mark redirty instead of falling through to enqueue's in-flight dedup,
+    which would silently no-op and lose the exclusion change."""
+    _root_dir, sm, root_id = env
+    scanner = Scanner(sm)  # no worker started — state is set up deterministically
+
+    scanner._enqueued.add(root_id)
+    scanner._status[root_id] = _RootStatus(status="idle")
+
+    await scanner.request_rescan(root_id)
+
+    assert root_id in scanner._redirty
+    # Must not have queued anything: the still-enqueued run will pick up the
+    # redirty mark in its finally and enqueue the guaranteed rerun itself.
+    assert scanner._queue.qsize() == 0
+
+
+async def test_request_rescan_while_queued_does_not_redirty(env, monkeypatch):
+    """A rescan request for a root whose scan has not started yet ("queued")
+    needs no extra rerun: that scan re-reads the exclusion set at its start, so
+    the change is naturally seen. Root B must run exactly once."""
+    root_dir, sm, root_a = env
+    _jpg(root_dir / "a.jpg")
+
+    dir_b = root_dir.parent / "photos_b"
+    dir_b.mkdir()
+    _jpg(dir_b / "b.jpg")
+    async with sm() as session:
+        first = await session.get(GalleryRoot, root_a)
+        root_b_row = GalleryRoot(
+            gallery_id=first.gallery_id,
+            label="R2",
+            absolute_path=str(dir_b.resolve()),
+            enabled=1,
+        )
+        session.add(root_b_row)
+        await session.commit()
+        await session.refresh(root_b_row)
+        root_b = root_b_row.id
+
+    import myphoto.scanner as sc
+
+    gate = threading.Event()
+    real_process = sc._process_file
+
+    def gated(path, is_raw):
+        gate.wait(timeout=5)
+        return real_process(path, is_raw)
+
+    monkeypatch.setattr(sc, "_process_file", gated)
+
+    scanner = Scanner(sm)
+    counts: dict[int, int] = {}
+    original = scanner.scan_root_now
+
+    async def counting(rid):
+        counts[rid] = counts.get(rid, 0) + 1
+        return await original(rid)
+
+    scanner.scan_root_now = counting  # instance attr shadows bound method
+
+    await scanner.start()
+    await scanner.enqueue(root_a)
+    await scanner.enqueue(root_b)
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if scanner.get_status(root_a)["status"] == "running":
+            break
+        await asyncio.sleep(0.01)
+    # Single worker: while A is running (gated) B is guaranteed still queued.
+    assert scanner.get_status(root_a)["status"] == "running"
+    assert scanner.get_status(root_b)["status"] == "queued"
+
+    qsize_before = scanner._queue.qsize()
+    await scanner.request_rescan(root_b)
+    assert root_b not in scanner._redirty
+    assert scanner._queue.qsize() == qsize_before
+
+    gate.set()
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if (
+            scanner.get_status(root_a)["status"] == "idle"
+            and scanner.get_status(root_b)["status"] == "idle"
+        ):
+            break
+        await asyncio.sleep(0.02)
+    await scanner.stop()
+
+    assert scanner.get_status(root_a)["status"] == "idle"
+    assert scanner.get_status(root_b)["status"] == "idle"
+    assert counts.get(root_a) == 1
+    assert counts.get(root_b) == 1
+
+    async with sm() as session:
+        rels_b = [
+            row.relative_path
+            for row in (
+                await session.execute(select(Image).where(Image.root_id == root_b))
+            ).scalars()
+        ]
+    assert rels_b == ["b.jpg"]
