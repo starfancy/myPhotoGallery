@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 from PIL import Image as PILImage
 from PIL.TiffImagePlugin import IFDRational
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import Folder, Gallery, GalleryRoot, Image
+from myphoto.models import Exclusion, Folder, Gallery, GalleryRoot, Image
 from myphoto.scanner import (
     Scanner,
     _extract_exif_json,
@@ -635,3 +635,129 @@ async def test_scanner_hash_workers_override(env):
     assert Scanner(sm, hash_workers=0)._hash_workers == sc._HASH_WORKERS
     assert Scanner(sm, hash_workers=-2)._hash_workers == sc._HASH_WORKERS
     assert Scanner(sm, hash_workers=3)._hash_workers == 3
+
+
+# ---------- P5: exclusions pruning ----------
+
+
+async def _add_exclusion(sm, root_id: int, rel: str) -> None:
+    async with sm() as session:
+        session.add(Exclusion(root_id=root_id, relative_path=rel,
+                              excluded_by=None, excluded_at=int(time.time())))
+        await session.commit()
+
+
+async def test_excluded_directory_pruned_from_index(env):
+    root_dir, sm, root_id = env
+    _jpg(root_dir / "keep.jpg")
+    _jpg(root_dir / "a" / "b" / "x.jpg")
+    _jpg(root_dir / "a" / "bc" / "y.jpg")
+    _jpg(root_dir / "a" / "b" / "deep" / "z.jpg")
+
+    await Scanner(sm).scan_root_now(root_id)
+
+    await _add_exclusion(sm, root_id, "a/b")
+    await Scanner(sm).scan_root_now(root_id)
+
+    async with sm() as session:
+        rels = sorted(
+            row.relative_path
+            for row in (await session.execute(select(Image))).scalars()
+        )
+        assert rels == ["a/bc/y.jpg", "keep.jpg"]
+        folder_rels = {
+            row.relative_path
+            for row in (await session.execute(select(Folder))).scalars()
+        }
+        assert "a/b" not in folder_rels
+        assert "a/b/deep" not in folder_rels
+        assert "a/bc" in folder_rels and "a" in folder_rels
+
+
+async def test_unexclude_restores_on_rescan(env):
+    root_dir, sm, root_id = env
+    _jpg(root_dir / "a" / "b" / "x.jpg")
+    scanner = Scanner(sm)
+    await scanner.scan_root_now(root_id)
+    await _add_exclusion(sm, root_id, "a/b")
+    await scanner.scan_root_now(root_id)
+    async with sm() as session:
+        assert (await session.execute(select(Image))).scalars().all() == []
+
+    async with sm() as session:
+        await session.execute(delete(Exclusion).where(Exclusion.root_id == root_id))
+        await session.commit()
+    await Scanner(sm).scan_root_now(root_id)
+    async with sm() as session:
+        rels = [row.relative_path for row in (
+            await session.execute(select(Image))).scalars()]
+        assert rels == ["a/b/x.jpg"]
+
+
+async def test_exclusion_for_missing_directory_is_harmless(env):
+    root_dir, sm, root_id = env
+    _jpg(root_dir / "keep.jpg")
+    await _add_exclusion(sm, root_id, "no/such/dir")
+    await Scanner(sm).scan_root_now(root_id)
+    async with sm() as session:
+        rels = [row.relative_path for row in (
+            await session.execute(select(Image))).scalars()]
+        assert rels == ["keep.jpg"]
+
+
+async def test_request_rescan_while_idle_enqueues(env):
+    _root_dir, sm, root_id = env
+    scanner = Scanner(sm)
+    await scanner.request_rescan(root_id)
+    assert scanner.get_status(root_id)["status"] == "queued"
+
+
+async def test_request_rescan_while_running_marks_redirty(env, monkeypatch):
+    root_dir, sm, root_id = env
+    for n in range(2):
+        _jpg(root_dir / f"{n}.jpg")
+
+    import myphoto.scanner as sc
+    gate = threading.Event()
+    real_process = sc._process_file
+
+    def gated(path, is_raw):
+        gate.wait(timeout=5)
+        return real_process(path, is_raw)
+
+    monkeypatch.setattr(sc, "_process_file", gated)
+
+    scanner = Scanner(sm)
+    runs = 0
+    original = scanner.scan_root_now
+
+    async def counting(rid):
+        nonlocal runs
+        runs += 1
+        return await original(rid)
+
+    scanner.scan_root_now = counting  # instance attr shadows bound method
+
+    await scanner.start()
+    await scanner.enqueue(root_id)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if scanner.get_status(root_id)["status"] == "running":
+            break
+        await asyncio.sleep(0.01)
+    assert scanner.get_status(root_id)["status"] == "running"
+
+    # 3 requests while running must collapse into exactly one extra run.
+    await scanner.request_rescan(root_id)
+    await scanner.request_rescan(root_id)
+    await scanner.request_rescan(root_id)
+    gate.set()
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if runs >= 2 and scanner.get_status(root_id)["status"] == "idle":
+            break
+        await asyncio.sleep(0.02)
+    await scanner.stop()
+    assert runs == 2
+    assert scanner.get_status(root_id)["status"] == "idle"

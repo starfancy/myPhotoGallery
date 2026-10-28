@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from myphoto.audit import write_audit
 from myphoto.formats import classify, is_supported
-from myphoto.models import Folder, GalleryRoot, Image
+from myphoto.models import Exclusion, Folder, GalleryRoot, Image
 
 log = logging.getLogger("myphoto.scanner")
 
@@ -125,6 +125,7 @@ class Scanner:
         self._enqueued: set[int] = set()
         self._worker: asyncio.Task[None] | None = None
         self._status: dict[int, _RootStatus] = {}
+        self._redirty: set[int] = set()
         self._lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -150,6 +151,22 @@ class Scanner:
             self._status.setdefault(root_id, _RootStatus()).status = "queued"
         await self._queue.put(root_id)
 
+    async def request_rescan(self, root_id: int) -> None:
+        """P5: 排除变更触发的重扫请求。
+
+        - root 空闲/排队：等同 enqueue（排队中由 _enqueued 去重）
+        - 扫描进行中：打 redirty 标记，本轮 worker 结束后自动再跑一遍，
+          避免 enqueue 的进行中去重把变更静默吞掉。
+        """
+        async with self._lock:
+            status = self._status.get(root_id)
+            running = status is not None and status.status == "running"
+        if running:
+            async with self._lock:
+                self._redirty.add(root_id)
+        else:
+            await self.enqueue(root_id)
+
     def get_status(self, root_id: int) -> dict[str, str | int | None]:
         status = self._status.get(root_id, _RootStatus())
         return {
@@ -173,7 +190,12 @@ class Scanner:
             finally:
                 async with self._lock:
                     self._enqueued.discard(root_id)
+                    needs_rerun = root_id in self._redirty
+                    if needs_rerun:
+                        self._redirty.discard(root_id)
                 self._queue.task_done()
+                if needs_rerun:
+                    await self.enqueue(root_id)
 
     async def scan_root_now(self, root_id: int) -> None:
         status = self._status.setdefault(root_id, _RootStatus())
@@ -245,9 +267,18 @@ class Scanner:
             if root is None:
                 raise RuntimeError(f"root {root_id} not found")
             absolute_root = Path(root.absolute_path)
+            excluded_rel_paths = set(
+                (await session.execute(
+                    select(Exclusion.relative_path).where(
+                        Exclusion.root_id == root_id
+                    )
+                )).scalars().all()
+            )
 
         status.phase = "walking"
-        walked_dirs, walked_files = await asyncio.to_thread(_walk_root, absolute_root)
+        walked_dirs, walked_files = await asyncio.to_thread(
+            _walk_root, absolute_root, excluded_rel_paths,
+        )
         status.total_files = len(walked_files)
         status.processed_files = 0
 
@@ -440,10 +471,13 @@ class Scanner:
         await self._audit(root_id, "scan_error", detail=error)
 
 
-def _walk_root(root: Path) -> tuple[set[str], dict[str, _WalkedFile]]:
+def _walk_root(
+    root: Path, excluded_rel_paths: set[str] | None = None
+) -> tuple[set[str], dict[str, _WalkedFile]]:
     if not root.exists() or not root.is_dir():
         raise RuntimeError(f"root path missing: {root}")
 
+    excluded: set[str] = excluded_rel_paths or set()
     walked_dirs: set[str] = {""}
     walked_files: dict[str, _WalkedFile] = {}
     walk_errors: list[OSError] = []
@@ -456,16 +490,22 @@ def _walk_root(root: Path) -> tuple[set[str], dict[str, _WalkedFile]]:
         root, topdown=True, onerror=onerror, followlinks=False
     ):
         current = Path(dirpath)
-        dirnames[:] = [
-            dirname
-            for dirname in dirnames
-            if not dirname.startswith(".")
-            and dirname != "__pycache__"
-            and not (current / dirname).is_symlink()
-        ]
         relative_dir = current.relative_to(root).as_posix()
         if relative_dir == ".":
             relative_dir = ""
+
+        def _kept(dirname: str) -> bool:
+            # P5: exact segment match — excluding "a/b" must not touch "a/bc".
+            child_rel = f"{relative_dir}/{dirname}" if relative_dir else dirname
+            if child_rel in excluded:
+                return False
+            if dirname.startswith(".") or dirname == "__pycache__":
+                return False
+            if (current / dirname).is_symlink():
+                return False
+            return True
+
+        dirnames[:] = [dirname for dirname in dirnames if _kept(dirname)]
         walked_dirs.add(relative_dir)
 
         for filename in filenames:
