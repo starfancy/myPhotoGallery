@@ -24,13 +24,33 @@
             </button>
           </template>
         </template>
-        <GridLayoutSwitch v-model="gridLayout" class="ml-auto" />
+        <div class="ml-auto flex items-center gap-1.5">
+          <GridLayoutSwitch v-model="gridLayout" />
+          <button type="button"
+                  class="flex items-center rounded px-1.5 py-1"
+                  :class="showFilenames
+                          ? 'bg-neutral-700 text-white'
+                          : 'text-neutral-400 hover:text-neutral-200'"
+                  title="缩略图上显示文件名"
+                  aria-label="缩略图上显示文件名"
+                  :aria-pressed="showFilenames"
+                  @click="showFilenames = !showFilenames">
+            <!-- 图片卡片 + 底部文字行 -->
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+                 stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
+                 aria-hidden="true">
+              <rect x="1.5" y="1.5" width="13" height="13" rx="1.5" />
+              <path d="M5 11h6" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid" />
       <component :is="gridComponent" v-if="images.length" :items="images"
                      :selection-mode="selectionMode"
                      :selected-ids="selectedIds"
+                     :show-filename="showFilenames"
                      @open="onOpen"
                      @menu-action="onGridMenuAction"
                      @toggle-select="onToggleSelect" />
@@ -133,6 +153,10 @@ watch(gridLayout, (v) => localStorage.setItem(GRID_LAYOUT_KEY, v))
 const gridComponent = computed(() =>
   gridLayout.value === "masonry" ? MasonryGrid : JustifiedGrid,
 )
+
+const SHOW_FILENAMES_KEY = "browse.grid.showFilenames"
+const showFilenames = ref(localStorage.getItem(SHOW_FILENAMES_KEY) === "1")
+watch(showFilenames, (v) => localStorage.setItem(SHOW_FILENAMES_KEY, v ? "1" : "0"))
 
 // ---------- selection mode ----------
 

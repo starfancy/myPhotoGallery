@@ -60,12 +60,12 @@ function linkFor(rel: string) {
 /*
  * auto-fill + 1fr：卡片等比拉伸铺满整行，左右边缘与图片网格
  * （JustifiedGrid/MasonryGrid 均为内容区满宽）严格对齐；
- * 最小列宽 128（原 w-32），间距与图片网格同为 12px。
+ * 最小列宽 128（原 w-32），间距与图片网格同为 16px。
  */
 .lb-folder-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-  gap: 12px;
+  gap: 16px;
 }
 /* 借来的封面：图底黑色渐变，托住白色来源名 */
 .lb-folder-source {

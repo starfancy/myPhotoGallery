@@ -16,6 +16,12 @@
            :alt="filename"
            class="h-full w-full object-cover" />
     </button>
+    <!-- 文件名开关：底部渐变阴影上居中显示文件名；不拦截点击 -->
+    <div v-if="showFilename"
+         class="lb-cell-filename pointer-events-none truncate text-center"
+         :title="filename">
+      {{ filename }}
+    </div>
     <!-- 选择模式：左上角勾选圈；非选择模式也保留一个可显示的空框，避免选择切换后布局跳动 -->
     <button v-if="selectionMode"
             type="button"
@@ -54,6 +60,8 @@ const props = defineProps<{
   selectionMode?: boolean
   /** 是否显示三点菜单（admin 且非选择模式） */
   showMenu?: boolean
+  /** 是否在底部渐变阴影上叠加文件名 */
+  showFilename?: boolean
   /** 单元格尺寸/定位样式：行排版给宽高，列排版给 grid-row span */
   cellStyle?: Record<string, string | number>
 }>()
@@ -95,6 +103,19 @@ function onTouchEnd() {
 .lb-grid-cell--selected {
   outline: 3px solid rgb(37 99 235);
   outline-offset: -3px;
+}
+.lb-cell-filename {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: 18px 6px 5px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.3;
+  /* truncate / text-center 由工具类提供；超长省略号，hover 看 title 全名 */
 }
 .lb-cell-menu-btn {
   position: absolute;

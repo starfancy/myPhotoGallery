@@ -10,6 +10,7 @@
                  :selected="isSelected(cell.id)"
                  :selection-mode="selectionMode"
                  :show-menu="isAdmin && !selectionMode"
+                 :show-filename="showFilename"
                  :cell-style="{ width: `${cell.scaledW}px`, height: `${cell.scaledH}px` }"
                  @activate="onCellClick(cell.id)"
                  @toggle-select="toggleSelect(cell.id)"
@@ -36,6 +37,8 @@ const props = defineProps<{
   selectionMode?: boolean
   /** 已选图片 id。父组件保持权威状态；此组件仅发出 toggle 事件。 */
   selectedIds?: Set<number>
+  /** 在缩略图底部渐变阴影上叠加文件名 */
+  showFilename?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -66,7 +69,7 @@ onUnmounted(() => {
   ro?.disconnect()
 })
 
-const gap = 12
+const gap = 16
 
 const rows = computed(() => {
   const input: (LayoutInput & { id: number; sha1: string; filename: string })[] = props.items.map((it) => ({
