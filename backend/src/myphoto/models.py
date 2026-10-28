@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -18,9 +18,6 @@ class User(Base):
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[int] = mapped_column(Integer, nullable=False)
     last_login_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # P5: 删用户时 ORM 把 exclusions.excluded_by 置空（无 passive_deletes，
-    # UOW 主动发 UPDATE；DB 层 ON DELETE SET NULL 作为兜底）
-    exclusions: Mapped[list["Exclusion"]] = relationship("Exclusion")
 
 
 class Gallery(Base):

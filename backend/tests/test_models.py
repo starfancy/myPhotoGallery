@@ -305,7 +305,7 @@ async def test_exclusion_cascades_when_root_deleted(session):
 
 
 async def test_exclusion_excluded_by_set_null_when_user_deleted(session):
-    from sqlalchemy import select as _select
+    from sqlalchemy import text
     now = int(time.time())
     u = User(username="ex-admin", password_hash="x", role="admin",
              access_scope="lan_only", enabled=1, created_at=now)
@@ -325,11 +325,30 @@ async def test_exclusion_excluded_by_set_null_when_user_deleted(session):
     await session.delete(u)
     await session.commit()
 
-    remaining = (await session.execute(
-        _select(Exclusion).where(Exclusion.id == ex_id)
-    )).scalar_one()
-    assert remaining.excluded_by is None
-    assert remaining.relative_path == "tmp"
+    # 绕过 ORM identity map 直接读物理行：否则同一 session 里缓存的
+    # excluded_by 旧值会让断言在没有数据库层 ON DELETE SET NULL 时也通过。
+    session.expire_all()
+    row = (await session.execute(
+        text("SELECT excluded_by, relative_path FROM exclusions WHERE id = :id"),
+        {"id": ex_id},
+    )).first()
+    assert row is not None
+    assert row[0] is None  # DB 层 ON DELETE SET NULL 生效
+    assert row[1] == "tmp"  # 排除规则本身保留
+
+
+async def test_exclusion_foreign_key_actions_ddl(session):
+    """P5: exclusions 的外键动作为数据库级 DDL（不依赖 ORM relationship）。
+
+    PRAGMA foreign_key_list 列: id, seq, table, from, to, on_update, on_delete, match
+    """
+    from sqlalchemy import text
+    rows = (await session.execute(
+        text("PRAGMA foreign_key_list(exclusions)")
+    )).all()
+    on_delete = {row[3]: row[6] for row in rows}
+    assert on_delete.get("root_id") == "CASCADE"
+    assert on_delete.get("excluded_by") == "SET NULL"
 
 
 async def test_exclusion_unique_path_per_root(session):
