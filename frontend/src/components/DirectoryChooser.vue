@@ -83,10 +83,12 @@ import { apiPost, HttpError } from "../api"
 interface Props {
   modelValue: boolean
   startPath?: string
+  rootId?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   startPath: "",
+  rootId: undefined,
 })
 
 const emit = defineEmits<{
@@ -161,7 +163,9 @@ async function browse(path: string) {
   loading.value = true
   error.value = ""
   try {
-    const data = await apiPost<BrowseResponse>("/api/admin/browse-fs", { path })
+    const body: { path: string; root_id?: number } = { path }
+    if (props.rootId !== undefined) body.root_id = props.rootId
+    const data = await apiPost<BrowseResponse>("/api/admin/browse-fs", body)
     currentPath.value = data.path
     entries.value = data.entries
     truncated.value = data.truncated

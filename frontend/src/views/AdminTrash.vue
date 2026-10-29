@@ -97,7 +97,7 @@
                   {{ formatTs(e.deleted_at) }}
                 </td>
                 <td class="px-3 py-2 text-xs text-neutral-500">
-                  {{ formatTs(e.purge_after) }}
+                  {{ formatPurgeAfter(e.purge_after) }}
                 </td>
                 <td class="px-3 py-2 space-x-2">
                   <button type="button"
@@ -133,6 +133,7 @@
 import { computed, onMounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiGet, apiPost, apiDelete, HttpError } from "../api"
+import { formatPurgeAfter } from "../utils/datetime"
 
 interface TrashEntry {
   id: number

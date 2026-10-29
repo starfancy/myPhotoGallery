@@ -85,10 +85,44 @@
                         class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
                   {{ r.enabled ? "禁用" : "启用" }}
                 </button>
+                <button @click="toggleExclusions(r.id)"
+                        class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                  排除目录
+                </button>
                 <button @click="confirmRemoveRoot(r.id, r.label)"
                         class="ml-auto rounded bg-red-800 px-2 py-1 text-xs hover:bg-red-700">
                   移除
                 </button>
+              </div>
+              <div v-if="exclusionPanels[r.id]" class="mt-2 rounded bg-neutral-800/50 p-2">
+                <div v-if="exclusionsLoading[r.id]" class="text-xs text-neutral-400">加载中...</div>
+                <div v-else-if="exclusionsError[r.id]" class="text-xs text-red-400">
+                  {{ exclusionsError[r.id] }}
+                </div>
+                <template v-else>
+                  <ul v-if="(exclusions[r.id] || []).length"
+                      class="divide-y divide-neutral-800 text-xs">
+                    <li v-for="e in exclusions[r.id]" :key="e.id"
+                        class="flex items-center gap-2 py-1.5">
+                      <span class="min-w-0 flex-1 truncate font-mono" :title="e.relative_path">
+                        {{ e.relative_path }}
+                      </span>
+                      <span v-if="e.reason" class="truncate text-neutral-500" :title="e.reason">
+                        {{ e.reason }}
+                      </span>
+                      <span class="shrink-0 text-neutral-500">{{ e.excluded_by_username || "—" }}</span>
+                      <button @click="removeExclusion(r, e)"
+                              class="shrink-0 rounded bg-neutral-700 px-2 py-0.5 hover:bg-neutral-600">
+                        解除
+                      </button>
+                    </li>
+                  </ul>
+                  <div v-else class="py-1 text-xs text-neutral-500">尚未排除任何目录</div>
+                  <button @click="openExclusionChooser(r)"
+                          class="mt-2 rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                    + 添加排除目录
+                  </button>
+                </template>
               </div>
             </div>
 
@@ -102,7 +136,12 @@
       </template>
     </main>
 
-    <!-- DirectoryChooser modal -->
+    <!-- DirectoryChooser modals: the exclusion chooser is listed first so that
+         (when open) component queries resolve to the root-confined instance. -->
+    <DirectoryChooser v-model="showExclusionChooser"
+                      :start-path="chooserStartPath"
+                      :root-id="chooserRootId ?? undefined"
+                      @confirm="onExclusionChosen" />
     <DirectoryChooser v-model="showChooser" @confirm="onPathChosen" />
   </div>
 </template>
@@ -112,7 +151,7 @@ import { onMounted, onUnmounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import AppHeader from "../components/AppHeader.vue"
 import DirectoryChooser from "../components/DirectoryChooser.vue"
-import { apiGet, apiPatch, apiPost, apiDelete, HttpError } from "../api"
+import { apiGet, apiPatch, apiPost, apiDelete, HttpError, errorMessage } from "../api"
 
 interface RootInfo {
   id: number
@@ -153,6 +192,86 @@ const saveSuccess = ref(false)
 const saveError = ref("")
 
 const showChooser = ref(false)
+
+interface ExclusionEntry {
+  id: number
+  relative_path: string
+  reason: string | null
+  excluded_by: number | null
+  excluded_by_username: string | null
+  excluded_at: number
+}
+
+const exclusionPanels = ref<Record<number, boolean>>({})
+const exclusions = ref<Record<number, ExclusionEntry[]>>({})
+const exclusionsLoading = ref<Record<number, boolean>>({})
+const exclusionsError = ref<Record<number, string>>({})
+const showExclusionChooser = ref(false)
+const chooserRootId = ref<number | null>(null)
+const chooserStartPath = ref("")
+
+function exclusionUrl(rid: number) {
+  return `/api/admin/galleries/${gid}/roots/${rid}/exclusions`
+}
+
+async function loadExclusions(rid: number) {
+  exclusionsLoading.value[rid] = true
+  exclusionsError.value[rid] = ""
+  try {
+    const d = await apiGet<{ root_id: number; entries: ExclusionEntry[] }>(
+      exclusionUrl(rid),
+    )
+    exclusions.value[rid] = d.entries
+  } catch (err) {
+    exclusionsError.value[rid] = errorMessage(err, "加载失败")
+  } finally {
+    exclusionsLoading.value[rid] = false
+  }
+}
+
+async function toggleExclusions(rid: number) {
+  const open = !exclusionPanels.value[rid]
+  exclusionPanels.value[rid] = open
+  if (open && exclusions.value[rid] === undefined) {
+    await loadExclusions(rid)
+  }
+}
+
+async function removeExclusion(r: RootInfo, e: ExclusionEntry) {
+  if (!window.confirm(
+    `解除对「${e.relative_path}」的排除？\n\n该目录将在下次扫描时重新纳入图库，本地文件不会被改动。`,
+  )) return
+  try {
+    await apiDelete(`${exclusionUrl(r.id)}/${e.id}`)
+    // Fire the gallery reload first: both async calls dispatch their fetch
+    // synchronously up to the first await, and tests queue gallery before
+    // exclusions responses.
+    await Promise.all([loadGallery(true), loadExclusions(r.id)])
+  } catch (err) {
+    exclusionsError.value[r.id] = errorMessage(err, "解除失败")
+  }
+}
+
+function openExclusionChooser(r: RootInfo) {
+  chooserRootId.value = r.id
+  chooserStartPath.value = r.absolute_path
+  showExclusionChooser.value = true
+}
+
+async function onExclusionChosen(path: string) {
+  const rid = chooserRootId.value
+  if (rid === null) return
+  const reason = window.prompt("备注（可留空）：", "")
+  try {
+    await apiPost(exclusionUrl(rid), {
+      absolute_path: path,
+      reason: reason && reason.trim() ? reason.trim() : null,
+    })
+    await Promise.all([loadGallery(true), loadExclusions(rid)])
+  } catch (err) {
+    exclusionsError.value[rid] = errorMessage(err, "添加失败")
+  }
+}
 
 async function loadGallery(silent = false) {
   if (!silent) loading.value = true
