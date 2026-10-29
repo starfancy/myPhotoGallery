@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import datetime
 import logging
 import os
 import time
@@ -52,6 +54,59 @@ def is_under_trash_dir(candidate: Path, root: GalleryRoot) -> bool:
     except ValueError:
         return False
     return True
+
+
+_DEFAULT_PURGE_HOUR = 3
+_DEFAULT_PURGE_MINUTE = 30
+
+
+def next_daily_run(
+    now_dt: datetime.datetime, hour: int, minute: int
+) -> datetime.datetime:
+    """今天 hour:minute（未到）→ 今天；已到/越界配置 → 明天。
+
+    非法 hour/minute 回退 03:30 而非抛异常（配置被手改不应拖垮启动）。
+    """
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        hour, minute = _DEFAULT_PURGE_HOUR, _DEFAULT_PURGE_MINUTE
+    target = now_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now_dt:
+        target += datetime.timedelta(days=1)
+    return target
+
+
+async def daily_purge_loop(sessionmaker, config_getter) -> None:
+    """P5: 每日按 [trash] purge_hour/purge_minute 跑一次到期清理。
+
+    config_getter 每轮读取，设置页改了时刻下一轮即生效。CancelledError
+    向外传播供 lifespan 关停；其他异常记录后继续，定时任务永不静默死亡。
+    """
+    while True:
+        cfg = config_getter()
+        now_dt = datetime.datetime.now()
+        nxt = next_daily_run(
+            now_dt, cfg.trash_purge_hour, cfg.trash_purge_minute
+        )
+        await asyncio.sleep(max(1.0, (nxt - now_dt).total_seconds()))
+        try:
+            async with sessionmaker() as session:
+                result = await purge_expired(
+                    session, actor_user_id=None, actor_ip="scheduled",
+                )
+                if any(result.values()):
+                    await write_audit(
+                        session, "trash_purge", None, "scheduled",
+                        target="scheduled",
+                        detail=(
+                            "purged={purged} blocked={blocked} "
+                            "missing={missing} errors={errors}"
+                        ).format(**result),
+                    )
+                await session.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("scheduled purge_expired failed")
 
 
 async def purge_expired(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -18,7 +19,7 @@ from myphoto.models import GalleryRoot
 from myphoto.scanner import Scanner
 from myphoto.schema_init import ensure_schema_and_admin
 from myphoto.thumbnails import ThumbnailGenerator
-from myphoto.trash import purge_expired
+from myphoto.trash import daily_purge_loop, purge_expired
 
 log = logging.getLogger("myphoto.main")
 
@@ -49,8 +50,8 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
             for root in roots:
                 await scanner.enqueue(root.id)
 
-        # 启动时清理一次已到期的回收站条目——防主机长时间关机漏掉。
-        # 定时器（daily）延后到 P4；本 phase 只做启动 + 手动。
+        # 启动时清理一次已到期的回收站条目——防主机长时间关机漏掉；
+        # 每日定时循环在下方挂后台任务。
         try:
             async with sm() as session:
                 result = await purge_expired(
@@ -65,6 +66,11 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
                     )
         except Exception:
             log.exception("startup purge_expired failed")
+
+        # 每日定时清理：启动 purge 之后挂后台循环；关停时在 finally 中取消。
+        purge_task = asyncio.create_task(
+            daily_purge_loop(sm, lambda: app.state.config)
+        )
         app.state.engine = engine
         app.state.sessionmaker = sm
         app.state.config = cfg
@@ -75,6 +81,11 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         try:
             yield
         finally:
+            purge_task.cancel()
+            try:
+                await purge_task
+            except asyncio.CancelledError:
+                pass
             await scanner.stop()
             await engine.dispose()
 
