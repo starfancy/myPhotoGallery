@@ -317,3 +317,82 @@ def test_browse_fs_windows_drive_labels(monkeypatch):
     # Each drive sets the suppress flags then restores the previous mode,
     # in drive enumeration order (C, E, F): set, restore, set, restore, ...
     assert fake.error_mode_calls == [expected_flags, 0, expected_flags, 0, expected_flags, 0]
+
+
+def _make_root(c, photos):
+    gid = c.post("/api/admin/galleries", json={"name": "G"}).json()["id"]
+    rid = c.post(
+        f"/api/admin/galleries/{gid}/roots",
+        json={"label": "R", "absolute_path": str(photos)},
+    ).json()["id"]
+    return gid, rid
+
+
+def test_browse_fs_with_root_id_defaults_to_root(client_as_admin, tmp_path):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    (photos / "child").mkdir()
+    _gid, rid = _make_root(client_as_admin, photos)
+
+    r = client_as_admin.post("/api/admin/browse-fs", json={"path": "", "root_id": rid})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["path"] == str(photos.resolve())
+    assert [e["name"] for e in data["entries"]] == ["child"]
+
+
+def test_browse_fs_with_root_id_allows_descendant(client_as_admin, tmp_path):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    child = photos / "child"
+    child.mkdir()
+    _gid, rid = _make_root(client_as_admin, photos)
+
+    r = client_as_admin.post(
+        "/api/admin/browse-fs",
+        json={"path": str(child), "root_id": rid},
+    )
+    assert r.status_code == 200
+
+
+def test_browse_fs_with_root_id_rejects_escape(client_as_admin, tmp_path):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _gid, rid = _make_root(client_as_admin, photos)
+
+    r = client_as_admin.post(
+        "/api/admin/browse-fs",
+        json={"path": str(outside), "root_id": rid},
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "path_invalid"
+
+
+def test_browse_fs_with_root_id_dotdot_escape_rejected(client_as_admin, tmp_path):
+    photos = tmp_path / "photos" / "deep"
+    photos.mkdir(parents=True)
+    _gid, rid = _make_root(client_as_admin, photos.parent)
+
+    r = client_as_admin.post(
+        "/api/admin/browse-fs",
+        json={"path": str(photos / ".." / ".." / "outside"), "root_id": rid},
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "path_invalid"
+
+
+def test_browse_fs_with_unknown_root_id_404(client_as_admin, tmp_path):
+    r = client_as_admin.post(
+        "/api/admin/browse-fs", json={"path": str(tmp_path), "root_id": 9999}
+    )
+    assert r.status_code == 404
+
+
+def test_browse_fs_without_root_id_unchanged(client_as_admin, tmp_path):
+    """不带 root_id 仍可浏览 root 之外（添加根目录场景，仅受 LAN 护栏）。"""
+    outside = tmp_path / "anywhere"
+    outside.mkdir()
+    r = client_as_admin.post("/api/admin/browse-fs", json={"path": str(outside)})
+    assert r.status_code == 200

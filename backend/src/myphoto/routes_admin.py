@@ -595,6 +595,7 @@ async def admin_delete_exclusion(
 
 class BrowseFsRequest(BaseModel):
     path: str = ""
+    root_id: int | None = None
 
 
 # Windows SetErrorMode flags used to suppress critical-error dialogs (e.g. an
@@ -733,9 +734,22 @@ async def admin_browse_fs(
 ):
     response.headers["Cache-Control"] = "no-store"
     raw = body.path or ""
+    sm = request.app.state.sessionmaker
+
+    # P5: optional root confinement (defense-in-depth UX; POST /exclusions
+    # remains the authority). None = whole-machine browsing (add-root flow).
+    root_p: Path | None = None
+    if body.root_id is not None:
+        async with sm() as s:
+            rr = await s.get(GalleryRoot, body.root_id)
+        if rr is None:
+            raise AppError("not_found", 404, "root not found")
+        root_p = Path(rr.absolute_path).resolve()
+        if not raw:
+            raw = str(root_p)
+
     audit_target = raw or "<root>"
     audit_detail: str | None = None
-    sm = request.app.state.sessionmaker
 
     async def _write_audit(detail: str | None) -> None:
         async with sm() as s:
@@ -775,6 +789,12 @@ async def admin_browse_fs(
             if not p.exists() or not p.is_dir():
                 raise AppError("path_not_readable", 400, f"path not readable: {raw}")
 
+            if root_p is not None:
+                try:
+                    p.resolve().relative_to(root_p)
+                except ValueError:
+                    raise AppError("path_invalid", 400, "path is outside the root")
+
             try:
                 entries, truncated = _list_directories(p)
             except OSError:
@@ -782,12 +802,16 @@ async def admin_browse_fs(
             result_path = str(p)
     except AppError as e:
         audit_detail = f"error={e.code}"
+        if body.root_id is not None:
+            audit_detail += f" root={body.root_id}"
         await _write_audit(audit_detail)
         raise
 
     audit_detail = f"count={len(entries)}"
     if truncated:
         audit_detail += " truncated=1"
+    if body.root_id is not None:
+        audit_detail += f" root={body.root_id}"
     await _write_audit(audit_detail)
 
     return {"path": result_path, "entries": entries, "truncated": truncated}
