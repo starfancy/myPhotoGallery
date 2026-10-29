@@ -111,6 +111,7 @@
                         {{ e.reason }}
                       </span>
                       <span class="shrink-0 text-neutral-500">{{ e.excluded_by_username || "—" }}</span>
+                      <span class="shrink-0 text-neutral-500">排除于 {{ formatDateTime(e.excluded_at) }}</span>
                       <button @click="removeExclusion(r, e)"
                               class="shrink-0 rounded bg-neutral-700 px-2 py-0.5 hover:bg-neutral-600">
                         解除
@@ -136,13 +137,12 @@
       </template>
     </main>
 
-    <!-- DirectoryChooser modals: the exclusion chooser is listed first so that
-         (when open) component queries resolve to the root-confined instance. -->
+    <!-- DirectoryChooser modals -->
+    <DirectoryChooser v-model="showChooser" @confirm="onPathChosen" />
     <DirectoryChooser v-model="showExclusionChooser"
                       :start-path="chooserStartPath"
                       :root-id="chooserRootId ?? undefined"
                       @confirm="onExclusionChosen" />
-    <DirectoryChooser v-model="showChooser" @confirm="onPathChosen" />
   </div>
 </template>
 
@@ -152,6 +152,7 @@ import { useRoute } from "vue-router"
 import AppHeader from "../components/AppHeader.vue"
 import DirectoryChooser from "../components/DirectoryChooser.vue"
 import { apiGet, apiPatch, apiPost, apiDelete, HttpError, errorMessage } from "../api"
+import { formatDateTime } from "../utils/datetime"
 
 interface RootInfo {
   id: number
@@ -232,7 +233,8 @@ async function loadExclusions(rid: number) {
 async function toggleExclusions(rid: number) {
   const open = !exclusionPanels.value[rid]
   exclusionPanels.value[rid] = open
-  if (open && exclusions.value[rid] === undefined) {
+  if (open && (exclusions.value[rid] === undefined || exclusionsError.value[rid])) {
+    exclusionsError.value[rid] = ""
     await loadExclusions(rid)
   }
 }
@@ -262,10 +264,11 @@ async function onExclusionChosen(path: string) {
   const rid = chooserRootId.value
   if (rid === null) return
   const reason = window.prompt("备注（可留空）：", "")
+  if (reason === null) return // 用户取消 —— 不创建排除
   try {
     await apiPost(exclusionUrl(rid), {
       absolute_path: path,
-      reason: reason && reason.trim() ? reason.trim() : null,
+      reason: reason.trim() ? reason.trim() : null,
     })
     await Promise.all([loadGallery(true), loadExclusions(rid)])
   } catch (err) {
