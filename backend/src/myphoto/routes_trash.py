@@ -31,7 +31,7 @@ from myphoto.audit import write_audit
 from myphoto.deps import admin_required
 from myphoto.errors import AppError
 from myphoto.formats import classify
-from myphoto.models import Folder, GalleryRoot, Image, Trash, User
+from myphoto.models import Exclusion, Folder, GalleryRoot, Image, Trash, User
 from myphoto.thumbnails import ALLOWED_SIZES, ThumbnailError
 from myphoto.trash import (
     delete_one as _trash_delete_one,
@@ -65,6 +65,14 @@ async def _restore_dst(root: GalleryRoot, original_rel: str) -> Path:
     suffix = f" (restored {stamp})"
     new_name = f"{stem}{suffix}{dot}{ext}" if dot else f"{dst.name}{suffix}"
     return dst.with_name(new_name)
+
+
+def _is_under_excluded(rel: str, excluded_paths: list[str]) -> bool:
+    """段级前缀判断（posix）：``rel`` 等于某个排除目录或位于其子树内。
+
+    按 "/" 边界比较，避免 "sub" 误匹配 "submarine"。
+    """
+    return any(rel == ex or rel.startswith(ex + "/") for ex in excluded_paths)
 
 
 def _move_from_trash(src: Path, dst: Path) -> None:
@@ -136,7 +144,7 @@ async def _restore_one(
 ) -> dict:
     """恢复一条 trash：文件搬回 + insert images + 增量 counts + 审计 image_restore + 删 trash 行。
 
-    返回 ``{"trash_id": int, "status": "restored"|"missing_source"|"not_found_root", "image_id": int|None, "restored_to": str}``
+    返回 ``{"trash_id": int, "status": "restored"|"missing_source"|"not_found_root"|"excluded", "image_id": int|None, "restored_to": str}``
     """
     root = await session.get(GalleryRoot, trash_row.root_id)
     if root is None:
@@ -153,6 +161,21 @@ async def _restore_one(
         return {
             "trash_id": trash_row.id,
             "status": "missing_source",
+            "image_id": None,
+            "restored_to": None,
+        }
+
+    excluded_paths = list(
+        (await session.execute(
+            select(Exclusion.relative_path).where(Exclusion.root_id == root.id)
+        )).scalars().all()
+    )
+    if _is_under_excluded(trash_row.original_relative_path, excluded_paths):
+        # 目标目录当前处于排除规则下：不搬文件、不建 image 行，
+        # 否则恢复出的行会留到下次扫描才被调和掉（phantom row）
+        return {
+            "trash_id": trash_row.id,
+            "status": "excluded",
             "image_id": None,
             "restored_to": None,
         }
@@ -293,6 +316,12 @@ async def restore_trash(
             raise AppError("not_found", 404, "trash file missing on disk")
         if result["status"] == "not_found_root":
             raise AppError("not_found", 404, "gallery root missing")
+        if result["status"] == "excluded":
+            raise AppError(
+                "conflict", 409,
+                "destination directory is currently excluded; "
+                "remove the exclusion before restoring",
+            )
         await s.commit()
         return result
 

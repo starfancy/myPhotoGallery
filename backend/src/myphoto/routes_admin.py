@@ -1069,8 +1069,10 @@ def _validate_settings(body: SettingsPatch) -> list[str]:
 @router.get("/settings")
 async def admin_get_settings(
     request: Request,
+    response: Response,
     _admin: User = Depends(admin_required),
 ):
+    response.headers["Cache-Control"] = "no-store"
     return _settings_payload(request.app.state.config)
 
 

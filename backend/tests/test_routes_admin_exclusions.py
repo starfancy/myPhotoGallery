@@ -220,6 +220,28 @@ def test_delete_nonexistent_exclusion_404(env_client):
     assert r.status_code == 404
 
 
+def test_exclusions_forbidden_for_viewer(env_client):
+    c, app, gid, rid, photos = env_client
+    r = c.post("/api/admin/users", json={
+        "username": "viewer1", "password": "viewerpass123",
+        "role": "viewer", "access_scope": "remote_allowed",
+    })
+    assert r.status_code == 201
+
+    # 复用 env_client 已启动的 app/portal（不重跑 lifespan、不另起事件循环）；
+    # viewer 从 127.0.0.1 登录。403 必须先于任何路径/ID 校验
+    # （POST body 是 root 本身、DELETE id 不存在）。
+    vc = TestClient(app, client=("127.0.0.1", 12345))
+    vc.portal = c.portal
+    vc.post("/api/auth/login",
+            json={"username": "viewer1", "password": "viewerpass123"})
+    assert vc.get(_ex_url(gid, rid)).status_code == 403
+    assert vc.post(
+        _ex_url(gid, rid), json={"absolute_path": str(photos)}
+    ).status_code == 403
+    assert vc.delete(_ex_url(gid, rid, "/1")).status_code == 403
+
+
 def test_exclusion_triggers_rescan(env_client):
     c, _app, gid, rid, photos = env_client
     _wait_idle(c, gid, rid)

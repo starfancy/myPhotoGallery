@@ -65,6 +65,20 @@ async def _list_trash(app):
         return (await s.execute(select(Trash))).scalars().all()
 
 
+async def _add_exclusion(app, rid, relative_path, reason=None):
+    from myphoto.models import Exclusion
+
+    async with app.state.sessionmaker() as s:
+        s.add(Exclusion(
+            root_id=rid,
+            relative_path=relative_path,
+            excluded_by=1,
+            excluded_at=int(time.time()),
+            reason=reason,
+        ))
+        await s.commit()
+
+
 async def _folders(app):
     async with app.state.sessionmaker() as s:
         return {f.relative_path: f for f in (
@@ -260,6 +274,49 @@ def test_restore_404_when_trash_id_unknown(admin_client):
     c, *_ = admin_client
     r = c.post("/api/trash/99999/restore")
     assert r.status_code == 404
+
+
+def test_restore_blocked_when_destination_excluded(admin_client):
+    c, app, _gid, rid, photos = admin_client
+    # b.jpg 原位于 sub/ 下
+    image_id = c.portal.call(_image_id, app, "b.jpg")
+    assert c.delete(f"/api/images/{image_id}").status_code == 204
+    t = c.portal.call(_list_trash, app)[0]
+    assert t.original_relative_path == "sub/b.jpg"
+
+    # 原目录 sub 当前被排除
+    c.portal.call(_add_exclusion, app, rid, "sub")
+
+    r = c.post(f"/api/trash/{t.id}/restore")
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "conflict"
+
+    # 文件未被移动：目标不存在，trash 内源文件仍在；trash 行保留
+    assert not (photos / "sub" / "b.jpg").exists()
+    assert (photos / t.trash_relative_path).exists()
+    trashes = c.portal.call(_list_trash, app)
+    assert [x.id for x in trashes] == [t.id]
+    # 没有写出 image 行
+    assert c.portal.call(_image_id, app, "b.jpg") is None
+
+
+def test_batch_restore_reports_excluded_failure(admin_client):
+    c, app, _gid, rid, photos = admin_client
+    image_id = c.portal.call(_image_id, app, "b.jpg")
+    assert c.delete(f"/api/images/{image_id}").status_code == 204
+    t = c.portal.call(_list_trash, app)[0]
+
+    c.portal.call(_add_exclusion, app, rid, "sub")
+
+    r = c.post("/api/trash/batch-restore", json={"trash_ids": [t.id]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["restored"] == []
+    assert body["failed"] == [{"id": t.id, "error": "excluded"}]
+
+    assert not (photos / "sub" / "b.jpg").exists()
+    assert (photos / t.trash_relative_path).exists()
+    assert len(c.portal.call(_list_trash, app)) == 1
 
 
 def test_batch_restore_success_and_partial(admin_client):
