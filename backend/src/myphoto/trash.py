@@ -78,6 +78,9 @@ async def purge_expired(
     """
     effective_now = int(time.time()) if now is None else int(now)
     cutoff = effective_now if before is None else int(before)
+    # 时间型清理（含手动 before 覆盖）永不触碰"永不清理"哨兵行；
+    # 显式单条删除走 delete_one，不受 purge_after 约束。
+    cutoff = min(cutoff, NEVER_PURGE_TS)
 
     stmt = select(Trash).where(Trash.purge_after < cutoff)
     if gallery_id is not None:

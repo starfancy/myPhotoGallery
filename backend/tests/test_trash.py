@@ -15,6 +15,7 @@ from myphoto.audit import write_audit  # noqa: F401  (import 校验)
 from myphoto.db import create_all, make_engine, make_sessionmaker
 from myphoto.models import AuditLog, Gallery, GalleryRoot, Trash, User
 from myphoto.trash import (
+    NEVER_PURGE_TS,
     TRASH_BASENAME,
     is_under_trash_dir,
     purge_expired,
@@ -315,3 +316,46 @@ async def test_purge_expired_before_overrides_now(gallery_and_root, session):
     remaining = (await session.execute(select(Trash))).scalars().all()
     assert len(remaining) == 1
     assert remaining[0].trash_relative_path == r2
+
+
+async def test_purge_expired_before_beyond_sentinel_spares_never_purge(gallery_and_root, session):
+    """`before` 即便超过 NEVER_PURGE_TS，也不能物理删除"永不清理"哨兵行。
+
+    防御纵深：retention_days=0 的用户面保证只能由显式 delete_one 打破。
+    同时正常的过期行仍应被清掉，证明 clamp 没有禁用现实时间戳的覆盖。
+    """
+    root = gallery_and_root["root"]
+    admin = gallery_and_root["admin"]
+    tdir_rel = f"{TRASH_BASENAME}/{root.gallery_id}/{root.id}"
+
+    keep_rel = f"{tdir_rel}/20260722/keep-forever.jpg"
+    exp_rel = f"{tdir_rel}/20260701/expired.jpg"
+    await _make_trashed_file(gallery_and_root["root_dir"], keep_rel)
+    await _make_trashed_file(gallery_and_root["root_dir"], exp_rel)
+    session.add(Trash(
+        gallery_id=root.gallery_id, root_id=root.id,
+        original_relative_path="a/keep-forever.jpg", trash_relative_path=keep_rel,
+        sha1="s1", size_bytes=1, deleted_by=admin.id,
+        deleted_at=1000, purge_after=NEVER_PURGE_TS,
+    ))
+    session.add(Trash(
+        gallery_id=root.gallery_id, root_id=root.id,
+        original_relative_path="a/expired.jpg", trash_relative_path=exp_rel,
+        sha1="s2", size_bytes=1, deleted_by=admin.id,
+        deleted_at=1000, purge_after=2000,
+    ))
+    await session.commit()
+
+    # 远超哨兵的 before，也不得触碰哨兵行
+    result = await purge_expired(session, before=10_000_000_000)
+    await session.commit()
+
+    assert result == {"purged": 1, "blocked": 0, "missing": 0, "errors": 0}
+    # 哨兵行文件与 DB 都还在
+    assert (gallery_and_root["root_dir"] / keep_rel).exists()
+    rows = (await session.execute(select(Trash))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].trash_relative_path == keep_rel
+    assert rows[0].purge_after == NEVER_PURGE_TS
+    # 正常过期行确实被清掉
+    assert not (gallery_and_root["root_dir"] / exp_rel).exists()
