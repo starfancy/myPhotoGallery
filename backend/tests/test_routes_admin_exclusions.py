@@ -93,6 +93,50 @@ def test_duplicate_exclusion_conflict(env_client):
     assert r.json()["error"]["code"] == "conflict"
 
 
+def test_duplicate_exclusion_race_integrityerror_maps_to_409(env_client, monkeypatch):
+    """Loser of a concurrent-create race: the pre-check SELECT misses but the
+    INSERT hits uq_exclusion_path_per_root -> IntegrityError must surface as
+    409 conflict, not 500, and must not trigger a rescan."""
+    import myphoto.routes_admin as ra
+
+    c, app, gid, rid, photos = env_client
+    target = photos / "exports"
+    target.mkdir()
+    body = {"absolute_path": str(target)}
+    assert c.post(_ex_url(gid, rid), json=body).status_code == 201
+
+    # Deterministically blind only the duplicate pre-check. In this endpoint
+    # select(Exclusion) with Exclusion as the sole entity is unique to the
+    # dup lookup (_get_root_or_404 selects GalleryRoot; write_audit issues no
+    # SELECT). A bare duck-typed statement is rejected by SQLAlchemy 2.0's
+    # session.execute, so hand back a real, executable SELECT that is
+    # guaranteed to return zero rows; the handler chains its own WHERE on top.
+    real_select = ra.select
+
+    def fake_select(*entities, **kw):
+        if entities and entities[0] is ra.Exclusion:
+            return real_select(ra.Exclusion).where(ra.Exclusion.id < 0)
+        return real_select(*entities, **kw)
+
+    monkeypatch.setattr(ra, "select", fake_select)
+
+    rescans: list[int] = []
+    real_request_rescan = app.state.scanner.request_rescan
+
+    async def _spy_request_rescan(root_id):
+        rescans.append(root_id)
+        return await real_request_rescan(root_id)
+
+    monkeypatch.setattr(app.state.scanner, "request_rescan", _spy_request_rescan)
+
+    r = c.post(_ex_url(gid, rid), json=body)
+    assert r.status_code == 409
+    err = r.json()["error"]
+    assert err["code"] == "conflict"
+    assert err["message"] == "this directory is already excluded"
+    assert rescans == []
+
+
 def test_exclude_path_outside_root_rejected(env_client, tmp_path):
     c, _app, gid, rid, photos = env_client
     outside = tmp_path / "elsewhere"

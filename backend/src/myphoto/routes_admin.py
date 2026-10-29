@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from myphoto.audit import write_audit
 from myphoto.deps import admin_required, require_lan_ip
@@ -534,16 +535,23 @@ async def admin_create_exclusion(
             excluded_at=int(time.time()),
             reason=reason,
         )
-        s.add(e)
-        await s.flush()
-        detail = f"root={rid} path={rel_posix}"
-        if reason:
-            detail += f" reason={reason}"
-        await write_audit(
-            s, "exclusion_add", admin.id, _client_ip(request),
-            target=f"exclusion:{e.id}", detail=detail[:200],
-        )
-        await s.commit()
+        # The pre-check above is the fast path; a concurrent POST for the same
+        # (root_id, relative_path) can win the check/insert race, so map the
+        # DB UNIQUE violation to the same 409 instead of leaking a 500.
+        try:
+            s.add(e)
+            await s.flush()
+            detail = f"root={rid} path={rel_posix}"
+            if reason:
+                detail += f" reason={reason}"
+            await write_audit(
+                s, "exclusion_add", admin.id, _client_ip(request),
+                target=f"exclusion:{e.id}", detail=detail[:200],
+            )
+            await s.commit()
+        except IntegrityError:
+            await s.rollback()
+            raise AppError("conflict", 409, "this directory is already excluded")
         payload = _exclusion_payload(e, admin.username)
 
     await request.app.state.scanner.request_rescan(rid)
