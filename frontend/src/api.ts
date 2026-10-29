@@ -30,6 +30,8 @@ const ERROR_MSG_ZH: Record<string, string> = {
   not_found: "未找到",
   conflict: "已存在",
   bad_request: "请求参数无效",
+  path_invalid: "路径无效",
+  path_not_readable: "路径不可读",
   internal_error: "服务器内部错误",
 }
 

@@ -36,6 +36,11 @@
             @click="adminOpen = false">
             用户
           </router-link>
+          <router-link to="/admin/settings" role="menuitem"
+            class="block px-3 py-2 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+            @click="adminOpen = false">
+            设置
+          </router-link>
         </div>
       </div>
       <div ref="menuRef" class="relative">
