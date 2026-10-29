@@ -147,7 +147,7 @@ async def test_daily_loop_survives_purge_error(loop_env, monkeypatch, caplog):
     # RuntimeError 被 log.exception 记录（带 traceback）
     matched = [
         r for r in caplog.records
-        if "scheduled purge_expired failed" in r.getMessage()
+        if "scheduled purge loop iteration failed" in r.getMessage()
         and r.exc_info is not None
         and issubclass(r.exc_info[0], RuntimeError)
     ]

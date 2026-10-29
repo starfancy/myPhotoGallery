@@ -720,10 +720,13 @@ async def test_request_rescan_while_running_marks_redirty(env, monkeypatch):
 
     import myphoto.scanner as sc
     gate = threading.Event()
+    entered = threading.Event()
     real_process = sc._process_file
 
     def gated(path, is_raw):
-        gate.wait(timeout=5)
+        entered.set()
+        if not gate.wait(timeout=30):
+            raise RuntimeError("test gate timed out")
         return real_process(path, is_raw)
 
     monkeypatch.setattr(sc, "_process_file", gated)
@@ -741,11 +744,9 @@ async def test_request_rescan_while_running_marks_redirty(env, monkeypatch):
 
     await scanner.start()
     await scanner.enqueue(root_id)
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        if scanner.get_status(root_id)["status"] == "running":
-            break
-        await asyncio.sleep(0.01)
+    # Wait until the worker is provably parked inside _process_file instead of
+    # racing a status-poll deadline (flaky under full-suite CPU contention).
+    assert await asyncio.to_thread(entered.wait, 30)
     assert scanner.get_status(root_id)["status"] == "running"
 
     # 3 requests while running must collapse into exactly one extra run.
@@ -756,9 +757,30 @@ async def test_request_rescan_while_running_marks_redirty(env, monkeypatch):
 
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        if runs >= 2 and scanner.get_status(root_id)["status"] == "idle":
+        # "idle" alone is too early: status flips before the scan_finish audit
+        # await finishes. Require the worker's own finally to have run too
+        # (_enqueued discarded, queue drained), else stop() below could cancel
+        # an in-flight DB op on the shared in-memory connection.
+        if (
+            runs >= 2
+            and scanner.get_status(root_id)["status"] == "idle"
+            and root_id not in scanner._enqueued
+            and scanner._queue.qsize() == 0
+        ):
             break
         await asyncio.sleep(0.02)
+    else:
+        await scanner.stop()
+        pytest.fail(
+            "scan did not reach expected state: runs=%d status=%s "
+            "enqueued=%r qsize=%d"
+            % (
+                runs,
+                scanner.get_status(root_id)["status"],
+                scanner._enqueued,
+                scanner._queue.qsize(),
+            )
+        )
     await scanner.stop()
     assert runs == 2
     assert scanner.get_status(root_id)["status"] == "idle"
@@ -810,10 +832,13 @@ async def test_request_rescan_while_queued_does_not_redirty(env, monkeypatch):
     import myphoto.scanner as sc
 
     gate = threading.Event()
+    entered = threading.Event()
     real_process = sc._process_file
 
     def gated(path, is_raw):
-        gate.wait(timeout=5)
+        entered.set()
+        if not gate.wait(timeout=30):
+            raise RuntimeError("test gate timed out")
         return real_process(path, is_raw)
 
     monkeypatch.setattr(sc, "_process_file", gated)
@@ -830,14 +855,10 @@ async def test_request_rescan_while_queued_does_not_redirty(env, monkeypatch):
 
     await scanner.start()
     await scanner.enqueue(root_a)
+    # Park A's worker provably inside _process_file; only then enqueue B so the
+    # single worker guarantees B is still "queued" (no status-poll deadline race).
+    assert await asyncio.to_thread(entered.wait, 30)
     await scanner.enqueue(root_b)
-
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        if scanner.get_status(root_a)["status"] == "running":
-            break
-        await asyncio.sleep(0.01)
-    # Single worker: while A is running (gated) B is guaranteed still queued.
     assert scanner.get_status(root_a)["status"] == "running"
     assert scanner.get_status(root_b)["status"] == "queued"
 
@@ -849,12 +870,24 @@ async def test_request_rescan_while_queued_does_not_redirty(env, monkeypatch):
     gate.set()
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
+        # Both "idle" is too early: status flips before each scan_finish audit
+        # await completes. Require both worker finallys to have run too
+        # (_enqueued empty, queue drained) so stop() cannot cancel an in-flight
+        # DB op on the shared in-memory connection.
         if (
             scanner.get_status(root_a)["status"] == "idle"
             and scanner.get_status(root_b)["status"] == "idle"
+            and not scanner._enqueued
+            and scanner._queue.qsize() == 0
         ):
             break
         await asyncio.sleep(0.02)
+    else:
+        await scanner.stop()
+        pytest.fail(
+            "scans did not drain before deadline: enqueued=%r qsize=%d"
+            % (scanner._enqueued, scanner._queue.qsize())
+        )
     await scanner.stop()
 
     assert scanner.get_status(root_a)["status"] == "idle"

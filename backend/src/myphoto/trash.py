@@ -82,13 +82,13 @@ async def daily_purge_loop(sessionmaker, config_getter) -> None:
     向外传播供 lifespan 关停；其他异常记录后继续，定时任务永不静默死亡。
     """
     while True:
-        cfg = config_getter()
-        now_dt = datetime.datetime.now()
-        nxt = next_daily_run(
-            now_dt, cfg.trash_purge_hour, cfg.trash_purge_minute
-        )
-        await asyncio.sleep(max(1.0, (nxt - now_dt).total_seconds()))
         try:
+            cfg = config_getter()
+            now_dt = datetime.datetime.now()
+            nxt = next_daily_run(
+                now_dt, cfg.trash_purge_hour, cfg.trash_purge_minute
+            )
+            await asyncio.sleep(max(1.0, (nxt - now_dt).total_seconds()))
             async with sessionmaker() as session:
                 result = await purge_expired(
                     session, actor_user_id=None, actor_ip="scheduled",
@@ -106,7 +106,7 @@ async def daily_purge_loop(sessionmaker, config_getter) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("scheduled purge_expired failed")
+            log.exception("scheduled purge loop iteration failed")
 
 
 async def purge_expired(

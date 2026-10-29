@@ -67,16 +67,17 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         except Exception:
             log.exception("startup purge_expired failed")
 
-        # 每日定时清理：启动 purge 之后挂后台循环；关停时在 finally 中取消。
-        purge_task = asyncio.create_task(
-            daily_purge_loop(sm, lambda: app.state.config)
-        )
         app.state.engine = engine
         app.state.sessionmaker = sm
         app.state.config = cfg
         app.state.scanner = scanner
         app.state.thumbnails = ThumbnailGenerator(
             Path(cfg.data_dir) / ".cache" / "thumbnails"
+        )
+        # 每日定时清理：所有 app.state 赋值完成后再挂后台循环（循环首轮即读
+        # app.state.config）；关停时在 finally 中取消。
+        purge_task = asyncio.create_task(
+            daily_purge_loop(sm, lambda: app.state.config)
         )
         try:
             yield
