@@ -125,6 +125,52 @@ describe("AdminSettings", () => {
     expect(JSON.parse(init.body).trusted_proxies).toEqual(["10.0.0.0/8"])
   })
 
+  it("blocks save with a Chinese message when a number field is cleared", async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(json(DEFAULTS))
+    vi.stubGlobal("fetch", fetchFn)
+    const w = await mountView()
+
+    const hours = w.findAll('input[type="number"]')[1]
+    await hours.setValue("")
+    await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click")
+    await flushPromises()
+
+    // only the initial GET — no PATCH
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(fetchFn.mock.calls[0][1]?.method ?? "GET").not.toBe("PATCH")
+    expect(w.text()).toContain("请填写有效的数字：锁定阈值和会话时长不能为空。")
+  })
+
+  it("resets form to the PATCH response so deduped proxies leave a clean form", async () => {
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockResolvedValueOnce(json(DEFAULTS))
+      // local body carries the proxy twice; the server dedupes to one row
+      .mockResolvedValueOnce(json({ ...DEFAULTS, trusted_proxies: ["10.0.0.0/8"] }))
+    vi.stubGlobal("fetch", fetchFn)
+    const w = await mountView()
+
+    await w.findAll("button").find((b) => b.text().includes("添加"))!.trigger("click")
+    await w.findAll("button").find((b) => b.text().includes("添加"))!.trigger("click")
+    const proxyInputs = w.findAll('input[placeholder*="127.0.0.1"]')
+    await proxyInputs[0].setValue("10.0.0.0/8")
+    await proxyInputs[1].setValue("10.0.0.0/8")
+
+    const save = w.findAll("button").find((b) => b.text() === "保存")!
+    await save.trigger("click")
+    await flushPromises()
+
+    const [, init] = fetchFn.mock.calls[1]
+    expect(JSON.parse(init.body).trusted_proxies).toEqual(["10.0.0.0/8", "10.0.0.0/8"])
+
+    const afterInputs = w.findAll('input[placeholder*="127.0.0.1"]')
+    expect(afterInputs).toHaveLength(1)
+    expect((afterInputs[0].element as HTMLInputElement).value).toBe("10.0.0.0/8")
+
+    const saveAfter = w.findAll("button").find((b) => b.text() === "保存")!
+    expect(saveAfter.attributes("disabled")).toBeDefined()
+  })
+
   it("shows backend validation message and keeps form", async () => {
     const fetchFn = vi.fn()
     fetchFn

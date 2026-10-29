@@ -18,6 +18,9 @@
           <h2 class="mb-3 text-sm font-medium text-neutral-400">回收站</h2>
           <div class="mb-2 text-xs text-neutral-500">自动清理前的保留时长</div>
           <div class="flex flex-wrap gap-4 text-sm">
+            <!-- 故意用 :checked + @click 而非 v-model：jsdom 分离挂载（detached mount）的
+                 spec 不会触发 radio 的 change 事件，而 click 绑定同时覆盖点 label 与键盘
+                 （空格/回车）激活。在同步更新 admin-settings.spec.ts 之前，不要“简化”回 v-model。 -->
             <label v-for="opt in RETENTION_OPTIONS" :key="opt.value"
                    class="flex cursor-pointer items-center gap-1.5">
               <input type="radio" name="retention" class="accent-blue-600"
@@ -132,6 +135,12 @@ function normalized(): SettingsForm {
   }
 }
 
+/** 数字输入框本地校验：清空字段时 v-model.number 会得到 ""（Number("") 又是 0，
+ *  不能只靠 Number.isFinite(Number(v))）；非法输入则保留为原始字符串（Number → NaN）。 */
+function isFiniteInput(v: unknown): boolean {
+  return v !== "" && Number.isFinite(Number(v))
+}
+
 function addProxy() {
   form.value.trusted_proxies.push("")
 }
@@ -160,14 +169,30 @@ async function load() {
 }
 
 async function save() {
-  saving.value = true
   error.value = ""
   savedOk.value = false
+  // 仅拦截“空值/非有限数”，避免后端回裸 422；超范围（如 9999）照常发送，
+  // 让后端 400 的校验信息透传给用户，这里不做 min/max 预检。
+  if (
+    !isFiniteInput(form.value.login_lockout_threshold) ||
+    !isFiniteInput(form.value.session_hours)
+  ) {
+    error.value = "请填写有效的数字：锁定阈值和会话时长不能为空。"
+    return
+  }
+  saving.value = true
   const body = normalized()
   try {
-    await apiPatch("/api/admin/settings", body)
-    loadedJson.value = JSON.stringify(body)
-    form.value.trusted_proxies = [...body.trusted_proxies]
+    // 以响应体为权威状态重建表单：服务端会对 trusted_proxies 去重，
+    // 本地 body 可能比响应多出重复行，直接用本地值会导致表单一直 dirty。
+    const data = await apiPatch<SettingsForm>("/api/admin/settings", body)
+    form.value = {
+      trash_retention_days: data.trash_retention_days,
+      login_lockout_threshold: data.login_lockout_threshold,
+      trusted_proxies: [...data.trusted_proxies],
+      session_hours: data.session_hours,
+    }
+    loadedJson.value = JSON.stringify(normalized())
     savedOk.value = true
   } catch (err) {
     error.value = (err as HttpError).message || "保存失败"
