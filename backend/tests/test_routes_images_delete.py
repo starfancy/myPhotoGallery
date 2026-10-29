@@ -252,3 +252,29 @@ def test_batch_delete_forbidden_for_viewer(admin_client):
     c.post("/api/auth/login", json={"username": "viewer", "password": "viewerpw"})
     r = c.post("/api/images/batch-delete", json={"image_ids": [1]})
     assert r.status_code == 403
+
+
+# ---------- P5: retention_days=0 never-purge sentinel ----------
+
+
+def test_retention_zero_writes_never_purge_sentinel(admin_client):
+    from myphoto.trash import NEVER_PURGE_TS
+
+    c, app, _gid, _rid, _photos = admin_client
+    assert c.patch(
+        "/api/admin/settings", json={"trash_retention_days": 0}
+    ).status_code == 200
+
+    img = c.portal.call(_get_image_by_filename, app, "a.jpg")
+    assert c.delete(f"/api/images/{img.id}").status_code == 204
+
+    trashes = c.portal.call(_get_trash, app)
+    assert len(trashes) == 1
+    assert trashes[0].purge_after == NEVER_PURGE_TS
+
+    # Manual "purge expired" must leave the sentinel row alone.
+    r = c.post("/api/trash/purge", json={"confirm": True})
+    assert r.status_code == 200
+    trashes = c.portal.call(_get_trash, app)
+    assert len(trashes) == 1
+    assert trashes[0].purge_after == NEVER_PURGE_TS

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import ipaddress
+import json
 import os
 import secrets
 import shutil
@@ -17,6 +19,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from myphoto.audit import write_audit
+from myphoto.config import load_or_init
+from myphoto.config_writer import SettingsUpdates, update_settings_file
 from myphoto.deps import admin_required, require_lan_ip
 from myphoto.errors import AppError
 from myphoto.models import AuditLog, Exclusion, Gallery, GalleryRoot, Image, User, UserGallery
@@ -1002,6 +1006,121 @@ async def admin_query_audit(
         ],
         "next_cursor": next_cursor,
     }
+
+
+# ---- settings (P5) ----
+
+
+class SettingsPatch(BaseModel):
+    trash_retention_days: int | None = None
+    login_lockout_threshold: int | None = None
+    trusted_proxies: list[str] | None = None
+    session_hours: int | None = None
+
+
+_RETENTION_CHOICES = {0, 7, 30, 90}
+
+
+def _valid_proxy_entry(entry: str) -> bool:
+    try:
+        ipaddress.ip_address(entry)
+        return True
+    except ValueError:
+        pass
+    try:
+        ipaddress.ip_network(entry, strict=False)
+        return True
+    except ValueError:
+        return False
+
+
+def _settings_payload(cfg) -> dict:
+    return {
+        "trash_retention_days": cfg.trash_retention_days,
+        "login_lockout_threshold": cfg.login_lockout_threshold,
+        "trusted_proxies": list(cfg.trusted_proxies),
+        "session_hours": cfg.session_hours,
+    }
+
+
+def _validate_settings(body: SettingsPatch) -> list[str]:
+    errors: list[str] = []
+    if body.trash_retention_days is not None and (
+        body.trash_retention_days not in _RETENTION_CHOICES
+    ):
+        errors.append("trash_retention_days must be one of 0/7/30/90")
+    if body.login_lockout_threshold is not None and not (
+        1 <= body.login_lockout_threshold <= 100
+    ):
+        errors.append("login_lockout_threshold must be between 1 and 100")
+    if body.session_hours is not None and not (1 <= body.session_hours <= 720):
+        errors.append("session_hours must be between 1 and 720")
+    if body.trusted_proxies is not None:
+        if len(body.trusted_proxies) > 16:
+            errors.append("trusted_proxies accepts at most 16 entries")
+        else:
+            for entry in body.trusted_proxies:
+                if not _valid_proxy_entry(entry):
+                    errors.append(f"invalid trusted_proxies entry: {entry}")
+                    break
+    return errors
+
+
+@router.get("/settings")
+async def admin_get_settings(
+    request: Request,
+    _admin: User = Depends(admin_required),
+):
+    return _settings_payload(request.app.state.config)
+
+
+@router.patch("/settings")
+async def admin_update_settings(
+    body: SettingsPatch,
+    request: Request,
+    admin: User = Depends(admin_required),
+):
+    errors = _validate_settings(body)
+    if errors:
+        raise AppError("bad_request", 400, "; ".join(errors))
+
+    proxies: list[str] | None = None
+    if body.trusted_proxies is not None:
+        seen: set[str] = set()
+        proxies = []
+        for entry in body.trusted_proxies:
+            if entry not in seen:
+                seen.add(entry)
+                proxies.append(entry)
+
+    updates = SettingsUpdates(
+        trash_retention_days=body.trash_retention_days,
+        login_lockout_threshold=body.login_lockout_threshold,
+        trusted_proxies=proxies,
+        session_hours=body.session_hours,
+    )
+    changed = [
+        name for name, value in (
+            ("trash_retention_days", body.trash_retention_days),
+            ("login_lockout_threshold", body.login_lockout_threshold),
+            ("trusted_proxies", body.trusted_proxies),
+            ("session_hours", body.session_hours),
+        ) if value is not None
+    ]
+
+    config_path = request.app.state.config_path
+    if changed:
+        update_settings_file(config_path, updates)
+        request.app.state.config = load_or_init(config_path)
+        async with request.app.state.sessionmaker() as s:
+            await write_audit(
+                s, "settings_update", admin.id, _client_ip(request),
+                target="settings",
+                detail=json.dumps({"changed": changed}, ensure_ascii=False),
+            )
+            await s.commit()
+
+    return _settings_payload(request.app.state.config)
 
 
 # ---- P4: users CRUD ----

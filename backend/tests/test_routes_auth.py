@@ -346,3 +346,24 @@ def test_login_lan_only_ip_does_not_lock_account(app_factory):
                 })
                 assert r.status_code == 403
                 assert r.json()["error"]["code"] == "access_scope_violation"
+
+
+# ---- P5: lockout threshold hot-reload via settings ----
+
+
+def test_lockout_threshold_hot_reload_via_settings(app_and_pw):
+    client, password, app = app_and_pw
+    assert _login(client, password).status_code == 200
+    assert client.patch(
+        "/api/admin/settings", json={"login_lockout_threshold": 2}
+    ).status_code == 200
+    assert app.state.config.login_lockout_threshold == 2
+
+    # Two failures record counts 1 and 2; the third attempt is locked.
+    r1 = _login(client, "bad")
+    r2 = _login(client, "bad")
+    r3 = _login(client, "bad")
+    assert r1.status_code == 401
+    assert r2.status_code == 401
+    assert r3.status_code == 423
+    assert r3.json()["error"]["code"] == "login_locked"

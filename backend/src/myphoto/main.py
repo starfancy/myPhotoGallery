@@ -24,7 +24,8 @@ log = logging.getLogger("myphoto.main")
 
 
 def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
-    cfg = load_or_init(resolve_config_path(config_path))
+    config_file = resolve_config_path(config_path)
+    cfg = load_or_init(config_file)
     db_path = Path(cfg.data_dir) / "app.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
@@ -78,6 +79,7 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
             await engine.dispose()
 
     app = FastAPI(title="myPhotoGallery", lifespan=lifespan)
+    app.state.config_path = config_file
     app.state.login_lockout = {}
     install_error_handlers(app)
 

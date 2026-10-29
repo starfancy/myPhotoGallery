@@ -26,7 +26,7 @@ from myphoto.audit import write_audit
 from myphoto.deps import admin_required, current_user
 from myphoto.errors import AppError
 from myphoto.models import Folder, GalleryRoot, Image, Trash, User
-from myphoto.trash import trash_dir_for
+from myphoto.trash import NEVER_PURGE_TS, trash_dir_for
 
 log = logging.getLogger("myphoto.routes_images")
 
@@ -138,7 +138,10 @@ async def _delete_single(
             size_bytes=image.size_bytes,
             deleted_by=admin.id,
             deleted_at=now,
-            purge_after=now + retention_days * 86400,
+            purge_after=(
+                now + retention_days * 86400
+                if retention_days > 0 else NEVER_PURGE_TS
+            ),
         )
     )
     await write_audit(

@@ -38,30 +38,39 @@ class ChangePasswordBody(BaseModel):
     new_password: str = Field(min_length=1)  # strength checked in handler (single authority)
 
 
-def _record_fail(state: dict[str, tuple[int, float]], ip: str) -> None:
+def _record_fail(
+    state: dict[str, tuple[int, float]], ip: str, window_sec: int = _LOCKOUT_WINDOW_SEC
+) -> None:
     now = time.monotonic()
     count, first = state.get(ip, (0, now))
-    if now - first >= _LOCKOUT_WINDOW_SEC:
+    if now - first >= window_sec:
         count, first = 0, now
     state[ip] = (count + 1, first)
 
 
-def _is_locked(state: dict[str, tuple[int, float]], ip: str) -> bool:
+def _is_locked(
+    state: dict[str, tuple[int, float]], ip: str,
+    threshold: int = _LOCKOUT_THRESHOLD,
+    window_sec: int = _LOCKOUT_WINDOW_SEC,
+) -> bool:
     entry = state.get(ip)
     if entry is None:
         return False
     count, first = entry
-    if time.monotonic() - first >= _LOCKOUT_WINDOW_SEC:
+    if time.monotonic() - first >= window_sec:
         state.pop(ip, None)
         return False
-    return count >= _LOCKOUT_THRESHOLD
+    return count >= threshold
 
 
 @router.post("/login")
 async def login(body: LoginBody, request: Request, response: Response):
     ip = _client_ip(request)
+    cfg = request.app.state.config
+    lockout_threshold = int(cfg.login_lockout_threshold)
+    lockout_window_sec = int(cfg.login_lockout_minutes) * 60
     lockout_state = request.app.state.login_lockout
-    if _is_locked(lockout_state, ip):
+    if _is_locked(lockout_state, ip, lockout_threshold, lockout_window_sec):
         raise AppError("login_locked", 423, "too many failed attempts; try again later")
 
     sm = request.app.state.sessionmaker
@@ -73,14 +82,13 @@ async def login(body: LoginBody, request: Request, response: Response):
         password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
         password_valid = verify_password(body.password, password_hash)
         if user is None or user.enabled != 1 or not password_valid:
-            _record_fail(lockout_state, ip)
+            _record_fail(lockout_state, ip, lockout_window_sec)
             login_failed = True
         else:
             # P4: 步骤 3 判定 — lan_only 用户从公网登录直接拒绝（403），不计入锁计数。
             if user.access_scope == "lan_only":
                 from myphoto import access  # lazy import 避免循环
                 from myphoto.deps import _is_lan_ip
-                cfg = request.app.state.config
                 effective_ip = access.get_client_ip(request, cfg.trusted_proxies)
                 if not _is_lan_ip(effective_ip):
                     raise AppError(
@@ -96,7 +104,6 @@ async def login(body: LoginBody, request: Request, response: Response):
             await session.commit()
             lockout_state.pop(ip, None)
 
-            cfg = request.app.state.config
             max_age = cfg.session_hours * 3600
             token = make_token(cfg.jwt_secret, user.id, user.role, max_age)
             response.set_cookie(

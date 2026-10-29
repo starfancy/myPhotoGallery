@@ -23,6 +23,10 @@ log = logging.getLogger("myphoto.trash")
 # .trash/ 目录固定基名（同盘，供 os.rename 原子重命名）
 TRASH_BASENAME = ".trash"
 
+# 2286 年附近；retention_days=0（永不自动清理）时作为 purge_after 哨兵值。
+# purge_expired 的查询是 purge_after < now，哨兵永不命中。
+NEVER_PURGE_TS = 9_999_999_999
+
 
 def trash_dir_for(root: GalleryRoot) -> Path:
     """返回 `<root.absolute_path>/.trash/{gallery_id}/{root_id}/`。
