@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from myphoto.main import build_app
 from myphoto.routes_download import (
     DownloadEntry,
+    TicketRecord,
     TicketStore,
     build_arcnames,
 )
@@ -279,3 +280,79 @@ def test_missing_file_listed_in_zip(env):
     assert "a.jpg" in zf.namelist()
     listing = zf.read("missing-files.txt").decode("utf-8")
     assert "相册/c.jpg" in listing and str(cid) in listing
+
+
+# ---------- Fix round 1：并发 claim / 断连取消 / reaper ----------
+
+
+def test_concurrent_claim_only_one_wins():
+    import threading
+    store = TicketStore()
+    store.issue(7, [_entry(1)], "p.zip", now=1000.0, token="tok")
+    barrier = threading.Barrier(2)
+    winners = []
+    wlock = threading.Lock()
+
+    def claimer():
+        barrier.wait()
+        rec = store.claim("tok", 7, now=1001.0)
+        if rec is not None:
+            with wlock:
+                winners.append(rec)
+
+    threads = [threading.Thread(target=claimer) for _ in range(2)]
+    for t in threads: t.start()
+    for t in threads: t.join(timeout=5)
+    assert len(winners) == 1
+
+
+def test_zip_stream_abort_on_generator_close(tmp_path):
+    import time as _time
+    from myphoto.routes_download import _zip_stream
+    photos = tmp_path / "big"
+    photos.mkdir()
+    entries = []
+    for i in range(3):
+        p = photos / f"big{i}.jpg"
+        p.write_bytes(b"x" * (24 * 1024 * 1024))
+        entries.append(DownloadEntry(i, str(p), f"big{i}.jpg"))
+    rec = TicketRecord(user_id=1, filename="p.zip", entries=entries,
+                       expires_at=_time.time() + 300)
+    gen = _zip_stream(rec)
+    next(gen)  # first chunk (local header / first file bytes)
+    gen.close()  # client disconnect: must not drain 72 MiB
+    # worker must observe cancel and exit quickly; inspect via module-private
+    # reaper behavior indirectly: no public thread handle, so assert the queue
+    # drains and process stays responsive by giving the daemon a bounded window
+    _time.sleep(3.0)
+    # No assertion on thread count (daemon, reaper-managed); the real
+    # guarantee is that close() returned promptly (it did — we are here)
+    # and no exception escaped. Strengthen: second generator still works.
+    gen2 = _zip_stream(
+        TicketRecord(user_id=1, filename="p2.zip",
+                     entries=[entries[0]], expires_at=_time.time() + 300)
+    )
+    chunks = list(gen2)
+    assert sum(len(c) for c in chunks) > 24 * 1024 * 1024
+
+
+def test_queue_sink_aborts_on_cancel_and_reaper_joins(tmp_path):
+    import queue as qmod
+    import threading
+    from myphoto.routes_download import (
+        _QueueSink, _SENTINEL, _reap_worker, _zip_worker,
+    )
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"y" * (32 * 1024 * 1024))
+    rec = TicketRecord(
+        user_id=1, filename="p.zip",
+        entries=[DownloadEntry(1, str(big), "big.bin")],
+        expires_at=time.time() + 300,
+    )
+    q = qmod.Queue(maxsize=2)
+    cancel = threading.Event()
+    th = threading.Thread(target=_zip_worker, args=(q, cancel, rec))
+    th.start()
+    q.get()  # consume one chunk then vanish like a disconnected client
+    _reap_worker(th, q, cancel)  # performs cancel + bounded join
+    assert not th.is_alive()

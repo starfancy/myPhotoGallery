@@ -57,6 +57,7 @@ class TicketStore:
     def __init__(self, ttl_sec: float = TICKET_TTL_SEC,
                  max_entries: int = TICKET_MAX_ENTRIES) -> None:
         self._t: dict[str, TicketRecord] = {}
+        self._lock = threading.Lock()
         self.ttl_sec = ttl_sec
         self.max_entries = max_entries
 
@@ -68,26 +69,30 @@ class TicketStore:
     def issue(self, user_id: int, entries: list[DownloadEntry],
               filename: str, *, now: float | None = None,
               token: str | None = None) -> str:
-        now = time.time() if now is None else now
-        self._purge(now)
-        if len(self._t) >= self.max_entries:
-            oldest = min(self._t, key=lambda k: self._t[k].expires_at)
-            del self._t[oldest]
-        token = token or secrets.token_urlsafe(16)
-        self._t[token] = TicketRecord(
-            user_id=user_id, filename=filename,
-            entries=entries, expires_at=now + self.ttl_sec,
-        )
-        return token
+        with self._lock:
+            now = time.time() if now is None else now
+            self._purge(now)
+            if len(self._t) >= self.max_entries:
+                oldest = min(self._t, key=lambda k: self._t[k].expires_at)
+                del self._t[oldest]
+            token = token or secrets.token_urlsafe(16)
+            self._t[token] = TicketRecord(
+                user_id=user_id, filename=filename,
+                entries=entries, expires_at=now + self.ttl_sec,
+            )
+            return token
 
     def claim(self, token: str, user_id: int,
               *, now: float | None = None) -> TicketRecord | None:
-        now = time.time() if now is None else now
-        rec = self._t.get(token)
-        if rec is None or rec.expires_at <= now or rec.user_id != user_id:
-            return None
-        del self._t[token]
-        return rec
+        # 同步 GET 跑在 anyio 线程池，issue 跑在事件循环线程：
+        # 加锁让 lookup/check/delete 原子，杜绝并发双 claim 与 purge 竞态。
+        with self._lock:
+            now = time.time() if now is None else now
+            rec = self._t.get(token)
+            if rec is None or rec.expires_at <= now or rec.user_id != user_id:
+                return None
+            del self._t[token]
+            return rec
 
 
 _LABEL_BAD = re.compile(r'[\\/:*?"<>|]')
@@ -197,23 +202,38 @@ async def create_download_batch(
 
 _SENTINEL = object()
 _ERROR = object()
+_ABORTED = object()  # raised out of the zip writer after client disconnect
 _CHUNK_MAX = 1024 * 1024
 _QUEUE_DEPTH = 8
+_PUT_TIMEOUT = 0.5
+_REAP_JOIN_SEC = 10.0
+
+
+class _ZipAborted(Exception):
+    pass
 
 
 class _QueueSink:
-    """zipfile 的写入端：有界 queue 背压（写满阻塞写线程）；
-    seekable=False 让 zipfile 走数据描述符 + ZIP64 的流式写法。"""
+    """zipfile sink: bounded queue back-pressure; cancel-aware so an aborted
+    response stops the worker within _PUT_TIMEOUT instead of finishing a
+    multi-GB ZIP nobody reads."""
 
-    def __init__(self, q: "queue.Queue[object]") -> None:
+    def __init__(self, q: "queue.Queue[object]", cancel: threading.Event) -> None:
         self._q = q
+        self._cancel = cancel
         self._pos = 0
 
     def write(self, b) -> int:
         data = bytes(b)
-        self._q.put(data)
-        self._pos += len(data)
-        return len(data)
+        while True:
+            if self._cancel.is_set():
+                raise _ZipAborted()
+            try:
+                self._q.put(data, timeout=_PUT_TIMEOUT)
+                self._pos += len(data)
+                return len(data)
+            except queue.Full:
+                continue
 
     def flush(self) -> None:
         pass
@@ -231,50 +251,87 @@ class _QueueSink:
         pass
 
 
+def _put_guarded(q: "queue.Queue[object]", item, cancel: threading.Event) -> None:
+    """Terminal marker put: never block forever on a full/dead queue."""
+    while not cancel.is_set():
+        try:
+            q.put(item, timeout=_PUT_TIMEOUT)
+            return
+        except queue.Full:
+            continue
+
+
+def _zip_worker(q, cancel, record) -> None:
+    try:
+        with zipfile.ZipFile(
+            _QueueSink(q, cancel), "w", compression=zipfile.ZIP_STORED
+        ) as zf:
+            missing: list[str] = []
+            for e in record.entries:
+                if cancel.is_set():
+                    raise _ZipAborted()
+                p = Path(e.disk_path)
+                if not p.is_file():
+                    missing.append(f"{e.image_id}  {e.arcname}")
+                    continue
+                try:
+                    mt = time.localtime(p.stat().st_mtime)[:6]
+                except OSError:
+                    mt = (1980, 1, 1, 0, 0, 0)
+                zi = zipfile.ZipInfo(e.arcname, date_time=mt)
+                zi.compress_type = zipfile.ZIP_STORED
+                zi.external_attr = (0o644 & 0xFFFF) << 16
+                zi.flag_bits |= 0x800  # UTF-8 文件名
+                try:
+                    with zf.open(zi, "w", force_zip64=True) as out, \
+                            p.open("rb") as fh:
+                        shutil.copyfileobj(fh, out, length=_CHUNK_MAX)
+                except OSError:
+                    log.exception("zip entry read failed: %s", e.arcname)
+                    missing.append(f"{e.image_id}  {e.arcname} (read error)")
+            if missing and not cancel.is_set():
+                mi = zipfile.ZipInfo("missing-files.txt")
+                mi.compress_type = zipfile.ZIP_STORED
+                mi.flag_bits |= 0x800
+                # 流模式必须 force_zip64，writestr 不支持，显式 open：
+                header = "以下文件在打包时缺失或读取失败（条目可能不完整）：\n"
+                with zf.open(mi, "w", force_zip64=True) as out:
+                    out.write(header.encode("utf-8"))
+                    out.write("".join(line + "\n" for line in missing).encode("utf-8"))
+    except _ZipAborted:
+        log.info("zip download aborted (client disconnected): ticket entries=%d",
+                 len(record.entries))
+    except Exception:
+        log.exception("zip streaming failed")
+        _put_guarded(q, _ERROR, cancel)
+    finally:
+        _put_guarded(q, _SENTINEL, cancel)
+
+
+def _reap_worker(thread: threading.Thread, q: "queue.Queue[object]",
+                 cancel: threading.Event) -> None:
+    """Run OFF the event-loop thread: tell the worker to stop and bounded-join.
+    The worker is cancel-aware (its blocking put bails within _PUT_TIMEOUT);
+    if it somehow stays stuck, drain briefly with timeouts, then abandon a
+    daemon thread rather than block forever."""
+    cancel.set()
+    thread.join(timeout=_REAP_JOIN_SEC)
+    while thread.is_alive():
+        try:
+            chunk = q.get(timeout=1.0)
+        except queue.Empty:
+            return  # abandon; daemon thread
+        if chunk is _SENTINEL or chunk is _ERROR:
+            break
+    thread.join(timeout=_REAP_JOIN_SEC)
+
+
 def _zip_stream(record: TicketRecord):
     q: "queue.Queue[object]" = queue.Queue(maxsize=_QUEUE_DEPTH)
-
-    def worker() -> None:
-        try:
-            with zipfile.ZipFile(
-                _QueueSink(q), "w", compression=zipfile.ZIP_STORED
-            ) as zf:
-                missing: list[str] = []
-                for e in record.entries:
-                    p = Path(e.disk_path)
-                    if not p.is_file():
-                        missing.append(f"{e.image_id}  {e.arcname}")
-                        continue
-                    try:
-                        mt = time.localtime(p.stat().st_mtime)[:6]
-                    except OSError:
-                        mt = (1980, 1, 1, 0, 0, 0)
-                    zi = zipfile.ZipInfo(e.arcname, date_time=mt)
-                    zi.compress_type = zipfile.ZIP_STORED
-                    zi.external_attr = (0o644 & 0xFFFF) << 16
-                    zi.flag_bits |= 0x800  # UTF-8 文件名
-                    try:
-                        with zf.open(zi, "w", force_zip64=True) as out, \
-                                p.open("rb") as fh:
-                            shutil.copyfileobj(fh, out, length=_CHUNK_MAX)
-                    except OSError:
-                        log.exception("zip entry read failed: %s", e.arcname)
-                        missing.append(f"{e.image_id}  {e.arcname} (read error)")
-                if missing:
-                    mi = zipfile.ZipInfo("missing-files.txt")
-                    mi.compress_type = zipfile.ZIP_STORED
-                    mi.flag_bits |= 0x800
-                    # 流模式必须 force_zip64，writestr 不支持，显式 open：
-                    with zf.open(mi, "w", force_zip64=True) as out:
-                        out.write("".join(line + "\n" for line in missing)
-                                  .encode("utf-8"))
-        except Exception:
-            log.exception("zip streaming failed")
-            q.put(_ERROR)
-        finally:
-            q.put(_SENTINEL)
-
-    thread = threading.Thread(target=worker, daemon=True)
+    cancel = threading.Event()
+    thread = threading.Thread(
+        target=_zip_worker, args=(q, cancel, record), daemon=True,
+    )
     thread.start()
     try:
         while True:
@@ -287,14 +344,11 @@ def _zip_stream(record: TicketRecord):
                 return
             yield chunk
     finally:
-        # 客户端断连（generator 被关闭）后写线程可能正阻塞在满队列上：
-        # 继续排空到 SENTINEL，让它正常写完退出，避免 daemon 线程泄漏。
-        if thread.is_alive():
-            while True:
-                chunk = q.get()
-                if chunk is _SENTINEL or chunk is _ERROR:
-                    break
-        thread.join(timeout=30)
+        # starlette 在事件循环线程上 finalize 被丢弃的同步 generator：
+        # 这里只做廉价操作，绝不排空队列；拆除交给 daemon reaper 线程。
+        threading.Thread(
+            target=_reap_worker, args=(thread, q, cancel), daemon=True,
+        ).start()
 
 
 @router.get("/download-batch/{ticket}")
