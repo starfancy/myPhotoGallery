@@ -10,10 +10,27 @@ ZIP：ZIP_STORED（照片已压缩）、force_zip64（RAW 合集可能超 4GB）
 from __future__ import annotations
 
 import logging
+import queue
 import re
 import secrets
+import shutil
+import threading
 import time
+import zipfile
 from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+
+from myphoto.access import check_gallery_access
+from myphoto.deps import current_user
+from myphoto.errors import AppError
+from myphoto.models import GalleryRoot, Image, User
+from myphoto.paths import PathTraversalError, resolve_within_root
 
 log = logging.getLogger("myphoto.routes_download")
 
@@ -102,7 +119,204 @@ def build_arcnames(seq: list[tuple[int, str, str]]) -> list[str]:
     for root_id, label, rel in seq:
         name = f"{_safe_label(label)}/{rel}" if multi else rel
         if name in used:
-            name = _disambiguate(name)
+            # 重抽直到不撞名（每次约 2^-32 撞已用集合），上限 8 次兜底
+            for _ in range(8):
+                candidate = _disambiguate(name)
+                if candidate not in used:
+                    name = candidate
+                    break
         used.add(name)
         out.append(name)
     return out
+
+
+router = APIRouter(prefix="/api", tags=["download"])
+
+
+class BatchBody(BaseModel):
+    image_ids: list[int] = Field(..., min_length=1, max_length=200)
+
+
+@router.post("/download-batch")
+async def create_download_batch(
+    body: BatchBody,
+    request: Request,
+    user: User = Depends(current_user),
+):
+    limit = int(request.app.state.config.download_batch_limit)
+    ids = list(dict.fromkeys(body.image_ids))  # 去重保序
+    if len(ids) > limit:
+        raise AppError(
+            "batch_too_large", 400,
+            f"batch exceeds configured limit: {limit}",
+        )
+
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        rows = (
+            await s.execute(
+                select(Image, GalleryRoot)
+                .join(GalleryRoot, Image.root_id == GalleryRoot.id)
+                .where(Image.id.in_(ids))
+            )
+        ).all()
+        by_id = {img.id: (img, root) for img, root in rows}
+        if any(i not in by_id for i in ids):
+            raise AppError("not_found", 404, "image not found")
+
+        checked_galleries: set[int] = set()
+        seq: list[tuple[int, str, str]] = []
+        disk_paths: dict[int, Path] = {}
+        for i in ids:
+            img, root = by_id[i]
+            if root.gallery_id not in checked_galleries:
+                await check_gallery_access(s, user, root.gallery_id)
+                checked_galleries.add(root.gallery_id)
+            try:
+                disk_paths[i] = resolve_within_root(
+                    root.absolute_path, img.relative_path
+                )
+            except PathTraversalError:
+                raise AppError("path_invalid", 400, "invalid path")
+            seq.append((root.id, root.label, img.relative_path))
+
+    arcnames = build_arcnames(seq)
+    entries = [
+        DownloadEntry(
+            image_id=i, disk_path=str(disk_paths[i]), arcname=arc,
+        )
+        for i, arc in zip(ids, arcnames)
+    ]
+    filename = f"photos-{time.strftime('%Y%m%d-%H%M%S')}.zip"
+    store: TicketStore = request.app.state.download_tickets
+    ticket = store.issue(user.id, entries, filename)
+    return {"ticket": ticket, "filename": filename, "count": len(entries)}
+
+
+# ---------- GET：一次性票据 → 流式 ZIP ----------
+
+_SENTINEL = object()
+_ERROR = object()
+_CHUNK_MAX = 1024 * 1024
+_QUEUE_DEPTH = 8
+
+
+class _QueueSink:
+    """zipfile 的写入端：有界 queue 背压（写满阻塞写线程）；
+    seekable=False 让 zipfile 走数据描述符 + ZIP64 的流式写法。"""
+
+    def __init__(self, q: "queue.Queue[object]") -> None:
+        self._q = q
+        self._pos = 0
+
+    def write(self, b) -> int:
+        data = bytes(b)
+        self._q.put(data)
+        self._pos += len(data)
+        return len(data)
+
+    def flush(self) -> None:
+        pass
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seekable(self) -> bool:
+        return False
+
+    def writable(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        pass
+
+
+def _zip_stream(record: TicketRecord):
+    q: "queue.Queue[object]" = queue.Queue(maxsize=_QUEUE_DEPTH)
+
+    def worker() -> None:
+        try:
+            with zipfile.ZipFile(
+                _QueueSink(q), "w", compression=zipfile.ZIP_STORED
+            ) as zf:
+                missing: list[str] = []
+                for e in record.entries:
+                    p = Path(e.disk_path)
+                    if not p.is_file():
+                        missing.append(f"{e.image_id}  {e.arcname}")
+                        continue
+                    try:
+                        mt = time.localtime(p.stat().st_mtime)[:6]
+                    except OSError:
+                        mt = (1980, 1, 1, 0, 0, 0)
+                    zi = zipfile.ZipInfo(e.arcname, date_time=mt)
+                    zi.compress_type = zipfile.ZIP_STORED
+                    zi.external_attr = (0o644 & 0xFFFF) << 16
+                    zi.flag_bits |= 0x800  # UTF-8 文件名
+                    try:
+                        with zf.open(zi, "w", force_zip64=True) as out, \
+                                p.open("rb") as fh:
+                            shutil.copyfileobj(fh, out, length=_CHUNK_MAX)
+                    except OSError:
+                        log.exception("zip entry read failed: %s", e.arcname)
+                        missing.append(f"{e.image_id}  {e.arcname} (read error)")
+                if missing:
+                    mi = zipfile.ZipInfo("missing-files.txt")
+                    mi.compress_type = zipfile.ZIP_STORED
+                    mi.flag_bits |= 0x800
+                    # 流模式必须 force_zip64，writestr 不支持，显式 open：
+                    with zf.open(mi, "w", force_zip64=True) as out:
+                        out.write("".join(line + "\n" for line in missing)
+                                  .encode("utf-8"))
+        except Exception:
+            log.exception("zip streaming failed")
+            q.put(_ERROR)
+        finally:
+            q.put(_SENTINEL)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    try:
+        while True:
+            chunk = q.get()
+            if chunk is _SENTINEL:
+                break
+            if chunk is _ERROR:
+                # 响应头已发出无法改状态码；提前结束流，客户端会得到损坏 ZIP
+                log.error("aborting zip response after worker error")
+                return
+            yield chunk
+    finally:
+        # 客户端断连（generator 被关闭）后写线程可能正阻塞在满队列上：
+        # 继续排空到 SENTINEL，让它正常写完退出，避免 daemon 线程泄漏。
+        if thread.is_alive():
+            while True:
+                chunk = q.get()
+                if chunk is _SENTINEL or chunk is _ERROR:
+                    break
+        thread.join(timeout=30)
+
+
+@router.get("/download-batch/{ticket}")
+def download_batch_zip(
+    ticket: str,
+    request: Request,
+    user: User = Depends(current_user),
+):
+    store: TicketStore = request.app.state.download_tickets
+    record = store.claim(ticket, user.id)
+    if record is None:
+        raise AppError("not_found", 404, "ticket not found")
+    quoted = quote(record.filename, safe="")
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="{record.filename}"; '
+            f"filename*=UTF-8''{quoted}"
+        ),
+        "Cache-Control": "no-store",
+    }
+    return StreamingResponse(
+        _zip_stream(record),
+        media_type="application/zip",
+        headers=headers,
+    )
