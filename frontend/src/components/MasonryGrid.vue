@@ -16,7 +16,9 @@
                  @contextmenu="onMenu(cell.id, $event)"
                  @longpress="onLongPress(cell.id, $event)" />
     </div>
-    <CellContextMenu :menu="menu" @action="runAction" />
+    <CellContextMenu :menu="menu"
+                     :items="[{ action: 'delete', label: '移入回收站' }]"
+                     @action="runAction" />
   </div>
 </template>
 
@@ -47,7 +49,7 @@ const emit = defineEmits<{
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.isAdmin)
 
-const { menu, open, openAt, runAction } = useCellMenu(emit)
+const { menu, open, openAt, runAction } = useCellMenu<number, "delete">(emit)
 
 const rootEl = ref<HTMLElement | null>(null)
 const width = ref(1000)

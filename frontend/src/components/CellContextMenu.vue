@@ -3,19 +3,23 @@
        class="lb-cell-menu"
        :style="{ top: `${menu.y}px`, left: `${menu.x}px` }"
        @click.stop>
-    <button type="button" class="lb-cell-menu-item"
-            @click="$emit('action', 'delete')">
-      移入回收站
+    <button v-for="item in items" :key="item.action"
+            type="button" class="lb-cell-menu-item"
+            @click="$emit('action', item.action)">
+      {{ item.label }}
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { CellMenuState } from "../composables/useCellMenu"
+import type { CellMenuItem, CellMenuState } from "../composables/useCellMenu"
 
-defineProps<{ menu: CellMenuState | null }>()
+defineProps<{
+  menu: CellMenuState | null
+  items: CellMenuItem[]
+}>()
 defineEmits<{
-  (e: "action", action: "delete"): void
+  (e: "action", action: string): void
 }>()
 </script>
 
