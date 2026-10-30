@@ -29,6 +29,7 @@ const ERROR_MSG_ZH: Record<string, string> = {
   forbidden: "无权访问",
   not_found: "未找到",
   conflict: "已存在",
+  request_rejected: "请求被服务器拒绝",
   bad_request: "请求参数无效",
   path_invalid: "路径无效",
   path_not_readable: "路径不可读",
@@ -69,9 +70,19 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const ct = res.headers.get("content-type") || ""
   const data = ct.includes("application/json") ? await res.json().catch(() => null) : null
   if (!res.ok) {
-    const code = data?.error?.code ?? "internal_error"
-    const msg = data?.error?.message ?? res.statusText
-    throw new HttpError(res.status, code, msg)
+    if (data?.error) {
+      // 本应用统一错误信封 {error:{code,message}}
+      throw new HttpError(
+        res.status,
+        data.error.code ?? "internal_error",
+        data.error.message ?? res.statusText,
+      )
+    }
+    // 非应用信封响应：FastAPI/Pydantic 原生 422（{detail:[...]}，如旧版
+    // 后端未重启）或反代返回的 HTML 错误页。不透传英文 statusText，统一
+    // 给中文兜底并带状态码，便于用户报告问题。
+    const code = res.status >= 500 ? "internal_error" : "request_rejected"
+    throw new HttpError(res.status, code, `请求被服务器拒绝（${res.status}）`)
   }
   return data as T
 }
