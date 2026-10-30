@@ -6,23 +6,21 @@
       </template>
     </AppHeader>
     <main class="p-3">
-      <!-- 工具栏：左侧选择操作（admin only），右侧排版切换 -->
+      <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换 -->
       <div v-if="images.length" class="mb-2 flex items-center gap-2 text-sm">
-        <template v-if="auth.isAdmin">
-          <button v-if="!selectionMode"
-                  type="button"
+        <button v-if="!selectionMode"
+                type="button"
+                class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
+                @click="enterSelectionMode">
+          选择
+        </button>
+        <template v-else>
+          <span class="text-neutral-400">已选 {{ selectedIds.size }} 项</span>
+          <button type="button"
                   class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
-                  @click="enterSelectionMode">
-            选择
+                  @click="selectAll">
+            {{ isAllSelected ? "取消全选" : "全选" }}
           </button>
-          <template v-else>
-            <span class="text-neutral-400">已选 {{ selectedIds.size }} 项</span>
-            <button type="button"
-                    class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
-                    @click="selectAll">
-              {{ isAllSelected ? "取消全选" : "全选" }}
-            </button>
-          </template>
         </template>
         <div class="ml-auto flex items-center gap-1.5">
           <GridLayoutSwitch v-model="gridLayout" />
@@ -68,6 +66,13 @@
         <span class="text-sm text-neutral-300">已选 {{ selectedIds.size }} 项</span>
         <div class="flex items-center gap-2">
           <button type="button"
+                  :disabled="selectedIds.size === 0 || downloading"
+                  class="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  @click="onBatchDownload">
+            {{ downloading ? "准备中..." : `下载 ZIP（${selectedIds.size}）` }}
+          </button>
+          <button v-if="auth.isAdmin"
+                  type="button"
                   :disabled="selectedIds.size === 0 || batchDeleting"
                   class="rounded bg-red-700 px-3 py-1.5 text-sm hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                   @click="onBatchDelete">
@@ -99,13 +104,19 @@ import GridLayoutSwitch from "../components/GridLayoutSwitch.vue"
 import type { GridLayout } from "../components/GridLayoutSwitch.vue"
 import PaginationBar from "../components/PaginationBar.vue"
 import ImageLightbox from "../components/ImageLightbox.vue"
-import { apiGet, apiDelete, apiPost, HttpError } from "../api"
+import { apiGet, apiDelete, apiPost, HttpError, errorMessage } from "../api"
 import { useBrowseStore, PAGE_SIZE, type BrowseKey, type ImageRow } from "../stores/browse"
 import { useAuthStore } from "../stores/auth"
+import { useToastStore } from "../stores/toast"
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const toast = useToastStore()
+
+/** 前端选择集硬上限（下载 API Pydantic 上限同为 200）。 */
+const SELECT_HARD_LIMIT = 200
+const downloading = ref(false)
 const gid = computed(() => Number(route.params.gid))
 const rid = computed(() => Number(route.params.rid))
 const path = computed(() => {
@@ -182,16 +193,62 @@ function exitSelectionMode() {
 
 function onToggleSelect(id: number) {
   const s = new Set(selectedIds.value)
-  if (s.has(id)) s.delete(id)
-  else s.add(id)
+  if (s.has(id)) {
+    s.delete(id)
+  } else {
+    if (s.size >= SELECT_HARD_LIMIT) {
+      toast.push("error", `一次最多选择 ${SELECT_HARD_LIMIT} 张`)
+      return
+    }
+    s.add(id)
+  }
   selectedIds.value = s
 }
 
 function selectAll() {
+  const s = new Set(selectedIds.value)
   if (isAllSelected.value) {
-    selectedIds.value = new Set()
+    for (const it of images.value) s.delete(it.id)
   } else {
-    selectedIds.value = new Set(images.value.map((it) => it.id))
+    for (const it of images.value) s.add(it.id)
+  }
+  selectedIds.value = s
+}
+
+function triggerAnchorDownload(href: string, filename: string) {
+  const a = document.createElement("a")
+  a.href = href
+  a.download = filename
+  a.rel = "noopener"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+async function onBatchDownload() {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  const limit = auth.user?.download_batch_limit ?? 100
+  if (ids.length > limit) {
+    window.alert(
+      `当前设置单次最多下载 ${limit} 张（已选 ${ids.length} 张），请减少选择；` +
+      "管理员可在「设置」中调整，最高 200。",
+    )
+    return
+  }
+  downloading.value = true
+  try {
+    const r = await apiPost<{ ticket: string; filename: string; count: number }>(
+      "/api/download-batch",
+      { image_ids: ids },
+    )
+    triggerAnchorDownload(`/api/download-batch/${r.ticket}`, r.filename)
+    // 浏览器原生下载已接管；无法感知完成，给 1s 防连点窗口
+    await new Promise((res) => setTimeout(res, 1000))
+  } catch (err) {
+    window.alert(`下载失败：${errorMessage(err, "请稍后重试")}`)
+  } finally {
+    downloading.value = false
   }
 }
 
@@ -354,7 +411,7 @@ async function renderPage(key: BrowseKey, p: number) {
 
 async function changePage(p: number) {
   if (p === page.value || p < 1 || p > totalPages.value) return
-  exitSelectionMode()
+  // 跨页累积选择：翻页不清空选择集（切换 gid/rid/path 时仍由 watcher 清空）
   const key = currentKey()
   page.value = p
   await renderPage(key, p)
