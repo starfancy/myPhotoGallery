@@ -228,6 +228,35 @@ def _decode_cursor(cursor: str) -> tuple[str, int]:
         raise AppError("path_invalid", 400, "invalid cursor")
 
 
+def _escape_like(term: str) -> str:
+    """转义 SQLite LIKE 的通配符（% _）与转义符本身；配合 ESCAPE 反斜杠。"""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _subtree_clause(column, rel: str):
+    """relative_path 位于 rel 子树内（含自身）；rel 为空时恒真（返回 None）。"""
+    if rel == "":
+        return None
+    return or_(
+        column == rel,
+        column.like(_escape_like(rel) + "/%", escape="\\"),
+    )
+
+
+def _image_payload(r: Image) -> dict:
+    return {
+        "id": r.id,
+        "filename": r.filename,
+        "width": r.width,
+        "height": r.height,
+        "sha1": r.sha1,
+        "size_bytes": r.size_bytes,
+        "taken_at": r.taken_at,
+        "mtime": r.mtime,
+        "is_raw": bool(r.is_raw),
+    }
+
+
 @router.get("/galleries/{gid}/roots/{rid}/images")
 async def list_images(
     gid: int,
@@ -318,20 +347,7 @@ async def list_images(
         rows = (await s.execute(q)).scalars().all()
         has_more = len(rows) > limit
         rows = rows[:limit]
-        items = [
-            {
-                "id": r.id,
-                "filename": r.filename,
-                "width": r.width,
-                "height": r.height,
-                "sha1": r.sha1,
-                "size_bytes": r.size_bytes,
-                "taken_at": r.taken_at,
-                "mtime": r.mtime,
-                "is_raw": bool(r.is_raw),
-            }
-            for r in rows
-        ]
+        items = [_image_payload(r) for r in rows]
         if has_more and rows:
             if sort in ("name_asc", "name_desc"):
                 next_cursor = _encode_cursor(sort, rows[-1].filename, rows[-1].id)
@@ -345,3 +361,113 @@ async def list_images(
                 next_cursor = _encode_cursor(sort, str(rows[-1].size_bytes), rows[-1].id)
             return {"items": items, "next_cursor": next_cursor, "total": total}
         return {"items": items, "next_cursor": None, "total": total}
+
+
+@router.get("/galleries/{gid}/roots/{rid}/search")
+async def search(
+    gid: int,
+    rid: int,
+    request: Request,
+    response: Response,
+    q: str = Query(""),
+    path: str = "",
+    limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = None,
+    _user: User = Depends(gallery_scope_guard),
+):
+    _no_store(response)
+    term = q.strip()
+    if not term:
+        raise AppError("bad_request", 400, "query must not be empty")
+    if len(term) > 100:
+        raise AppError("bad_request", 400, "query too long")
+    rel = _norm_or_400(path)
+    needle = f"%{_escape_like(term.lower())}%"
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        await _get_root_or_404(s, gid, rid)
+        anchor = (
+            await s.execute(
+                select(Folder.id).where(
+                    Folder.root_id == rid, Folder.relative_path == rel
+                )
+            )
+        ).scalar_one_or_none()
+        empty = {
+            "q": term, "path": rel, "folders": [],
+            "folders_truncated": False, "images": [], "next_cursor": None,
+        }
+        if anchor is None:
+            return empty
+
+        # ---- 文件夹命中：严格后代，固定 50 条上限 ----
+        fq = select(Folder).where(Folder.root_id == rid, Folder.name != "")
+        if rel:
+            fq = fq.where(
+                Folder.relative_path.like(
+                    _escape_like(rel) + "/%", escape="\\"
+                )
+            )
+        fq = (
+            fq.where(func.lower(Folder.name).like(needle, escape="\\"))
+            .order_by(Folder.name.asc(), Folder.id.asc())
+            .limit(51)
+        )
+        frows = (await s.execute(fq)).scalars().all()
+        folders_out = []
+        for f in frows[:50]:
+            cover = (
+                await s.execute(
+                    select(Image.sha1)
+                    .where(Image.folder_id == f.id)
+                    .order_by(Image.filename.asc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            folders_out.append({
+                "name": f.name,
+                "relative_path": f.relative_path,
+                "image_count": f.image_count,
+                "descendant_count": f.descendant_count,
+                "cover_thumb_sha1": cover,
+            })
+
+        # ---- 图片命中：子树内 filename LIKE，keyset 分页 ----
+        iq = (
+            select(Image)
+            .join(Folder, Image.folder_id == Folder.id)
+            .where(
+                Image.root_id == rid,
+                func.lower(Image.filename).like(needle, escape="\\"),
+            )
+        )
+        subtree = _subtree_clause(Folder.relative_path, rel)
+        if subtree is not None:
+            iq = iq.where(subtree)
+        if cursor:
+            last_val, last_id = _decode_cursor(cursor)
+            iq = iq.where(or_(
+                Image.filename > last_val,
+                and_(Image.filename == last_val, Image.id > last_id),
+            ))
+        iq = iq.order_by(Image.filename.asc(), Image.id.asc()).limit(limit + 1)
+        irows = (await s.execute(iq)).scalars().all()
+        has_more = len(irows) > limit
+        irows = irows[:limit]
+        images_out = []
+        for r in irows:
+            item = _image_payload(r)
+            item["relative_path"] = r.relative_path
+            images_out.append(item)
+        next_cursor = None
+        if has_more and irows:
+            next_cursor = _encode_cursor("search", irows[-1].filename, irows[-1].id)
+
+        return {
+            "q": term,
+            "path": rel,
+            "folders": folders_out,
+            "folders_truncated": len(frows) > 50,
+            "images": images_out,
+            "next_cursor": next_cursor,
+        }
