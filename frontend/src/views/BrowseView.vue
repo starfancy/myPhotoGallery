@@ -210,7 +210,16 @@ function selectAll() {
   if (isAllSelected.value) {
     for (const it of images.value) s.delete(it.id)
   } else {
-    for (const it of images.value) s.add(it.id)
+    // 与单张切换同一硬上限：按批次顺序最多补到 SELECT_HARD_LIMIT 张
+    let blocked = false
+    for (const it of images.value) {
+      if (s.size >= SELECT_HARD_LIMIT) {
+        blocked = true
+        break
+      }
+      s.add(it.id)
+    }
+    if (blocked) toast.push("error", `一次最多选择 ${SELECT_HARD_LIMIT} 张`)
   }
   selectedIds.value = s
 }
@@ -231,8 +240,8 @@ async function onBatchDownload() {
   const limit = auth.user?.download_batch_limit ?? 100
   if (ids.length > limit) {
     window.alert(
-      `当前设置单次最多下载 ${limit} 张（已选 ${ids.length} 张），请减少选择；` +
-      "管理员可在「设置」中调整，最高 200。",
+      `当前设置单次最多下载 ${limit} 张（已选 ${ids.length} 张），请减少选择。` +
+      (auth.isAdmin ? "管理员可在「设置」中调整，最高 200。" : ""),
     )
     return
   }

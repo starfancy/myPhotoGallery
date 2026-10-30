@@ -149,4 +149,41 @@ describe("BrowseView 多选与下载", () => {
     expect(toast.items.some((t) => t.text.includes("200"))).toBe(true)
     expect(w.text()).toContain("已选 200 项")
   })
+
+  it("全选跨页累积时同样受 200 硬上限约束并 toast 提示", async () => {
+    const { w } = await mountView("admin", 100, 201)
+    const toast = useToastStore()
+    await enterSelection(w)
+
+    // 第 1 页全选：恰好 200 张
+    await w.findAll("button").find((b) => b.text() === "全选")!.trigger("click")
+    await flushPromises()
+    expect(w.text()).toContain("已选 200 项")
+
+    // 翻到第 2 页（仅 id 201 一张）后再次全选：上限已达，不能再加
+    w.findComponent(PaginationBar).vm.$emit("change", 2)
+    await flushPromises()
+    await flushPromises()
+    expect(w.text()).toContain("已选 200 项")
+    await w.findAll("button").find((b) => b.text() === "全选")!.trigger("click")
+    await flushPromises()
+    expect(w.text()).toContain("已选 200 项")
+    expect(toast.items.some((t) => t.text === "一次最多选择 200 张")).toBe(true)
+  })
+
+  it("viewer 超限下载提示不含管理员设置说明", async () => {
+    const { w, fetchFn } = await mountView("viewer", 1, 2)
+    vi.stubGlobal("alert", vi.fn())
+    await enterSelection(w)
+    w.findComponent(JustifiedGrid).vm.$emit("toggle-select", 1)
+    w.findComponent(JustifiedGrid).vm.$emit("toggle-select", 2)
+    await flushPromises()
+    await w.findAll("button").find((b) => b.text().includes("下载 ZIP"))!.trigger("click")
+    expect(window.alert).toHaveBeenCalled()
+    const msg = (window.alert as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(msg).toContain("请减少选择")
+    expect(msg).not.toContain("管理员")
+    expect((fetchFn.mock.calls as unknown as Array<[string, RequestInit?]>)
+      .some((c) => c[0] === "/api/download-batch")).toBe(false)
+  })
 })
