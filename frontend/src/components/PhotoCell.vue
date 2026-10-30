@@ -22,6 +22,12 @@
          :title="filename">
       {{ filename }}
     </div>
+    <div v-if="badge"
+         class="lb-cell-badge pointer-events-none truncate text-left"
+         :class="{ 'lb-cell-badge--up': showFilename }"
+         :title="badge">
+      {{ badge }}
+    </div>
     <!-- 选择模式：左上角勾选圈；非选择模式也保留一个可显示的空框，避免选择切换后布局跳动 -->
     <button v-if="selectionMode"
             type="button"
@@ -64,6 +70,8 @@ const props = defineProps<{
   showFilename?: boolean
   /** 单元格尺寸/定位样式：行排版给宽高，列排版给 grid-row span */
   cellStyle?: Record<string, string | number>
+  /** 搜索结果：所在目录小字（posix 目录路径）；root 图片与普通浏览不传 */
+  badge?: string
 }>()
 
 const emit = defineEmits<{
@@ -116,6 +124,22 @@ function onTouchEnd() {
   font-size: 11px;
   line-height: 1.3;
   /* truncate / text-center 由工具类提供；超长省略号，hover 看 title 全名 */
+}
+.lb-cell-badge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: 16px 6px 3px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.2;
+}
+.lb-cell-badge--up {
+  /* 同时显示文件名时，目录行抬到文件名行之上 */
+  bottom: 15px;
 }
 .lb-cell-menu-btn {
   position: absolute;
