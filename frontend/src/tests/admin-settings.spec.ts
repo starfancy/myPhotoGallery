@@ -171,6 +171,35 @@ describe("AdminSettings", () => {
     expect(saveAfter.attributes("disabled")).toBeDefined()
   })
 
+  it("fills the recommended loopback proxies via 恢复默认 without auto-saving", async () => {
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockResolvedValueOnce(json(DEFAULTS))
+      .mockResolvedValueOnce(json({ ...DEFAULTS, trusted_proxies: ["127.0.0.1", "::1"] }))
+    vi.stubGlobal("fetch", fetchFn)
+    const w = await mountView()
+
+    // 初始为空；点击只填表单，不触发 PATCH
+    const restore = w.findAll("button").find((b) => b.text() === "恢复默认")!
+    await restore.trigger("click")
+
+    const proxyInputs = w.findAll('input[placeholder*="127.0.0.1"]')
+    expect(proxyInputs).toHaveLength(2)
+    expect((proxyInputs[0].element as HTMLInputElement).value).toBe("127.0.0.1")
+    expect((proxyInputs[1].element as HTMLInputElement).value).toBe("::1")
+    // 仍只有初始 GET；恢复默认不自动保存
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+
+    // 表单变 dirty，统一由保存按钮提交
+    const save = w.findAll("button").find((b) => b.text() === "保存")!
+    expect(save.attributes("disabled")).toBeUndefined()
+    await save.trigger("click")
+    await flushPromises()
+
+    const [, init] = fetchFn.mock.calls[1]
+    expect(JSON.parse(init.body).trusted_proxies).toEqual(["127.0.0.1", "::1"])
+  })
+
   it("shows backend validation message and keeps form", async () => {
     const fetchFn = vi.fn()
     fetchFn

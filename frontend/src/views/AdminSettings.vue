@@ -72,12 +72,20 @@
               </button>
             </div>
           </div>
-          <button type="button" @click="addProxy"
-                  class="mt-2 rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
-            + 添加
-          </button>
+          <div class="mt-2 flex items-center gap-2">
+            <button type="button" @click="addProxy"
+                    class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+              + 添加
+            </button>
+            <button type="button" @click="resetProxies"
+                    title="一键填回本机反代的推荐值（IPv4/IPv6 回环），需再点保存生效"
+                    class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+              恢复默认
+            </button>
+          </div>
           <p class="mt-2 text-xs text-neutral-500">
             仅这些来源（IP 或 CIDR）转发的 X-Forwarded-For 会被采纳；留空表示不信任任何代理。
+            本机 Caddy 反代的推荐默认值为 127.0.0.1 与 ::1。
           </p>
         </section>
 
@@ -141,12 +149,20 @@ function isFiniteInput(v: unknown): boolean {
   return v !== "" && Number.isFinite(Number(v))
 }
 
+/** 本机 Caddy 等单机反向代理的推荐值：IPv4/IPv6 回环各一条。 */
+const DEFAULT_TRUSTED_PROXIES = ["127.0.0.1", "::1"]
+
 function addProxy() {
   form.value.trusted_proxies.push("")
 }
 
 function removeProxy(i: number) {
   form.value.trusted_proxies.splice(i, 1)
+}
+
+/** 一键填回推荐默认值；只改表单，统一由「保存」提交。 */
+function resetProxies() {
+  form.value.trusted_proxies = [...DEFAULT_TRUSTED_PROXIES]
 }
 
 async function load() {
