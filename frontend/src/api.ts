@@ -31,6 +31,7 @@ const ERROR_MSG_ZH: Record<string, string> = {
   conflict: "已存在",
   request_rejected: "请求被服务器拒绝",
   bad_request: "请求参数无效",
+  batch_too_large: "超出批量下载数量上限",
   path_invalid: "路径无效",
   path_not_readable: "路径不可读",
   internal_error: "服务器内部错误",

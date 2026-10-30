@@ -9,6 +9,7 @@ export interface AuthUser {
   access_scope: "lan_only" | "remote_allowed"
   enabled?: number
   last_login_at?: number | null
+  download_batch_limit: number
 }
 
 export const useAuthStore = defineStore("auth", () => {

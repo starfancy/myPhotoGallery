@@ -18,6 +18,7 @@ function makeAuthUser(over: Partial<AuthUser> = {}): AuthUser {
     username: "alice",
     role: "admin",
     access_scope: "remote_allowed",
+    download_batch_limit: 100,
     ...over,
   }
 }
@@ -60,6 +61,7 @@ describe("AppHeader (P4 access scope badge)", () => {
       username: "u",
       role: "viewer",
       access_scope: "remote_allowed",  // always set in practice; this test ensures even without it the header doesn't crash
+      download_batch_limit: 100,
     })
     // username should be visible
     expect(w.html()).toContain("u")

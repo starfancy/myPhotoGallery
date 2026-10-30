@@ -13,6 +13,8 @@ export interface ImageRow {
   /** 文件修改时间（Unix 秒）；taken_at 缺失时作为拍摄时间的回退显示 */
   mtime: number
   is_raw: boolean
+  /** 搜索结果才有：图片相对 root 的完整 posix 路径（含目录） */
+  relative_path?: string
 }
 
 export interface BrowseKey {
