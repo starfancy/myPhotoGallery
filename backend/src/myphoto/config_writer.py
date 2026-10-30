@@ -21,6 +21,7 @@ _FIELD_MAP: dict[str, tuple[str, str]] = {
     "login_lockout_threshold": ("security", "login_lockout_threshold"),
     "trusted_proxies": ("security", "trusted_proxies"),
     "session_hours": ("app", "session_hours"),
+    "download_batch_limit": ("download", "batch_limit"),
 }
 
 
@@ -30,6 +31,7 @@ class SettingsUpdates:
     login_lockout_threshold: int | None = None
     trusted_proxies: list[str] | None = None
     session_hours: int | None = None
+    download_batch_limit: int | None = None
 
 
 def _toml_escape(s: str) -> str:

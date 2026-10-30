@@ -120,6 +120,7 @@ async def login(body: LoginBody, request: Request, response: Response):
                     "username": user.username,
                     "role": user.role,
                     "access_scope": user.access_scope,
+                    "download_batch_limit": cfg.download_batch_limit,
                 }
             }
 
@@ -142,12 +143,13 @@ async def logout(response: Response):
 
 
 @router.get("/me")
-async def me(user: User = Depends(current_user)):
+async def me(request: Request, user: User = Depends(current_user)):
     return {
         "id": user.id,
         "username": user.username,
         "role": user.role,
         "access_scope": user.access_scope,
+        "download_batch_limit": request.app.state.config.download_batch_limit,
     }
 
 

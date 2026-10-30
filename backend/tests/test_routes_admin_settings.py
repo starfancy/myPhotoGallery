@@ -30,6 +30,7 @@ def test_get_settings_defaults(client):
         "login_lockout_threshold": 5,
         "trusted_proxies": [],
         "session_hours": 8,
+        "download_batch_limit": 100,
     }
 
 
