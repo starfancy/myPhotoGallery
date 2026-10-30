@@ -252,3 +252,91 @@ def test_exclusion_triggers_rescan(env_client):
     _wait_idle(c, gid, rid)  # request_rescan queued and completed
     st = c.get(f"/api/admin/galleries/{gid}/roots/{rid}/scan-status").json()
     assert st["status"] == "idle"
+
+
+# ---- relative_path 入口（2026-10-30 快捷排除菜单）----
+
+
+def test_create_exclusion_relative_path_201(env_client):
+    c, _app, gid, rid, photos = env_client
+    (photos / "exports").mkdir()
+
+    r = c.post(_ex_url(gid, rid), json={"relative_path": "exports"})
+    assert r.status_code == 201
+    e = r.json()
+    assert e["relative_path"] == "exports"
+    assert e["reason"] is None
+    assert e["excluded_by_username"] == "admin"
+
+    listed = c.get(_ex_url(gid, rid)).json()["entries"]
+    assert [x["relative_path"] for x in listed] == ["exports"]
+
+
+def test_relative_path_nested_backslash_normalized_to_posix(env_client):
+    c, _app, gid, rid, photos = env_client
+    (photos / "a" / "b").mkdir(parents=True)
+
+    r = c.post(_ex_url(gid, rid), json={"relative_path": "a\\b"})
+    assert r.status_code == 201
+    assert r.json()["relative_path"] == "a/b"
+
+
+def test_relative_path_dotdot_rejected(env_client):
+    c, _app, gid, rid, _photos = env_client
+    r = c.post(_ex_url(gid, rid), json={"relative_path": "../x"})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "path_invalid"
+
+
+@pytest.mark.parametrize("raw", ["/etc/x", "C:/x", "a//b"])
+def test_relative_path_absolute_or_double_slash_rejected(env_client, raw):
+    c, _app, gid, rid, _photos = env_client
+    r = c.post(_ex_url(gid, rid), json={"relative_path": raw})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "path_invalid"
+
+
+def test_exactly_one_path_field_required(env_client):
+    c, _app, gid, rid, photos = env_client
+    (photos / "exports").mkdir()
+
+    neither = c.post(_ex_url(gid, rid), json={"reason": "x"})
+    assert neither.status_code == 400
+    assert neither.json()["error"]["code"] == "path_invalid"
+
+    both = c.post(_ex_url(gid, rid), json={
+        "absolute_path": str(photos / "exports"),
+        "relative_path": "exports",
+    })
+    assert both.status_code == 400
+    assert both.json()["error"]["code"] == "path_invalid"
+
+
+def test_relative_path_nonexistent_rejected(env_client):
+    c, _app, gid, rid, _photos = env_client
+    r = c.post(_ex_url(gid, rid), json={"relative_path": "nope"})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "path_not_readable"
+
+
+def test_relative_path_duplicate_of_absolute_conflict(env_client):
+    c, _app, gid, rid, photos = env_client
+    (photos / "exports").mkdir()
+    assert c.post(
+        _ex_url(gid, rid), json={"absolute_path": str(photos / "exports")}
+    ).status_code == 201
+    r = c.post(_ex_url(gid, rid), json={"relative_path": "exports"})
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "conflict"
+
+
+def test_relative_exclusion_triggers_rescan(env_client):
+    c, _app, gid, rid, photos = env_client
+    _wait_idle(c, gid, rid)
+    (photos / "exports").mkdir()
+    assert c.post(
+        _ex_url(gid, rid), json={"relative_path": "exports"}
+    ).status_code == 201
+    _wait_idle(c, gid, rid)
+    st = c.get(f"/api/admin/galleries/{gid}/roots/{rid}/scan-status").json()
+    assert st["status"] == "idle"

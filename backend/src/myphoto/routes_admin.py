@@ -5,6 +5,7 @@ import ctypes
 import ipaddress
 import json
 import os
+import re
 import secrets
 import shutil
 import string
@@ -427,7 +428,10 @@ async def admin_scan_status(
 
 
 class ExclusionCreate(BaseModel):
-    absolute_path: str = Field(min_length=1, max_length=4096)
+    # absolute_path（管理页 DirectoryChooser）与 relative_path（浏览页快捷菜单）
+    # 二选一；handler 中强制恰好提供一个。
+    absolute_path: str | None = Field(None, min_length=1, max_length=4096)
+    relative_path: str | None = Field(None, min_length=1, max_length=4096)
     reason: str | None = Field(None, max_length=500)
 
 
@@ -455,30 +459,56 @@ def _exclusion_payload(e: Exclusion, username: str | None) -> dict:
     }
 
 
+def _check_resolved_within_root(p: Path, root_p: Path, display: str) -> str:
+    """两个入口共用的终态校验：拒符号链接、必须真实目录、不得等于 root
+    本身、resolve 后必须落在 root 内。返回 posix 风格相对路径。"""
+    try:
+        if p.is_symlink():
+            raise AppError("path_invalid", 400, "symlinks are not permitted")
+    except OSError:
+        raise AppError("path_not_readable", 400, f"path not readable: {display}")
+    resolved = p.resolve()
+    if resolved == root_p:
+        raise AppError("path_invalid", 400, "cannot exclude the root itself")
+    try:
+        rel = resolved.relative_to(root_p)
+    except ValueError:
+        raise AppError("path_invalid", 400, "path is outside the root")
+    if not resolved.exists() or not resolved.is_dir():
+        raise AppError("path_not_readable", 400, f"path not readable: {display}")
+    return rel.as_posix()
+
+
 def _validate_path_within_root(raw_path: str, root: GalleryRoot) -> tuple[Path, str]:
-    """Resolve an admin-supplied path and enforce it is a real directory
+    """管理页入口：入参为磁盘绝对路径。先拒 '..' 片段再走终态校验。
+
+    Resolve an admin-supplied path and enforce it is a real directory
     strictly inside the root. Returns (resolved, posix relative path)."""
     # Rule 5 (mirrors browse-fs): reject any '..' segment before resolution
     # so traversal attempts are refused as invalid rather than normalized away.
     if any(part == ".." for part in raw_path.replace("\\", "/").split("/")):
         raise AppError("path_invalid", 400, "path must not contain '..' segments")
-    raw = Path(raw_path)
-    try:
-        if raw.is_symlink():
-            raise AppError("path_invalid", 400, "symlinks are not permitted")
-    except OSError:
-        raise AppError("path_not_readable", 400, f"path not readable: {raw_path}")
     root_p = Path(root.absolute_path).resolve()
-    p = raw.resolve()
-    if p == root_p:
-        raise AppError("path_invalid", 400, "cannot exclude the root itself")
-    try:
-        rel = p.relative_to(root_p)
-    except ValueError:
-        raise AppError("path_invalid", 400, "path is outside the root")
-    if not p.exists() or not p.is_dir():
-        raise AppError("path_not_readable", 400, f"path not readable: {raw_path}")
-    return p, rel.as_posix()
+    p = Path(raw_path)
+    rel_posix = _check_resolved_within_root(p, root_p, raw_path)
+    return p, rel_posix
+
+
+def _validate_relative_within_root(raw_rel: str, root: GalleryRoot) -> str:
+    """浏览页快捷菜单入口：入参为相对 root 的 POSIX 风格路径
+    （Windows 反斜杠会被归一化）。空片段（前导/重复斜杠）、'..' 与
+    Windows 盘符片段在拼接前直接拒绝，避免任何绝对路径形式重置拼接结果。"""
+    norm = raw_rel.replace("\\", "/")
+    parts = norm.split("/")
+    if any(part == ".." for part in parts):
+        raise AppError("path_invalid", 400, "path must not contain '..' segments")
+    if any(part == "" for part in parts):
+        raise AppError("path_invalid", 400, "relative_path must not be absolute")
+    if any(re.fullmatch(r"[A-Za-z]:", part) for part in parts):
+        raise AppError("path_invalid", 400, "relative_path must not contain a drive")
+    root_p = Path(root.absolute_path).resolve()
+    p = root_p / norm
+    return _check_resolved_within_root(p, root_p, raw_rel)
 
 
 @router.get("/galleries/{gid}/roots/{rid}/exclusions")
@@ -517,8 +547,16 @@ async def admin_create_exclusion(
 ):
     sm = request.app.state.sessionmaker
     async with sm() as s:
+        if (body.absolute_path is None) == (body.relative_path is None):
+            raise AppError(
+                "path_invalid", 400,
+                "provide exactly one of absolute_path / relative_path",
+            )
         root = await _get_root_or_404(s, gid, rid)
-        _, rel_posix = _validate_path_within_root(body.absolute_path, root)
+        if body.absolute_path is not None:
+            _, rel_posix = _validate_path_within_root(body.absolute_path, root)
+        else:
+            rel_posix = _validate_relative_within_root(body.relative_path, root)
 
         dup = (
             await s.execute(
