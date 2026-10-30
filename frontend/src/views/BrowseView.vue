@@ -46,7 +46,9 @@
         </div>
       </div>
 
-      <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid" />
+      <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid"
+                      :can-exclude="auth.isAdmin"
+                      @exclude="onExcludeFolder" />
       <component :is="gridComponent" v-if="images.length" :items="images"
                      :selection-mode="selectionMode"
                      :selected-ids="selectedIds"
@@ -248,19 +250,47 @@ async function onGridMenuAction(id: number, action: "delete") {
   await onImageDeleted(id)
 }
 
+/** 文件夹卡片快捷菜单：确认后走 P5 排除接口（仅清索引，不删磁盘文件）。 */
+async function onExcludeFolder(folder: { name: string; relative_path: string }) {
+  const msg =
+    `确定排除文件夹「${folder.name}」？\n\n` +
+    "该文件夹及其所有子文件夹、图片将从图库索引中移除，磁盘上的文件不会被删除。" +
+    "之后可在「图库管理」中解除排除。"
+  if (!window.confirm(msg)) return
+  try {
+    await apiPost(
+      `/api/admin/galleries/${gid.value}/roots/${rid.value}/exclusions`,
+      { relative_path: folder.relative_path },
+    )
+  } catch (err) {
+    const m = err instanceof HttpError ? err.message : "排除失败"
+    window.alert(`排除失败：${m}`)
+    return
+  }
+  // 只刷新文件夹区域；图片分页与滚动位置保持不动
+  await loadFolders()
+}
+
+/**
+ * 只重拉面包屑与文件夹列表（含空文件夹借封面补查）。
+ * 快捷排除成功后使用：不清图片分页缓存、不滚顶、不重置页码。
+ */
+async function loadFolders() {
+  const [c, f] = await Promise.all([
+    apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/breadcrumbs?path=${encodeURIComponent(path.value)}`),
+    apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/folders?path=${encodeURIComponent(path.value)}`),
+  ])
+  crumbs.value = c
+  folders.value = f
+  // 空文件夹（自身无图、后代有图）借用直接子文件夹封面：单项失败静默处理。
+  await enrichBorrowedCovers()
+}
+
 async function loadAll() {
   loading.value = true
   try {
     const key = currentKey()
-    const [c, f] = await Promise.all([
-      apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/breadcrumbs?path=${encodeURIComponent(path.value)}`),
-      apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/folders?path=${encodeURIComponent(path.value)}`),
-    ])
-    crumbs.value = c
-    folders.value = f
-    // 空文件夹（自身无图、后代有图）借用直接子文件夹封面：fire-and-forget，
-    // 不阻塞分页加载；单项失败在函数内静默处理。
-    void enrichBorrowedCovers()
+    await loadFolders()
     page.value = 1
     await renderPage(key, 1)
     // restore scroll
