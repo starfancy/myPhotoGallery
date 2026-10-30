@@ -143,16 +143,19 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 async function mountBrowse(role: "admin" | "viewer") {
-  // 服务端状态：排除成功后 folders 重拉返回空列表（卡片应消失）
+  // 服务端状态：排除 POST 只入队后台重扫，Folder 行要等 worker 重扫完成才
+  // 被删除。因此 POST 之后立刻 GET folders 仍返回该文件夹（真实时序窗口）。
   const folders = SERVER_FOLDERS.map((x) => ({ ...x }))
   const excludeBodies: unknown[] = []
+  let parentFolderGets = 0
   const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : (input as Request).url ?? String(input)
     const method = init?.method ?? "GET"
     if (method === "GET" && url.includes("/breadcrumbs")) return jsonResponse(CRUMBS)
     if (method === "GET" && url.includes("/folders")) {
-      // path=trip 是 enrichBorrowedCovers 的直接子级补查（成功后父列表已空，
-      // 不会再触发；挂载时 trip 的补查返回空即可）
+      // path=trip 是 enrichBorrowedCovers 的直接子级补查；父列表即使在
+      // POST 之后也持续返回该文件夹，模拟重扫未完成。
+      if (!url.includes("path=trip")) parentFolderGets += 1
       return jsonResponse(url.includes("path=trip") ? [] : folders.map((x) => ({ ...x })))
     }
     if (method === "GET" && url.includes("/images")) {
@@ -160,7 +163,6 @@ async function mountBrowse(role: "admin" | "viewer") {
     }
     if (method === "POST" && /\/exclusions$/.test(url)) {
       excludeBodies.push(JSON.parse(init?.body as string))
-      folders.splice(0, folders.length)
       return jsonResponse({ id: 99, relative_path: "trip", reason: null })
     }
     return jsonResponse({ error: { code: "not_found", message: "not mocked" } }, 404)
@@ -184,7 +186,7 @@ async function mountBrowse(role: "admin" | "viewer") {
   })
   await flushPromises()
   await flushPromises()  // 网格 onMounted 又等一轮
-  return { w, fetchFn, excludeBodies }
+  return { w, fetchFn, excludeBodies, getParentFolderGets: () => parentFolderGets }
 }
 
 describe("BrowseView folder quick exclude", () => {
@@ -205,9 +207,11 @@ describe("BrowseView folder quick exclude", () => {
     expect(viewer.w.findAll('button[aria-label^="排除文件夹"]').length).toBe(0)
   })
 
-  it("POSTs relative_path after confirm and refreshes only the folder list", async () => {
-    const { w, fetchFn, excludeBodies } = await mountBrowse("admin")
+  it("optimistically removes the card even before the rescan completes", async () => {
+    const { w, fetchFn, excludeBodies, getParentFolderGets } = await mountBrowse("admin")
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true))
+    const getsBefore = getParentFolderGets()
+    expect(getsBefore).toBe(1)  // 仅挂载时一次
 
     await w.get('button[aria-label^="排除文件夹"]').trigger("click")
     await flushPromises()
@@ -227,8 +231,11 @@ describe("BrowseView folder quick exclude", () => {
     )
     expect(post).toBeDefined()
 
-    // 文件夹卡片消失，图片分页不受影响
+    // 服务端重扫窗口内 GET folders 仍会返回该文件夹，但卡片必须立即消失，
+    // 且成功后不再发起会把卡片“加回来”的父列表重拉。
     expect(w.findAll('button[aria-label^="排除文件夹"]').length).toBe(0)
+    expect(getParentFolderGets()).toBe(getsBefore)
+    // 图片分页不受影响
     expect(w.findAll("img").length).toBeGreaterThanOrEqual(1)
   })
 

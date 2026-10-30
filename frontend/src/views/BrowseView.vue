@@ -267,8 +267,10 @@ async function onExcludeFolder(folder: { name: string; relative_path: string }) 
     window.alert(`排除失败：${m}`)
     return
   }
-  // 只刷新文件夹区域；图片分页与滚动位置保持不动
-  await loadFolders()
+  // 乐观更新：POST 只把重扫入队，Folder 行要等后台 worker 重扫完才删，
+  // 此刻重拉 folders 会读到旧行、把卡片加回来。直接本地摘除；图片分页与
+  // 滚动位置不动，下次进入目录时 loadAll 与服务端最终状态收敛。
+  folders.value = folders.value.filter((f) => f.relative_path !== folder.relative_path)
 }
 
 /**

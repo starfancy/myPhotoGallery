@@ -103,7 +103,7 @@ class ExclusionCreate(BaseModel):
      `确定排除文件夹「${folder.name}」？\n\n该文件夹及其所有子文件夹、图片将从图库索引中移除，磁盘上的文件不会被删除。之后可在「图库管理」中解除排除。`
      取消则直接返回。
   2. `apiPost("/api/admin/galleries/${gid}/roots/${rid}/exclusions", { relative_path: folder.relative_path })`，不带 reason（null）。
-  3. 成功：只重新拉取文件夹列表与面包屑（轻量 `loadFolders()`：复用 loadAll 中 folders/crumbs 两个请求 + `enrichBorrowedCovers()`），**不重置图片分页、不滚动**。被排除卡片随 folders 刷新消失；后端扫描异步清索引，若此刻点进尚未清完的目录仍可正常浏览，无副作用。
+  3. 成功：**乐观更新**——直接从 `folders.value` 本地摘除该卡片（`filter(relative_path !==)`），不重置图片分页、不滚动。原因（2026-10-30 实测修正）：POST 只把重扫**入队**，Folder 行由后台 worker 重扫时才删除（`scanner._remove_unwalked_folders`）；POST 返回后立即 GET folders 会读到重扫窗口内的旧行，重拉反而把卡片加回来。下次进入目录时 `loadAll` 与服务端最终状态收敛；若重扫失败，管理页扫描状态可见。
   4. 失败：`window.alert("排除失败：" + message)`，含 409「该目录已排除」，风格同 `onGridMenuAction`。
 
 注意：菜单的全局「点击外部关闭」监听在三点按钮的 `@click.stop` 场景下不会被同一点击触发关闭（stop 阻止冒泡到 window），与图片菜单行为相同。
