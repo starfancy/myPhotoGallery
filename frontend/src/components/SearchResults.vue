@@ -51,11 +51,11 @@
       未找到匹配的图片或文件夹
     </div>
 
-    <div v-if="nextCursor" class="py-4 text-center">
+    <div v-if="nextCursor || loading" class="py-4 text-center">
       <button
         type="button"
         class="rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
-        :disabled="loadingMore"
+        :disabled="loading || loadingMore"
         @click="loadMore"
       >
         {{ loadingMore ? "加载中..." : "加载更多" }}
@@ -132,6 +132,10 @@ const nextCursor = ref<string | null>(null)
 const loading = ref(false)
 const loadingMore = ref(false)
 const error = ref("")
+// 单调请求令牌：loadFirst 每次自增 seq；loadMore 每次自增 moreSeq。
+// 过期响应（换词后才返回的首页/分页结果）一律丢弃，不触碰任何状态。
+const seq = ref(0)
+const moreSeq = ref(0)
 
 function dirOf(it: ImageRow): string | null {
   const p = it.relative_path ?? ""
@@ -158,42 +162,57 @@ function searchParams(cursor?: string | null) {
 
 async function loadFirst() {
   if (!props.q.trim()) return
+  const my = ++seq.value
   loading.value = true
   error.value = ""
+  folders.value = []
+  foldersTruncated.value = false
+  items.value = []
+  nextCursor.value = null
   try {
     const r = await apiGet<SearchResponse>(
       `/api/galleries/${props.gid}/roots/${props.rid}/search?${searchParams()}`,
     )
+    if (my !== seq.value) return
     folders.value = r.folders
     foldersTruncated.value = r.folders_truncated
     items.value = r.images
     nextCursor.value = r.next_cursor
     emit("itemsChange", items.value)
   } catch (e) {
+    if (my !== seq.value) return
     error.value = errorMessage(e, "搜索失败")
     folders.value = []
     items.value = []
     nextCursor.value = null
     emit("itemsChange", [])
   } finally {
-    loading.value = false
+    if (my === seq.value) loading.value = false
   }
 }
 
 async function loadMore() {
-  if (!nextCursor.value || loadingMore.value) return
+  if (loading.value || loadingMore.value || !nextCursor.value) return
+  const firstSeq = seq.value
+  const my = ++moreSeq.value
+  const cursor = nextCursor.value
+  const base = items.value
   loadingMore.value = true
   try {
     const r = await apiGet<SearchResponse>(
-      `/api/galleries/${props.gid}/roots/${props.rid}/search?${searchParams(nextCursor.value)}`,
+      `/api/galleries/${props.gid}/roots/${props.rid}/search?${searchParams(cursor)}`,
     )
-    items.value = [...items.value, ...r.images]
+    // 过期条件：期间开了新一轮首页（换词/reload），或被更新的 loadMore 取代
+    if (firstSeq !== seq.value || my !== moreSeq.value) return
+    items.value = [...base, ...r.images]
     nextCursor.value = r.next_cursor
     emit("itemsChange", items.value)
   } catch (e) {
+    if (firstSeq !== seq.value || my !== moreSeq.value) return
     error.value = errorMessage(e, "搜索失败")
   } finally {
-    loadingMore.value = false
+    // 只有最新一次 loadMore 负责清标志，避免覆盖后来者
+    if (my === moreSeq.value) loadingMore.value = false
   }
 }
 
