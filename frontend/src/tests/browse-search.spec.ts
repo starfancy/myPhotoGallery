@@ -43,8 +43,13 @@ const LightboxStub = defineComponent({
 })
 
 async function mountAt(url: string) {
-  const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const u = String(input)
+    const method = init?.method ?? "GET"
+    if (method === "POST" && u.includes("/api/images/batch-delete")) {
+      const { image_ids } = JSON.parse(init?.body as string) as { image_ids: number[] }
+      return json({ deleted: image_ids, failed: [] })
+    }
     if (u.includes("/breadcrumbs")) return json([{ name: "R", relative_path: "" }])
     if (u.includes("/folders")) return json([])
     if (u.includes("/search")) {
@@ -172,5 +177,68 @@ describe("BrowseView 搜索态", () => {
     await flushPromises()
     expect(w.text()).not.toContain("已选 1 项")
     expect((grid.props("selectedIds") as Set<number>).size).toBe(0)
+  })
+
+  it("清除搜索后加载普通视图", async () => {
+    const { w, fetchFn } = await mountAt("/galleries/1/r/1?q=%E6%97%85%E8%A1%8C")
+    const imageCalls = () =>
+      (fetchFn.mock.calls as unknown as Array<[string]>).filter((c) => c[0].includes("/images?"))
+    // 搜索态下不应请求普通 /images
+    expect(imageCalls().length).toBe(0)
+    expect(w.findComponent(SearchResults).exists()).toBe(true)
+
+    await w.get('button[aria-label="清除搜索"]').trigger("click")
+    await flushPromises()
+    await flushPromises()
+
+    // 同路径清除 q 后补拉普通视图
+    expect(imageCalls().length).toBe(1)
+    expect(w.findComponent(SearchResults).exists()).toBe(false)
+    expect(w.text()).not.toContain("此目录暂无图片")
+    const grid = w.findComponent(JustifiedGrid)
+    expect(grid.exists()).toBe(true)
+    expect((grid.props("items") as Array<{ id: number }>).map((it) => it.id)).toEqual([1, 2])
+  })
+
+  it("搜索态批量删除后刷新结果", async () => {
+    const { w, fetchFn } = await mountAt("/galleries/1/r/1?q=%E6%97%85%E8%A1%8C")
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true))
+
+    await w.findAll("button").find((b) => b.text() === "选择")!.trigger("click")
+    await flushPromises()
+    w.findComponent(JustifiedGrid).vm.$emit("toggle-select", 11)
+    await flushPromises()
+    expect(w.text()).toContain("已选 1 项")
+
+    await w.findAll("button").find((b) => b.text().includes("移入回收站"))!.trigger("click")
+    await flushPromises()
+    await flushPromises()
+
+    const calls = fetchFn.mock.calls as unknown as Array<[string, RequestInit?]>
+    const postIdx = calls.findIndex(
+      (c) => c[0].includes("/api/images/batch-delete") && c[1]?.method === "POST",
+    )
+    expect(postIdx).toBeGreaterThanOrEqual(0)
+    expect(JSON.parse(calls[postIdx][1]!.body as string)).toEqual({ image_ids: [11] })
+    // POST 之后必须有第二次 /search（reload），且不补拉隐藏的普通 /images
+    const searchesAfter = calls
+      .slice(postIdx + 1)
+      .filter((c) => c[0].includes("/search")).length
+    expect(searchesAfter).toBe(1)
+    expect(calls.filter((c) => c[0].includes("/images?")).length).toBe(0)
+  })
+
+  it("仅切换整个 root 范围不触发普通 /images 请求", async () => {
+    const { w, fetchFn } = await mountAt("/galleries/1/r/1/sub?q=x")
+    const imageCallCount = () =>
+      (fetchFn.mock.calls as unknown as Array<[string]>).filter((c) => c[0].includes("/images?")).length
+    expect(imageCallCount()).toBe(0)
+
+    await w.get('input[type="checkbox"]').setValue(true)
+    await flushPromises()
+    await flushPromises()
+
+    expect(imageCallCount()).toBe(0)
+    expect(w.findComponent(SearchResults).props("path")).toBe("")
   })
 })

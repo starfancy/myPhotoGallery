@@ -348,7 +348,7 @@ function selectAll() {
     for (const it of visibleItems.value) s.delete(it.id)
   } else {
     // 与单张切换同一硬上限：只补未选项，按批次顺序最多补到 SELECT_HARD_LIMIT 张
-    const room = SELECT_HARD_LIMIT - s.size
+    const room = Math.max(0, SELECT_HARD_LIMIT - s.size)
     const missing = visibleItems.value.filter((it) => !s.has(it.id))
     for (const it of missing.slice(0, room)) s.add(it.id)
     if (missing.length > room) toast.push("error", `一次最多选择 ${SELECT_HARD_LIMIT} 张`)
@@ -405,7 +405,12 @@ async function onBatchDelete() {
       { image_ids: ids },
     )
     if (r.deleted.length > 0) {
-      await reloadAfterChange()
+      if (searchQ.value) {
+        // 搜索态：刷新可见结果（删除项可能跨目录），隐藏的普通页不动
+        await resultsRef.value?.reload()
+      } else {
+        await reloadAfterChange()
+      }
     }
     if (r.failed.length > 0) {
       window.alert(`部分删除失败：${r.failed.length} 项`)
@@ -430,6 +435,22 @@ async function reloadAfterChange() {
   const key = currentKey()
   browse.invalidate(key)
   await renderPage(key, page.value)
+}
+
+/**
+ * 退出搜索态后补拉当前目录普通视图：folders 在搜索期间已加载、无需重拉；
+ * 先 invalidate 再渲染第 1 页，确保搜索结果里删除过的图片不会由旧缓存回显。
+ */
+async function loadNormalAfterSearch() {
+  const key = currentKey()
+  browse.invalidate(key)
+  page.value = 1
+  loading.value = true
+  try {
+    await renderPage(key, 1)
+  } finally {
+    loading.value = false
+  }
 }
 
 async function onGridMenuAction(id: number, action: "delete") {
@@ -579,13 +600,25 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("scroll", onScroll)
 })
-// 切换目录/图库/根目录时退出选择模式，避免旧选中 id 混入新数据
-watch([gid, rid, path], () => {
+// 位置（图库/根/目录）与搜索词合并监听：view-in-folder 可能在同一 tick
+// 同时改 path 和清 q，必须合并成一次判定，避免普通视图被拉两遍。
+watch([gid, rid, path, searchQ], (now, old) => {
   exitSelectionMode()
-  loadAll()
+  const [ogid, orid, opath, oq] = old ?? [0, 0, "", ""]
+  const locChanged =
+    now[0] !== ogid || now[1] !== orid || now[2] !== opath
+  if (locChanged) {
+    // loadAll 在搜索态会跳过 /images，由 SearchResults 自取
+    loadAll()
+  } else if (oq && !now[3]) {
+    // 同路径 q 由非空变空（刷新在 ?q= 页后清除、同目录 view-in-folder）：
+    // 此前从未拉过普通页，补拉当前 key；走 invalidate 防缓存里残留已删图片
+    void loadNormalAfterSearch()
+  }
 })
-// 换搜索词或切换范围时结果集整体替换，旧选择不应保留
-watch([searchQ, scopeAll], () => {
+// 仅切换范围：结果集整体替换，旧选择不应保留；普通 /images 不得触发，
+// SearchResults 靠自身 prop watcher 重查
+watch(scopeAll, () => {
   exitSelectionMode()
 })
 </script>
