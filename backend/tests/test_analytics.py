@@ -149,6 +149,10 @@ def test_camera_display_name_missing_model():
     ("Canon", "Canon EOS R1", 1.0),
     ("Canon", "Canon EOS R10", 1.6),
     ("Canon", "Canon EOS 200D II", 1.6),
+    # Canon 编号机身 MARK 后缀：7D Mark II 为 APS-C；5D/6D Mark 代次须被前面的 FF 规则先吞
+    ("Canon", "Canon EOS 7D Mark II", 1.6),
+    ("Canon", "Canon EOS 5D Mark IV", 1.0),
+    ("Canon", "Canon EOS 6D Mark II", 1.0),
     # Fujifilm X100 全系 1.5，但小底 X10/XF1 必须落空
     ("FUJIFILM", "X100", 1.5),
     ("FUJIFILM", "X100V", 1.5),

@@ -147,8 +147,9 @@ _CROP_RULES: dict[str, tuple[tuple[re.Pattern[str], float], ...]] = {
         (re.compile(r"^EOS5D.*$"), 1.0),
         (re.compile(r"^EOS6D.*$"), 1.0),
         (re.compile(r"^EOS1D.*$"), 1.0),       # 1Ds/1D X
-        # —— APS-C 单反：编号机身（7D/77D/550D/1000D），允许 II/III/IV 代后缀（200D II）——
-        (re.compile(r"^EOS\d{1,4}D(II|III|IV)?$"), 1.6),
+        # —— APS-C 单反：编号机身（7D/77D/550D/1000D），后缀兼容 200D II（EOS200DII）
+        # 与 7D Mark II（EOS7DMARKII）；5D/6D Mark 代次已在上方 FF 规则先命中 ——
+        (re.compile(r"^EOS\d{1,4}D(MARK(II|III|IV)|II|III|IV)?$"), 1.6),
     ),
     "Pentax": (
         (re.compile(r"^K-1(II|MARKII|MARK2)?$"), 1.0),  # K-1 必须先于通用 K- 前缀
