@@ -1,7 +1,7 @@
 <template>
   <div v-if="folders.length" class="lb-folder-grid py-2">
     <div v-for="f in folders" :key="f.relative_path"
-         class="lb-folder-card group relative flex w-full flex-col overflow-hidden rounded bg-neutral-800 text-sm hover:ring-2 hover:ring-blue-500"
+         class="lb-folder-card group relative flex w-full flex-col overflow-hidden rounded bg-surface-2 text-sm hover:ring-2 hover:ring-primary"
          @contextmenu="onContextMenu(f.relative_path, $event)"
          @touchstart="onTouchStart(f.relative_path, $event)"
          @touchend="onTouchEnd"
@@ -9,7 +9,7 @@
       <!-- 卡片整体可点进目录；省略号按钮作为链接的兄弟节点，避免 button 嵌套在 a 内 -->
       <router-link :to="linkFor(f.relative_path)"
                    class="flex w-full flex-1 flex-col">
-        <div class="relative h-24 w-full overflow-hidden bg-neutral-700">
+        <div class="relative h-24 w-full overflow-hidden bg-surface-3">
           <img v-if="f.cover_thumb_sha1"
                :src="`/api/thumb/${f.cover_thumb_sha1}?size=200`"
                class="h-full w-full"
@@ -26,7 +26,7 @@
         </div>
         <div class="truncate p-2">
           <div class="truncate font-medium">{{ f.name }}</div>
-          <div class="text-xs text-neutral-400">{{ f.descendant_count }} 张</div>
+          <div class="text-xs text-ink-2">{{ f.descendant_count }} 张</div>
         </div>
       </router-link>
       <!-- Admin-only 省略号：hover / 键盘 focus 才显示，点击弹快捷菜单 -->

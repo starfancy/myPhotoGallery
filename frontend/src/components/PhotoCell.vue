@@ -1,9 +1,9 @@
 <template>
-  <div class="lb-grid-cell relative h-full w-full overflow-hidden bg-neutral-800"
+  <div class="lb-grid-cell relative h-full w-full overflow-hidden bg-surface-2"
        :class="{ 'lb-grid-cell--selected': selected }"
        :style="cellStyle">
     <button type="button"
-            class="absolute inset-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            class="absolute inset-0 focus:outline-none focus:ring-2 focus:ring-primary"
             @click="$emit('activate')"
             @contextmenu.prevent="$emit('contextmenu', $event)"
             @touchstart="onTouchStart"
@@ -109,7 +109,7 @@ function onTouchEnd() {
 
 <style scoped>
 .lb-grid-cell--selected {
-  outline: 3px solid rgb(37 99 235);
+  outline: 3px solid rgb(var(--color-primary-hover));
   outline-offset: -3px;
 }
 .lb-cell-filename {
@@ -181,7 +181,7 @@ function onTouchEnd() {
   z-index: 2;
 }
 .lb-cell-check--on {
-  background: rgb(37 99 235);
-  border-color: rgb(37 99 235);
+  background: rgb(var(--color-primary-hover));
+  border-color: rgb(var(--color-primary-hover));
 }
 </style>

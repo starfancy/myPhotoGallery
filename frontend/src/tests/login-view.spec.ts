@@ -60,7 +60,7 @@ describe("LoginView (P4 access_scope)", () => {
 
     const html = w.html()
     expect(html).toContain("该账号仅限局域网访问")
-    expect(html).toMatch(/amber/)
+    expect(html).toMatch(/warning/)
   })
 
   it("shows login_locked banner (yellow) on 423", async () => {
@@ -80,7 +80,7 @@ describe("LoginView (P4 access_scope)", () => {
 
     const html = w.html()
     expect(html).toContain("登录尝试过多")
-    expect(html).toMatch(/yellow/)
+    expect(html).toMatch(/warning/)
   })
 
   it("shows invalid_credentials banner (red) on 401", async () => {
@@ -100,6 +100,6 @@ describe("LoginView (P4 access_scope)", () => {
 
     const html = w.html()
     expect(html).toContain("用户名或密码错误")
-    expect(html).toMatch(/red/)
+    expect(html).toMatch(/danger/)
   })
 })
