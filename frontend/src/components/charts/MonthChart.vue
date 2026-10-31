@@ -18,10 +18,12 @@
                 fill="transparent">
             <title>{{ p.month }} · {{ p.count }} 张</title>
           </rect>
+          <!-- 柱体盖在带 title 的命中区上：放行指针事件，悬停才能落到命中区显示原生提示 / bars overlay titled hit rects: let pointer events through so hover reaches the hit rect -->
           <rect v-if="p.count > 0" data-testid="bar"
                 :x="i * STEP" :y="barY(p.count)" :width="BAR_W"
                 :height="barHeight(p.count)"
-                fill="rgb(var(--color-primary))" />
+                fill="rgb(var(--color-primary))"
+                pointer-events="none" />
         </template>
 
         <text v-for="t in yearTicks" :key="t.label + t.x"

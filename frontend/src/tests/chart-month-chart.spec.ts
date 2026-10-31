@@ -32,6 +32,10 @@ describe("MonthChart", () => {
     const w = mountChart()
     const bars = w.findAll("rect[data-testid='bar']")
     expect(bars.length).toBe(2)
+    // 柱体须放行指针事件，悬停才能到达下方带 title 的命中区
+    for (const bar of bars) {
+      expect(bar.attributes("pointer-events")).toBe("none")
+    }
   })
 
   it("summarizes range and peak in the img aria-label; sr-only table lists non-zero months only", () => {
