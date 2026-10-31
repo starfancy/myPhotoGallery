@@ -53,6 +53,13 @@
   --color-warning-btn: 180 83 9;
   --color-warning-btn-hover: 146 64 14;
   --color-focus-ring: 37 99 235;
+  /* 图表分类色（分析面板环形图）：色相固定，深色主题另有提亮版 */
+  --color-chart-1: 45 108 192;   /* 蓝 */
+  --color-chart-2: 52 153 102;   /* 绿 */
+  --color-chart-3: 204 138 24;   /* 琥珀 */
+  --color-chart-4: 133 99 198;   /* 紫 */
+  --color-chart-5: 38 158 168;   /* 青 */
+  --color-chart-6: 190 90 98;    /* 红灰 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -85,6 +92,12 @@
     --color-warning-btn: 133 77 14;
     --color-warning-btn-hover: 113 63 18;
     --color-focus-ring: 96 165 250;
+    --color-chart-1: 96 150 228;
+    --color-chart-2: 96 190 140;
+    --color-chart-3: 224 172 80;
+    --color-chart-4: 170 140 222;
+    --color-chart-5: 92 190 198;
+    --color-chart-6: 220 140 146;
   }
 }
 
