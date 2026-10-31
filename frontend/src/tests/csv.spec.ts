@@ -27,9 +27,6 @@ describe("auditRowsToCsv", () => {
 })
 
 describe("collectAuditCsv", () => {
-  const page = (entries: any[], next_cursor: string | null) =>
-    vi.fn(async () => ({ entries, next_cursor }))
-
   it("pages until exhausted and reports progress", async () => {
     const calls: (string | null)[] = []
     const fetcher = async (cursor: string | null) => {
@@ -55,6 +52,25 @@ describe("collectAuditCsv", () => {
     })
     await expect(collectAuditCsv(fetcher, { signal: ac.signal }))
       .rejects.toBeInstanceOf(AuditExportAborted)
+  })
+
+  it("maps an in-flight AbortError after abort to AuditExportAborted, rethrows other errors", async () => {
+    // 真实场景：abort() 在 await fetch 期间触发，fetch 以 DOMException AbortError
+    // reject（api.ts 会再包成 HttpError(0,"network_error")，await 后的 aborted
+    // 检查跑不到）→ 收集器必须在此归一为 AuditExportAborted。
+    const ac = new AbortController()
+    const abortFetcher = vi.fn(async () => {
+      ac.abort()
+      throw new DOMException("Aborted", "AbortError")
+    })
+    await expect(collectAuditCsv(abortFetcher, { signal: ac.signal }))
+      .rejects.toBeInstanceOf(AuditExportAborted)
+
+    // 非 abort 的真实失败必须原样上抛（由调用方 toast「导出失败」）
+    const boom = new Error("network down")
+    const failFetcher = vi.fn(async () => { throw boom })
+    await expect(collectAuditCsv(failFetcher, { signal: new AbortController().signal }))
+      .rejects.toBe(boom)
   })
 
   it("stops at 10000 with AuditExportLimitError and no truncated file", async () => {

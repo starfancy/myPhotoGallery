@@ -11,7 +11,7 @@ export interface AuditCsvRow {
 }
 
 export const AUDIT_EXPORT_LIMIT = 10_000
-const PAGE_SIZE = 500
+export const AUDIT_EXPORT_PAGE_SIZE = 500
 const BOM = "﻿"
 const HEADER = "id,time,actor_user_id,actor_ip,action,target,detail"
 
@@ -81,7 +81,16 @@ export async function collectAuditCsv(
   let cursor: string | null = null
   do {
     if (opts.signal.aborted) throw new AuditExportAborted()
-    const page = await fetchPage(cursor, opts.signal)
+    let page: Page
+    try {
+      page = await fetchPage(cursor, opts.signal)
+    } catch (err) {
+      // abort() 在 await 期间触发时，fetch 以 AbortError reject（经 api.ts 会被
+      // 包成 HttpError(0,"network_error")），await 后的 aborted 检查跑不到——
+      // 这里按 signal 状态归一为用户取消；真实失败原样上抛。
+      if (opts.signal.aborted) throw new AuditExportAborted()
+      throw err
+    }
     if (opts.signal.aborted) throw new AuditExportAborted()
     all.push(...page.entries)
     opts.onProgress?.(all.length)

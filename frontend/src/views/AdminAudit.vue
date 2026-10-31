@@ -23,9 +23,16 @@
         <input id="audit-to" type="date" v-model="filterTo"
                class="rounded bg-surface-2 px-2 py-1 text-sm text-ink" @change="reload">
 
+        <!-- 导出中按钮即「取消」，必须保持可点：禁用态只在非导出时覆盖 loading/error/空。
+             opacity-40 也按同一条件显式绑定，保证导出中按钮不发灰。 -->
         <button type="button"
-                class="rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
-                :disabled="loading || !!error || entries.length === 0 || exporting"
+                :class="[
+                  'rounded bg-primary px-3 py-1.5 text-sm text-white',
+                  exportDisabled
+                    ? 'cursor-not-allowed opacity-40'
+                    : 'cursor-pointer hover:bg-primary-hover',
+                ]"
+                :disabled="exportDisabled"
                 @click="onExportClick">
           <template v-if="!exporting">导出 CSV</template>
           <template v-else>导出中…（已拉取 {{ exportCount }} 条）<span class="ml-1 underline">取消</span></template>
@@ -100,13 +107,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiGet, errorMessage } from "../api"
 import { formatDateTime } from "../utils/datetime"
 import { AUDIT_ACTION_LABELS, auditActionLabel } from "../utils/audit"
 import {
   auditCsvFilename, collectAuditCsv, AuditExportAborted, AuditExportLimitError,
+  AUDIT_EXPORT_PAGE_SIZE,
 } from "../utils/csv"
 import { useToastStore } from "../stores/toast"
 
@@ -229,16 +237,24 @@ const exporting = ref(false)
 const exportCount = ref(0)
 let exportAbort: AbortController | null = null
 
+// 非导出态：loading / 错误 / 空数据时禁用；导出态恒可点（按钮即取消入口）。
+const exportDisabled = computed(() =>
+  !exporting.value && (loading.value || !!error.value || entries.value.length === 0))
+
 async function onExportClick() {
   if (exporting.value) { exportAbort?.abort(); return }
   exportAbort = new AbortController()
   exporting.value = true
   exportCount.value = 0
+  // 过滤条件在导出开始时快照一次：多页拉取期间用户改过滤，后续页不得把新参数
+  // 与旧游标混用；游标页仅在快照 query 上追加 cursor。
+  const queryBase = buildQuery(null, AUDIT_EXPORT_PAGE_SIZE)
   try {
     const csv = await collectAuditCsv(
       (cursor, signal) =>
         apiGet<{ entries: AuditEntry[]; next_cursor: string | null }>(
-          `/api/admin/audit${buildQuery(cursor, 500)}`, signal,
+          `/api/admin/audit${queryBase}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+          signal,
         ),
       { signal: exportAbort.signal, onProgress: (n) => (exportCount.value = n) },
     )
@@ -252,7 +268,9 @@ async function onExportClick() {
     a.remove()
     URL.revokeObjectURL(url)
   } catch (err) {
-    if (err instanceof AuditExportAborted) {
+    // 纵深防御：即使错误类未被 collectAuditCsv 归一（如 api.ts 包装的
+    // network_error），只要 abort 已触发就静默——取消后无文件、无错误 toast。
+    if (err instanceof AuditExportAborted || exportAbort?.signal.aborted) {
       // 用户主动取消，静默
     } else if (err instanceof AuditExportLimitError) {
       toast.push("error", "最多导出 10,000 条，请收窄时间范围后重试")

@@ -74,12 +74,16 @@ const exportRow = (id: number) => ({
 })
 
 function stubDownload() {
-  const createObjectURL = vi.fn(() => "blob:mock")
+  const createObjectURL = vi.fn((_blob: Blob) => "blob:mock")
   const revokeObjectURL = vi.fn()
   URL.createObjectURL = createObjectURL
   URL.revokeObjectURL = revokeObjectURL
-  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
-  return { createObjectURL, revokeObjectURL }
+  // 在 anchor.click 桩里捕获 download 属性（组件 click 后立即 remove，拿不到节点）
+  const downloads: string[] = []
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+    downloads.push(this.download)
+  })
+  return { createObjectURL, revokeObjectURL, downloads }
 }
 
 describe("AdminAudit", () => {
@@ -297,7 +301,7 @@ describe("AdminAudit", () => {
   })
 
   it("CSV export pages at limit=500 and triggers one browser download", async () => {
-    const { createObjectURL } = stubDownload()
+    const { createObjectURL, downloads } = stubDownload()
     let exportPage = 0
     const { w, fetchFn } = await mountForExport((u) => {
       if (u.searchParams.get("limit") === "500") {
@@ -318,6 +322,97 @@ describe("AdminAudit", () => {
     expect(exportUrls).toHaveLength(2)
     expect(new URL(exportUrls[0], "http://x").searchParams.get("cursor")).toBeNull()
     expect(new URL(exportUrls[1], "http://x").searchParams.get("cursor")).toBe("exp1")
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    // Blob 必须带 UTF-8 CSV MIME；文件名 audit-YYYYMMDD-HHmmss.csv
+    const blob = createObjectURL.mock.calls[0][0]
+    expect(blob).toBeInstanceOf(Blob)
+    expect((blob as Blob).type).toBe("text/csv;charset=utf-8")
+    expect(downloads).toHaveLength(1)
+    expect(downloads[0]).toMatch(/^audit-\d{8}-\d{6}\.csv$/)
+  })
+
+  it("cancel on an in-flight page is operable, silent, and leaves no download", async () => {
+    const { createObjectURL } = stubDownload()
+    let rejectExport!: (e: unknown) => void
+    const pendingExport = new Promise<Response>((_, reject) => { rejectExport = reject })
+    const { w, fetchFn, pinia } = await mountForExport(() => ({
+      entries: [ENTRIES[0]], next_cursor: null,
+    }))
+    fetchFn.mockClear()
+    fetchFn.mockImplementation(async (input: RequestInfo | URL) => {
+      const raw = typeof input === "string" ? input : (input as Request).url
+      if (raw.startsWith("/api/admin/users"))
+        return response([{ id: 1, username: "alice" }])
+      if (new URL(raw, "http://x").searchParams.get("limit") === "500")
+        return pendingExport // 第一页导出挂起
+      return response({ entries: [ENTRIES[0]], next_cursor: null })
+    })
+
+    const exportBtn = () => w.findAll("button").find((b) => /导出|取消/.test(b.text()))!
+    await exportBtn().trigger("click")
+    await flushPromises()
+    // 导出中：按钮变「取消」、可点、不灰
+    expect(exportBtn().text()).toContain("取消")
+    expect(exportBtn().attributes("disabled")).toBeUndefined()
+    expect(exportBtn().classes()).not.toContain("opacity-40")
+
+    await exportBtn().trigger("click") // 点击取消 → abort()
+    // 底层 fetch 随 abort 以 AbortError reject（api.ts 会包成 network_error）
+    rejectExport(new DOMException("Aborted", "AbortError"))
+    await flushPromises()
+
+    const toast = useToastStore(pinia)
+    expect(toast.items).toHaveLength(0) // 取消后无错误 toast
+    expect(createObjectURL).not.toHaveBeenCalled() // 无文件
+    // 按钮恢复「导出 CSV」、可点、常态
+    expect(exportBtn().text()).toContain("导出 CSV")
+    expect(exportBtn().attributes("disabled")).toBeUndefined()
+    expect(exportBtn().classes()).not.toContain("opacity-40")
+  })
+
+  it("snapshots filters at export start: mid-export filter change cannot mix into later pages", async () => {
+    const { createObjectURL } = stubDownload()
+    let resolvePage2!: (r: Response) => void
+    const pendingPage2 = new Promise<Response>((res) => { resolvePage2 = res })
+    const { w, fetchFn } = await mountForExport(() => ({
+      entries: [ENTRIES[0]], next_cursor: null,
+    }))
+    // 先在 image_delete 过滤下列表加载一次
+    await w.find("select").setValue("image_delete")
+    await flushPromises()
+
+    fetchFn.mockClear()
+    fetchFn.mockImplementation(async (input: RequestInfo | URL) => {
+      const raw = typeof input === "string" ? input : (input as Request).url
+      if (raw.startsWith("/api/admin/users"))
+        return response([{ id: 1, username: "alice" }])
+      const u = new URL(raw, "http://x")
+      if (u.searchParams.get("limit") === "500" && u.searchParams.get("cursor") === "exp1")
+        return pendingPage2 // 第二页导出挂起，等待过滤切换后再放行
+      if (u.searchParams.get("limit") === "500" && u.searchParams.get("cursor") === "exp2")
+        return response({ entries: [exportRow(103)], next_cursor: null }) // 第三页：过滤切换后才发出
+      if (u.searchParams.get("limit") === "500")
+        return response({ entries: [exportRow(101)], next_cursor: "exp1" })
+      // 过滤切换触发的浏览 reload（limit=100，新 action）
+      return response({ entries: [ENTRIES[0]], next_cursor: null })
+    })
+
+    await w.findAll("button").find((b) => b.text().includes("导出 CSV"))!.trigger("click")
+    await flushPromises() // 第一页已回，第二页在途
+    // 导出途中切换过滤：只触发浏览 reload，不得改写导出请求
+    await w.find("select").setValue("login_success")
+    await flushPromises()
+    resolvePage2(response({ entries: [exportRow(102)], next_cursor: "exp2" }))
+    await flushPromises() // 第二页回后第三页发出
+
+    const exportUrls = (fetchFn.mock.calls as Array<[string]>)
+      .map((c) => c[0])
+      .filter((u) => new URL(u, "http://x").searchParams.get("limit") === "500")
+    expect(exportUrls).toHaveLength(3)
+    const pages = exportUrls.map((u) => new URL(u, "http://x").searchParams)
+    // 三页全部使用导出开始时的旧过滤；游标依次 null/exp1/exp2，无 login_success 混入
+    for (const p of pages) expect(p.get("action")).toBe("image_delete")
+    expect(pages.map((p) => p.get("cursor"))).toEqual([null, "exp1", "exp2"])
     expect(createObjectURL).toHaveBeenCalledTimes(1)
   })
 
