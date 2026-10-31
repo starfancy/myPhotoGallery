@@ -1,3 +1,73 @@
+/* ---- P7 语义颜色令牌：浅色为默认，深色跟随系统 prefers-color-scheme ----
+ * 变量存 RGB 通道，消费形态 rgb(var(--color-X) / <alpha>)，
+ * 这样 UnoCSS 的 /60 /95 透明度修饰符仍可用。
+ * 深色值 = P7 之前的既有调色板，保证深色外观零变化。
+ * ImageLightbox/PhotoSwipe 不消费这些变量（其样式为常暗字面量）。
+ */
+:root {
+  --color-base: 250 250 250;
+  --color-surface: 255 255 255;
+  --color-surface-2: 244 244 245;
+  --color-surface-3: 228 228 231;
+  --color-surface-4: 212 212 216;
+  --color-line: 228 228 231;
+  --color-line-strong: 212 212 216;
+  --color-ink: 23 23 23;
+  --color-ink-2: 64 64 64;
+  --color-ink-muted: 115 115 115;
+  --color-primary: 37 99 235;
+  --color-primary-hover: 29 78 216;
+  --color-primary-text: 29 78 216;
+  --color-primary-soft: 219 234 254;
+  --color-danger: 220 38 38;
+  --color-danger-hover: 185 28 28;
+  --color-danger-text: 185 28 28;
+  --color-danger-soft: 254 226 226;
+  --color-danger-line: 254 202 202;
+  --color-success: 21 128 61;
+  --color-success-btn: 21 128 61;
+  --color-success-btn-hover: 22 101 52;
+  --color-warning: 180 83 9;
+  --color-warning-soft: 254 243 199;
+  --color-warning-line: 253 230 138;
+  --color-warning-btn: 217 119 6;
+  --color-warning-btn-hover: 180 83 9;
+  --color-focus-ring: 37 99 235;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-base: 10 10 10;
+    --color-surface: 23 23 23;
+    --color-surface-2: 38 38 38;
+    --color-surface-3: 64 64 64;
+    --color-surface-4: 82 82 82;
+    --color-line: 38 38 38;
+    --color-line-strong: 64 64 64;
+    --color-ink: 245 245 245;
+    --color-ink-2: 163 163 163;
+    --color-ink-muted: 115 115 115;
+    --color-primary: 59 130 246;
+    --color-primary-hover: 37 99 235;
+    --color-primary-text: 96 165 250;
+    --color-primary-soft: 30 58 138;
+    --color-danger: 220 38 38;
+    --color-danger-hover: 185 28 28;
+    --color-danger-text: 248 113 113;
+    --color-danger-soft: 127 29 29;
+    --color-danger-line: 153 27 27;
+    --color-success: 74 222 128;
+    --color-success-btn: 22 101 52;
+    --color-success-btn-hover: 21 128 61;
+    --color-warning: 250 204 21;
+    --color-warning-soft: 113 63 18;
+    --color-warning-line: 133 77 14;
+    --color-warning-btn: 133 77 14;
+    --color-warning-btn-hover: 113 63 18;
+    --color-focus-ring: 96 165 250;
+  }
+}
+
 /* 全局样式补丁 */
 
 /*
