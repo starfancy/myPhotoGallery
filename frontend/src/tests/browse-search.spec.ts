@@ -1,0 +1,176 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { defineComponent } from "vue"
+import { flushPromises, mount } from "@vue/test-utils"
+import { createMemoryHistory, createRouter } from "vue-router"
+import { createPinia, setActivePinia } from "pinia"
+import BrowseView from "../views/BrowseView.vue"
+import SearchResults from "../components/SearchResults.vue"
+import JustifiedGrid from "../components/JustifiedGrid.vue"
+import { useAuthStore } from "../stores/auth"
+
+beforeAll(() => {
+  vi.stubGlobal("ResizeObserver", class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  })
+})
+
+const IMG_A = {
+  id: 11, filename: "a.jpg", width: 400, height: 300, sha1: "s11",
+  size_bytes: 1, taken_at: null, mtime: 0, is_raw: false,
+  relative_path: "2024/旅行/a.jpg",
+}
+const BROWSE_IMAGES = [
+  { id: 1, filename: "x.jpg", width: 40, height: 30, sha1: "s1",
+    size_bytes: 1, taken_at: null, mtime: 0, is_raw: false },
+  { id: 2, filename: "y.jpg", width: 40, height: 30, sha1: "s2",
+    size_bytes: 1, taken_at: null, mtime: 0, is_raw: false },
+]
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  })
+}
+
+const LightboxStub = defineComponent({
+  name: "ImageLightbox",
+  props: ["items", "startId", "locationResolver"],
+  emits: ["viewInFolder", "close", "change", "deleted"],
+  template: `<div class="lb-stub" />`,
+})
+
+async function mountAt(url: string) {
+  const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+    const u = String(input)
+    if (u.includes("/breadcrumbs")) return json([{ name: "R", relative_path: "" }])
+    if (u.includes("/folders")) return json([])
+    if (u.includes("/search")) {
+      return json({
+        q: "旅行", path: "", folders_truncated: false,
+        folders: [{ name: "旅行", relative_path: "2024/旅行", image_count: 0,
+                    descendant_count: 2, cover_thumb_sha1: "sf" }],
+        images: [IMG_A], next_cursor: null,
+      })
+    }
+    if (u.includes("/images")) return json({ items: BROWSE_IMAGES, total: 2 })
+    return json({ error: { code: "not_found", message: "x" } }, 404)
+  })
+  vi.stubGlobal("fetch", fetchFn)
+  setActivePinia(createPinia())
+  const auth = useAuthStore()
+  auth.$patch({ user: { id: 1, username: "u", role: "admin",
+                         access_scope: "lan_only", download_batch_limit: 100 } })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/galleries/:gid/r/:rid/:path(.*)*", component: BrowseView },
+      { path: "/galleries/:gid/r/:rid/:path(.*)*/image/:iid", component: BrowseView },
+    ],
+  })
+  await router.push(url)
+  const w = mount(BrowseView, {
+    global: { plugins: [router], stubs: { ImageLightbox: LightboxStub } },
+  })
+  await flushPromises()
+  await flushPromises()
+  return { w, router, fetchFn }
+}
+
+describe("BrowseView 搜索态", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+
+  it("?q= 进入搜索态：请求 search、显示文件夹命中、不显示分页条", async () => {
+    const { w, fetchFn } = await mountAt("/galleries/1/r/1?q=%E6%97%85%E8%A1%8C")
+    const searchCall = (fetchFn.mock.calls as unknown as Array<[string]>).find(
+      (c) => c[0].includes("/search"),
+    )!
+    expect(decodeURIComponent(searchCall[0])).toContain("q=旅行")
+    expect(w.text()).toContain("匹配的文件夹")
+    expect(w.findComponent(SearchResults).exists()).toBe(true)
+    expect(w.text()).not.toContain("此目录暂无图片")
+  })
+
+  it("输入搜索词：防抖后写入路由 query 并进入搜索态", async () => {
+    vi.useFakeTimers()
+    const { w, router } = await mountAt("/galleries/1/r/1")
+    const input = w.get('input[aria-label="搜索"]')
+    await input.setValue("abc")
+    expect(router.currentRoute.value.query.q).toBeUndefined()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(router.currentRoute.value.query.q).toBe("abc")
+    expect(w.findComponent(SearchResults).exists()).toBe(true)
+  })
+
+  it("结果网格 open：以结果集开 Lightbox，resolver 给出目录，viewInFolder 跳目录", async () => {
+    const { w, router } = await mountAt("/galleries/1/r/1?q=%E6%97%85%E8%A1%8C")
+    w.findComponent(JustifiedGrid).vm.$emit("open", 11)
+    await flushPromises()
+    expect(router.currentRoute.value.query.image).toBe("11")
+
+    const lb = w.findComponent(LightboxStub)
+    expect(lb.props("startId")).toBe(11)
+    const resolver = lb.props("locationResolver") as (it: { relative_path?: string }) => string
+    expect(resolver(IMG_A)).toBe("2024/旅行")
+    expect(resolver({ relative_path: "a.jpg" })).toBe("")
+
+    lb.vm.$emit("viewInFolder", IMG_A)
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe("/galleries/1/r/1/2024/旅行")
+    expect(router.currentRoute.value.query.q).toBeUndefined()
+  })
+
+  it("scope=all 时 SearchResults 的 path 为空（整 root）", async () => {
+    const ctx = await mountAt("/galleries/1/r/1/sub?q=x")
+    const cb = ctx.w.find('input[type="checkbox"]')
+    expect(cb.exists()).toBe(true)
+    await cb.setValue(true)
+    await flushPromises()
+    expect(ctx.router.currentRoute.value.query.scope).toBe("all")
+    expect(ctx.w.findComponent(SearchResults).props("path")).toBe("")
+  })
+
+  it("改搜索词清空选择集", async () => {
+    vi.useFakeTimers()
+    const { w } = await mountAt("/galleries/1/r/1?q=old")
+    await flushPromises()
+    await w.findAll("button").find((b) => b.text() === "选择")!.trigger("click")
+    w.findComponent(JustifiedGrid).vm.$emit("toggle-select", 11)
+    await flushPromises()
+    expect(w.text()).toContain("已选 1 项")
+
+    const input = w.get('input[aria-label="搜索"]')
+    await input.setValue("new")
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(w.text()).not.toContain("已选")
+  })
+
+  it("搜索态全选作用于结果集：全选选中结果，网格 toggle 仍可用", async () => {
+    const { w } = await mountAt("/galleries/1/r/1?q=%E6%97%85%E8%A1%8C")
+    await flushPromises()
+    await w.findAll("button").find((b) => b.text() === "选择")!.trigger("click")
+    await flushPromises()
+    await w.findAll("button").find((b) => b.text() === "全选")!.trigger("click")
+    await flushPromises()
+    expect(w.text()).toContain("已选 1 项")
+    const grid = w.findComponent(JustifiedGrid)
+    expect(Array.from(grid.props("selectedIds") as Set<number>)).toContain(11)
+
+    grid.vm.$emit("toggle-select", 11)
+    await flushPromises()
+    expect(w.text()).not.toContain("已选 1 项")
+    expect((grid.props("selectedIds") as Set<number>).size).toBe(0)
+  })
+})

@@ -7,7 +7,8 @@
     </AppHeader>
     <main class="p-3">
       <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换 -->
-      <div v-if="images.length" class="mb-2 flex items-center gap-2 text-sm">
+      <div v-if="images.length || folders.length || searchQ"
+           class="mb-2 flex items-center gap-2 text-sm">
         <button v-if="!selectionMode"
                 type="button"
                 class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
@@ -23,6 +24,13 @@
           </button>
         </template>
         <div class="ml-auto flex items-center gap-1.5">
+          <SearchBox
+            :model-value="searchQ"
+            :scope-all="scopeAll"
+            :is-root="path === ''"
+            @update:model-value="onSearchQuery"
+            @update:scope-all="onScopeAll"
+          />
           <GridLayoutSwitch v-model="gridLayout" />
           <button type="button"
                   class="flex items-center rounded px-1.5 py-1"
@@ -44,21 +52,39 @@
         </div>
       </div>
 
-      <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid"
-                      :can-exclude="auth.isAdmin"
-                      @exclude="onExcludeFolder" />
-      <component :is="gridComponent" v-if="images.length" :items="images"
-                     :selection-mode="selectionMode"
-                     :selected-ids="selectedIds"
-                     :show-filename="showFilenames"
-                     @open="onOpen"
-                     @menu-action="onGridMenuAction"
-                     @toggle-select="onToggleSelect" />
-      <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-neutral-500">
-        此目录暂无图片
-      </div>
-      <PaginationBar v-if="totalPages > 1" :page="page" :total-pages="totalPages"
-                     @change="changePage" />
+      <template v-if="!searchQ">
+        <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid"
+                        :can-exclude="auth.isAdmin"
+                        @exclude="onExcludeFolder" />
+        <component :is="gridComponent" v-if="images.length" :items="images"
+                       :selection-mode="selectionMode"
+                       :selected-ids="selectedIds"
+                       :show-filename="showFilenames"
+                       @open="onOpen"
+                       @menu-action="onGridMenuAction"
+                       @toggle-select="onToggleSelect" />
+        <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-neutral-500">
+          此目录暂无图片
+        </div>
+        <PaginationBar v-if="totalPages > 1" :page="page" :total-pages="totalPages"
+                       @change="changePage" />
+      </template>
+      <SearchResults
+        v-else
+        ref="resultsRef"
+        :gid="gid"
+        :rid="rid"
+        :q="searchQ"
+        :path="scopeAll ? '' : path"
+        :grid="gridLayout"
+        :selection-mode="selectionMode"
+        :selected-ids="selectedIds"
+        :show-filename="showFilenames"
+        @open="onSearchOpen"
+        @toggle-select="onToggleSelect"
+        @menu-action="onSearchMenuAction"
+        @items-change="onSearchItems"
+      />
 
       <!-- 选择模式底部浮动工具条 -->
       <div v-if="selectionMode"
@@ -86,9 +112,19 @@
         </div>
       </div>
     </main>
-    <ImageLightbox v-if="lightboxId !== null" :items="images" :start-id="lightboxId"
+    <ImageLightbox v-if="lightboxId !== null && !searchQ" :items="images" :start-id="lightboxId"
                     @close="onLightboxClose" @change="onLightboxChange"
                     @deleted="onImageDeleted" />
+    <ImageLightbox
+      v-else-if="searchImageId !== null && searchItems.some((it) => it.id === searchImageId)"
+      :items="searchItems"
+      :start-id="searchImageId"
+      :location-resolver="searchLocation"
+      @close="onSearchLightboxClose"
+      @change="onSearchLightboxChange"
+      @view-in-folder="onViewInFolder"
+      @deleted="onSearchImageDeleted"
+    />
   </div>
 </template>
 
@@ -104,6 +140,8 @@ import GridLayoutSwitch from "../components/GridLayoutSwitch.vue"
 import type { GridLayout } from "../components/GridLayoutSwitch.vue"
 import PaginationBar from "../components/PaginationBar.vue"
 import ImageLightbox from "../components/ImageLightbox.vue"
+import SearchBox from "../components/SearchBox.vue"
+import SearchResults from "../components/SearchResults.vue"
 import { apiGet, apiDelete, apiPost, HttpError, errorMessage } from "../api"
 import { useBrowseStore, PAGE_SIZE, type BrowseKey, type ImageRow } from "../stores/browse"
 import { useAuthStore } from "../stores/auth"
@@ -136,6 +174,98 @@ function onLightboxChange(id: number) {
   const suffix = path.value ? `/${path.value}` : ""
   router.replace(`/galleries/${gid.value}/r/${rid.value}${suffix}/image/${id}`)
 }
+
+// ---------- 搜索态 ----------
+
+const searchQ = computed(() => String(route.query.q ?? "").trim())
+const scopeAll = computed(() => route.query.scope === "all")
+const searchItems = ref<ImageRow[]>([])
+const resultsRef = ref<InstanceType<typeof SearchResults> | null>(null)
+
+const searchImageId = computed(() => {
+  if (!searchQ.value || route.query.image === undefined) return null
+  const n = Number(route.query.image)
+  return Number.isInteger(n) && n > 0 ? n : null
+})
+
+function queryWithoutImage(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(route.query)) {
+    if (k === "image" || v === undefined || v === null) continue
+    out[k] = Array.isArray(v) ? v.join("/") : String(v)
+  }
+  return out
+}
+
+function onSearchQuery(q: string) {
+  const query = queryWithoutImage()
+  if (q) query.q = q
+  else delete query.q
+  router.replace({ query })
+}
+
+function onScopeAll(v: boolean) {
+  const query = queryWithoutImage()
+  if (v) query.scope = "all"
+  else delete query.scope
+  router.replace({ query })
+}
+
+function onSearchItems(items: ImageRow[]) {
+  searchItems.value = items
+}
+
+function onSearchOpen(id: number) {
+  router.replace({ query: { ...queryWithoutImage(), image: String(id) } })
+}
+
+function onSearchLightboxClose() {
+  router.replace({ query: queryWithoutImage() })
+}
+
+function onSearchLightboxChange(id: number) {
+  router.replace({ query: { ...queryWithoutImage(), image: String(id) } })
+}
+
+/** 图片 → 所在目录（root 根目录返回 ""，Lightbox 仍显示跳转按钮）。 */
+function searchLocation(it: ImageRow): string {
+  const p = it.relative_path ?? ""
+  const i = p.lastIndexOf("/")
+  return i >= 0 ? p.slice(0, i) : ""
+}
+
+function onViewInFolder(it: ImageRow) {
+  const dir = searchLocation(it)
+  router.push(
+    `/galleries/${gid.value}/r/${rid.value}${dir ? `/${dir}` : ""}`,
+  )
+}
+
+async function onSearchMenuAction(id: number, action: "delete") {
+  if (action !== "delete") return
+  const image = searchItems.value.find((it) => it.id === id)
+  if (!image) return
+  const msg = `确定将「${image.filename}」移入回收站？\n\n30 天内可从「回收站」恢复。`
+  if (!window.confirm(msg)) return
+  try {
+    await apiDelete(`/api/images/${id}`)
+  } catch (err) {
+    const m = err instanceof HttpError ? err.message : "删除失败"
+    window.alert(`删除失败：${m}`)
+    return
+  }
+  await onSearchImageDeleted(id)
+}
+
+/** Lightbox 删除成功后的回调：Lightbox 内部已调过 DELETE，这里只做本地摘除 + 重拉。 */
+async function onSearchImageDeleted(id: number) {
+  searchItems.value = searchItems.value.filter((it) => it.id !== id)
+  const s = new Set(selectedIds.value)
+  s.delete(id)
+  selectedIds.value = s
+  await resultsRef.value?.reload()
+}
+
 const sort = ref("name_asc")
 
 const crumbs = ref<{ name: string; relative_path: string }[]>([])
@@ -177,8 +307,14 @@ const selectionMode = ref(false)
 const selectedIds = ref(new Set<number>())
 const batchDeleting = ref(false)
 
+/** 当前可见批次：搜索态为累积的搜索结果，普通浏览态为当前页图片。 */
+const visibleItems = computed<ImageRow[]>(() =>
+  searchQ.value ? searchItems.value : images.value,
+)
+
 const isAllSelected = computed(() =>
-  images.value.length > 0 && images.value.every((it) => selectedIds.value.has(it.id)),
+  visibleItems.value.length > 0 &&
+  visibleItems.value.every((it) => selectedIds.value.has(it.id)),
 )
 
 function enterSelectionMode() {
@@ -208,18 +344,14 @@ function onToggleSelect(id: number) {
 function selectAll() {
   const s = new Set(selectedIds.value)
   if (isAllSelected.value) {
-    for (const it of images.value) s.delete(it.id)
+    // 只摘除当前可见批次（普通页=当前页；搜索态=已加载结果），保留其他批次的勾选
+    for (const it of visibleItems.value) s.delete(it.id)
   } else {
-    // 与单张切换同一硬上限：按批次顺序最多补到 SELECT_HARD_LIMIT 张
-    let blocked = false
-    for (const it of images.value) {
-      if (s.size >= SELECT_HARD_LIMIT) {
-        blocked = true
-        break
-      }
-      s.add(it.id)
-    }
-    if (blocked) toast.push("error", `一次最多选择 ${SELECT_HARD_LIMIT} 张`)
+    // 与单张切换同一硬上限：只补未选项，按批次顺序最多补到 SELECT_HARD_LIMIT 张
+    const room = SELECT_HARD_LIMIT - s.size
+    const missing = visibleItems.value.filter((it) => !s.has(it.id))
+    for (const it of missing.slice(0, room)) s.add(it.id)
+    if (missing.length > room) toast.push("error", `一次最多选择 ${SELECT_HARD_LIMIT} 张`)
   }
   selectedIds.value = s
 }
@@ -359,6 +491,7 @@ async function loadAll() {
   try {
     const key = currentKey()
     await loadFolders()
+    if (searchQ.value) return // 搜索结果由 SearchResults 自取
     page.value = 1
     await renderPage(key, 1)
     // restore scroll
@@ -450,5 +583,9 @@ onUnmounted(() => {
 watch([gid, rid, path], () => {
   exitSelectionMode()
   loadAll()
+})
+// 换搜索词或切换范围时结果集整体替换，旧选择不应保留
+watch([searchQ, scopeAll], () => {
+  exitSelectionMode()
 })
 </script>
