@@ -49,8 +49,19 @@ export function useCellMenu<K extends CellMenuKey = CellMenuKey, A extends strin
     emit("menuAction", key, action as A)
   }
 
-  onMounted(() => window.addEventListener("click", close))
-  onUnmounted(() => window.removeEventListener("click", close))
+  // Esc 关闭弹出菜单（焦点归还由 CellContextMenu 负责）
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") close()
+  }
+
+  onMounted(() => {
+    window.addEventListener("click", close)
+    window.addEventListener("keydown", onKeydown)
+  })
+  onUnmounted(() => {
+    window.removeEventListener("click", close)
+    window.removeEventListener("keydown", onKeydown)
+  })
 
   return { menu, open, openAt, close, runAction }
 }

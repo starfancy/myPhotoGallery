@@ -3,10 +3,11 @@
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
        @click.self="cancel">
     <div class="m-2 w-[calc(100vw-1rem)] max-w-2xl overflow-hidden rounded-lg bg-surface shadow-xl"
-         role="dialog" aria-modal="true" @keydown.esc="cancel" tabindex="-1" ref="dialogEl">
+         role="dialog" aria-modal="true" aria-labelledby="dir-chooser-title"
+         tabindex="-1" ref="dialogEl">
       <!-- Header -->
       <div class="flex items-center justify-between border-b border-line px-4 py-3">
-        <div class="font-medium">选择目录</div>
+        <div class="font-medium" id="dir-chooser-title">选择目录</div>
         <button class="min-h-11 min-w-11 rounded px-2 py-1 text-sm text-ink-2 hover:bg-surface-2 hover:text-ink"
                 @click="cancel" aria-label="关闭">✕</button>
       </div>
@@ -16,7 +17,7 @@
         <button class="min-h-11 rounded px-1.5 py-0.5 hover:bg-surface-2 md:min-h-0"
                 @click="navigateTo('')">根</button>
         <template v-for="(bc, i) in breadcrumbs" :key="i">
-          <span class="text-ink-muted">/</span>
+          <span class="text-ink-muted" aria-hidden="true">/</span>
           <button class="min-h-11 rounded px-1.5 py-0.5 hover:bg-surface-2 md:min-h-0"
                   @click="navigateTo(bc.path)">{{ bc.name }}</button>
         </template>
@@ -32,7 +33,7 @@
       <!-- Directory list -->
       <div class="max-h-96 overflow-y-auto">
         <div v-if="loading" class="p-4 text-sm text-ink-2">加载中...</div>
-        <div v-else-if="error" class="p-4 text-sm text-danger-text">{{ error }}</div>
+        <div v-else-if="error" class="p-4 text-sm text-danger-text" role="alert">{{ error }}</div>
         <template v-else>
           <div v-if="truncated"
                class="border-b border-warning-line/40 bg-warning-soft/20 px-4 py-2 text-xs text-warning">
@@ -53,7 +54,7 @@
               </button>
             </li>
           </ul>
-          <div v-else class="p-4 text-sm text-ink-muted">
+          <div v-else class="p-4 text-sm text-ink-2" role="status">
             {{ currentPath ? "此目录下没有子目录" : "无可用位置" }}
           </div>
         </template>
@@ -61,7 +62,7 @@
 
       <!-- Footer -->
       <div class="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
-        <div class="min-w-0 flex-1 truncate text-xs text-ink-muted" :title="confirmTarget || '未选择'">
+        <div class="min-w-0 flex-1 truncate text-xs text-ink-2" :title="confirmTarget || '未选择'">
           将选择: <span class="text-ink">{{ confirmTarget || "未选择" }}</span>
         </div>
         <div class="flex gap-2">
@@ -77,8 +78,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue"
+import { computed, ref, watch } from "vue"
 import { apiPost, HttpError } from "../api"
+import { useDialogFocus } from "../composables/useDialogFocus"
 
 interface Props {
   modelValue: boolean
@@ -117,6 +119,13 @@ const error = ref("")
 const selected = ref<string>("")
 const manualPath = ref<string>("")
 const dialogEl = ref<HTMLElement | null>(null)
+
+// 焦点统一管理：打开聚焦首项、Esc 关闭、Tab 循环、关闭归还触发器焦点。
+useDialogFocus(
+  computed(() => props.modelValue),
+  dialogEl,
+  cancel,
+)
 
 // The path the user actually confirms: prefer an explicit selection from the
 // entry list; if nothing is selected but the user is inside a real directory,
@@ -213,9 +222,6 @@ watch(
       selected.value = ""
       error.value = ""
       await browse(props.startPath ?? "")
-      // Move focus into the dialog so Esc-to-close works immediately.
-      await nextTick()
-      dialogEl.value?.focus()
     }
   },
   { immediate: true },

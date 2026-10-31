@@ -3,7 +3,7 @@
     <AppHeader>
       <template #title><span class="text-ink-2">管理 · 图库列表</span></template>
     </AppHeader>
-    <main class="p-4 space-y-6">
+    <main id="main-content" class="p-4 space-y-6">
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <div v-else-if="error" class="text-danger-text">{{ error }}</div>
       <template v-else>
@@ -18,13 +18,13 @@
             <h3 class="mb-3 text-sm font-medium text-ink-2">新建图库</h3>
             <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div class="flex-1">
-                <label class="block text-xs text-ink-muted">名称</label>
+                <label class="block text-xs text-ink-2">名称</label>
                 <input v-model="newName"
                        class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary"
                        placeholder="图库名称" />
               </div>
               <div class="flex-1">
-                <label class="block text-xs text-ink-muted">描述（可选）</label>
+                <label class="block text-xs text-ink-2">描述（可选）</label>
                 <input v-model="newDescription"
                        class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary"
                        placeholder="简短描述" />
@@ -48,7 +48,7 @@
           <h2 v-if="galleries.length > 0" class="mb-2 text-sm font-medium text-ink-2">
             {{ galleries.length }} 个图库
           </h2>
-          <div v-if="galleries.length === 0" class="text-sm text-ink-muted">
+          <div v-if="galleries.length === 0" class="text-sm text-ink-2" role="status">
             暂无图库，点击上方按钮创建
           </div>
           <div v-else class="divide-y divide-line rounded-lg bg-surface">

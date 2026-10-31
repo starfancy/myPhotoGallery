@@ -3,7 +3,7 @@
     <AppHeader>
       <template #title><span class="text-ink-2">管理 · 审计日志</span></template>
     </AppHeader>
-    <main class="space-y-4 p-4">
+    <main id="main-content" class="space-y-4 p-4">
       <!-- 过滤工具条（sticky 贴在 AppHeader 之下）：手机头部触发器 44px → 头高 69px，
            md+ 触发器恢复自然高度 → 头高 53px；偏移按断点切换避免工具条被半透明头部遮挡 -->
       <div class="sticky top-[69px] z-30 -mx-4 flex flex-wrap items-center gap-3 bg-surface px-4 py-2 md:top-[53px]">
@@ -48,7 +48,7 @@
                 @click="reload">重试</button>
       </div>
       <template v-else>
-        <p v-if="entries.length === 0" class="text-sm text-ink-muted">暂无审计记录</p>
+        <p v-if="entries.length === 0" class="text-sm text-ink-2" role="status">暂无审计记录</p>
         <template v-else>
           <!-- 过滤/重试失败但已有数据：行内错误条，重试走 reload -->
           <div v-if="error" class="mb-2 flex items-center gap-3 text-danger-text">
@@ -58,7 +58,7 @@
           </div>
           <div class="overflow-x-auto rounded-lg bg-surface">
             <table class="w-full min-w-[860px] text-left text-sm">
-              <thead class="border-b border-line text-xs text-ink-muted">
+              <thead class="border-b border-line text-xs text-ink-2">
                 <tr>
                   <th class="px-3 py-2">时间</th>
                   <th class="px-3 py-2">操作人</th>
@@ -89,7 +89,7 @@
 
         <!-- reload/首页错误期间整块隐藏：旧游标不得与新过滤参数混用，
              重试由上方行内 reload 错误条承接（loadMoreError 仅在无 reload 错误时可达） -->
-        <div v-if="nextCursor !== null && !error" class="space-y-2 text-center">
+        <div v-if="nextCursor !== null && !error" class="space-y-2 text-center" aria-live="polite">
           <!-- 分页失败：错误条紧邻「加载更多」，重试带同一游标再拉一次 -->
           <div v-if="loadMoreError" class="flex items-center justify-center gap-3 text-danger-text">
             <span>{{ loadMoreError }}</span>

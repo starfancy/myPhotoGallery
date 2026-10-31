@@ -3,7 +3,7 @@
     <AppHeader>
       <template #title><span class="text-ink-2">管理 · 回收站</span></template>
     </AppHeader>
-    <main class="p-4 space-y-4">
+    <main id="main-content" class="p-4 space-y-4">
       <!-- Filter + bulk toolbar -->
       <div class="flex flex-wrap items-center gap-3">
         <label class="text-sm text-ink-2">图库</label>
@@ -42,12 +42,12 @@
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <div v-else-if="error" class="text-danger-text">{{ error }}</div>
       <template v-else>
-        <p v-if="entries.length === 0" class="text-sm text-ink-muted">
+        <p v-if="entries.length === 0" class="text-sm text-ink-2" role="status">
           回收站为空
         </p>
         <div v-else class="overflow-x-auto rounded-lg bg-surface">
           <table class="w-full min-w-[720px] text-left text-sm">
-            <thead class="border-b border-line text-xs text-ink-muted">
+            <thead class="border-b border-line text-xs text-ink-2">
               <tr>
                 <th class="w-10 px-3 py-2">
                   <input type="checkbox" :checked="allSelected"
@@ -116,7 +116,7 @@
           </table>
         </div>
 
-        <div v-if="nextCursor !== null" class="text-center">
+        <div v-if="nextCursor !== null" class="text-center" aria-live="polite">
           <button type="button"
                   class="rounded bg-surface-2 px-3 py-1.5 text-sm hover:bg-surface-3"
                   :disabled="loadingMore"

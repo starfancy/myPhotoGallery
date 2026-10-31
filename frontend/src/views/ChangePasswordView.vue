@@ -3,28 +3,34 @@
     <AppHeader>
       <template #title><span class="text-ink-2">修改密码</span></template>
     </AppHeader>
-    <main class="mx-auto max-w-sm p-4">
+    <main id="main-content" class="mx-auto max-w-sm p-4">
       <form @submit.prevent="onSubmit" class="space-y-4 rounded-lg bg-surface p-6">
         <div>
-          <label class="block text-xs text-ink-muted">当前密码</label>
-          <input v-model="oldPassword" type="password" autocomplete="current-password" required
+          <label class="block text-xs text-ink-2" for="cpw-old">当前密码</label>
+          <input id="cpw-old" v-model="oldPassword" type="password" autocomplete="current-password" required
+                 :aria-invalid="error ? true : undefined"
+                 :aria-describedby="error ? 'cpw-error' : undefined"
                  class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
         <div>
-          <label class="block text-xs text-ink-muted">新密码（至少 8 位）</label>
-          <input v-model="newPassword" type="password" autocomplete="new-password" required minlength="8"
+          <label class="block text-xs text-ink-2" for="cpw-new">新密码（至少 8 位）</label>
+          <input id="cpw-new" v-model="newPassword" type="password" autocomplete="new-password" required minlength="8"
+                 :aria-invalid="error ? true : undefined"
+                 :aria-describedby="error ? 'cpw-error' : undefined"
                  class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
         <div>
-          <label class="block text-xs text-ink-muted">确认新密码</label>
-          <input v-model="confirmPassword" type="password" autocomplete="new-password" required
+          <label class="block text-xs text-ink-2" for="cpw-confirm">确认新密码</label>
+          <input id="cpw-confirm" v-model="confirmPassword" type="password" autocomplete="new-password" required
+                 :aria-invalid="(error || mismatch) ? true : undefined"
+                 :aria-describedby="confirmDescribedBy"
                  class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <div v-if="confirmPassword && newPassword !== confirmPassword" class="text-xs text-danger-text">
+        <div v-if="mismatch" id="cpw-mismatch" class="text-xs text-danger-text" role="alert">
           两次输入的密码不一致
         </div>
-        <div v-if="error" class="text-xs text-danger-text">{{ error }}</div>
-        <div v-if="success" class="text-xs text-success">密码已修改</div>
+        <div v-if="error" id="cpw-error" class="text-xs text-danger-text" role="alert">{{ error }}</div>
+        <div v-if="success" class="text-xs text-success" role="status">密码已修改</div>
         <button type="submit" :disabled="submitting || !valid"
                 class="min-h-11 w-full rounded bg-primary px-3 py-2 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
           {{ submitting ? "修改中..." : "修改密码" }}
@@ -45,6 +51,15 @@ const confirmPassword = ref("")
 const submitting = ref(false)
 const error = ref("")
 const success = ref(false)
+
+const mismatch = computed(() =>
+  !!confirmPassword.value && newPassword.value !== confirmPassword.value,
+)
+const confirmDescribedBy = computed(() =>
+  [mismatch.value ? "cpw-mismatch" : null, error.value ? "cpw-error" : null]
+    .filter(Boolean)
+    .join(" ") || undefined,
+)
 
 const valid = computed(() => {
   return (

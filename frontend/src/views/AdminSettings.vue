@@ -5,7 +5,7 @@
         <span class="text-ink-2">管理 · 设置</span>
       </template>
     </AppHeader>
-    <main class="mx-auto max-w-2xl space-y-6 p-4">
+    <main id="main-content" class="mx-auto max-w-2xl space-y-6 p-4">
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <template v-else>
         <div v-if="error"
@@ -16,8 +16,9 @@
         <!-- 回收站 -->
         <section class="rounded-lg bg-surface p-4">
           <h2 class="mb-3 text-sm font-medium text-ink-2">回收站</h2>
-          <div class="mb-2 text-xs text-ink-muted">自动清理前的保留时长</div>
-          <div class="flex flex-wrap gap-4 text-sm">
+          <div id="retention-label" class="mb-2 text-xs text-ink-2">自动清理前的保留时长</div>
+          <div role="group" aria-labelledby="retention-label"
+               class="flex flex-wrap gap-4 text-sm">
             <!-- 故意用 :checked + @click 而非 v-model：jsdom 分离挂载（detached mount）的
                  spec 不会触发 radio 的 change 事件，而 click 绑定同时覆盖点 label 与键盘
                  （空格/回车）激活。在同步更新 admin-settings.spec.ts 之前，不要“简化”回 v-model。 -->
@@ -38,18 +39,18 @@
         <!-- 登录安全 -->
         <section class="rounded-lg bg-surface p-4">
           <h2 class="mb-3 text-sm font-medium text-ink-2">登录安全</h2>
-          <label class="block text-xs text-ink-muted">
+          <label class="block text-xs text-ink-2" for="settings-lockout">
             登录失败锁定阈值（1–100 次）
           </label>
-          <input v-model.number="form.login_lockout_threshold"
+          <input id="settings-lockout" v-model.number="form.login_lockout_threshold"
                  type="number" min="1" max="100"
                  class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
           <p class="mt-2 text-xs text-ink-muted">
             连续登录失败达到此次数后将被临时锁定；锁定时长在 config.toml 中配置。
           </p>
 
-          <label class="mt-4 block text-xs text-ink-muted">会话时长（1–720 小时）</label>
-          <input v-model.number="form.session_hours"
+          <label class="mt-4 block text-xs text-ink-2" for="settings-session">会话时长（1–720 小时）</label>
+          <input id="settings-session" v-model.number="form.session_hours"
                  type="number" min="1" max="720"
                  class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
           <p class="mt-2 text-xs text-ink-muted">对新登录生效。</p>
@@ -64,6 +65,7 @@
             <div v-for="(_, i) in form.trusted_proxies" :key="i"
                  class="flex items-center gap-2">
               <input v-model="form.trusted_proxies[i]"
+                     aria-label="可信代理 IP 或 CIDR"
                      placeholder="如 127.0.0.1 或 10.0.0.0/8"
                      class="min-w-0 flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
               <button type="button" @click="removeProxy(i)"
@@ -92,10 +94,10 @@
         <!-- 批量下载 -->
         <section class="rounded-lg bg-surface p-4">
           <h2 class="mb-3 text-sm font-medium text-ink-2">批量下载</h2>
-          <label class="block text-xs text-ink-muted">
+          <label class="block text-xs text-ink-2" for="settings-download">
             单次批量下载 ZIP 的图片数量上限（10–200）
           </label>
-          <input v-model.number="form.download_batch_limit"
+          <input id="settings-download" v-model.number="form.download_batch_limit"
                  type="number" min="10" max="200"
                  class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
           <p class="mt-2 text-xs text-ink-muted">
@@ -106,7 +108,7 @@
         <!-- 审计日志 -->
         <section class="rounded-lg bg-surface p-4">
           <h2 class="mb-3 text-sm font-medium text-ink-2">审计日志</h2>
-          <label for="audit-retention" class="block text-xs text-ink-muted">
+          <label for="audit-retention" class="block text-xs text-ink-2">
             审计日志保留天数
           </label>
           <select id="audit-retention" v-model.number="form.audit_retention_days"

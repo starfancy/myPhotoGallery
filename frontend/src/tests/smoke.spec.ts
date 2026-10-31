@@ -13,4 +13,16 @@ describe("App", () => {
     })
     expect(w.exists()).toBe(true)
   })
+
+  it("renders a skip link targeting #main-content", () => {
+    const w = mount(App, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { RouterView: true },
+      },
+    })
+    const link = w.find("a.skip-link")
+    expect(link.exists()).toBe(true)
+    expect(link.attributes("href")).toBe("#main-content")
+  })
 })

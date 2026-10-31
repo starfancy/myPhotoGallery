@@ -4,12 +4,12 @@
       <template #title>
         <div class="truncate text-ink-2">
           <router-link to="/galleries" class="hover:text-ink">图库</router-link>
-          <span class="mx-1 text-ink-muted">›</span>
+          <span class="mx-1 text-ink-muted" aria-hidden="true">›</span>
           <span class="text-ink">{{ galleryName }}</span>
         </div>
       </template>
     </AppHeader>
-    <main class="p-4">
+    <main id="main-content" class="p-4">
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         <router-link v-for="r in roots" :key="r.id" :to="`/galleries/${gid}/r/${r.id}/`"

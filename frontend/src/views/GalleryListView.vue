@@ -3,7 +3,7 @@
     <AppHeader>
       <template #title><span class="text-ink-2">图库</span></template>
     </AppHeader>
-    <main class="p-4">
+    <main id="main-content" class="p-4">
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <div v-else-if="error" class="text-danger-text">{{ error }}</div>
       <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">

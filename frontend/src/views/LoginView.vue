@@ -1,19 +1,24 @@
 <template>
-  <div class="min-h-screen flex items-center justify-center px-4">
+  <main id="main-content" class="min-h-screen flex items-center justify-center px-4">
     <form class="w-full max-w-sm space-y-4 bg-surface rounded-lg p-6" @submit.prevent="onSubmit">
       <h1 class="text-xl font-semibold text-center">myPhotoGallery</h1>
       <label class="block">
         <span class="text-sm text-ink-2">用户名</span>
         <input v-model="username" type="text" autocomplete="username" required
+               :aria-invalid="errorMsg ? true : undefined"
+               :aria-describedby="errorMsg ? 'login-error' : undefined"
                class="mt-1 w-full rounded bg-surface-2 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary" />
       </label>
       <label class="block">
         <span class="text-sm text-ink-2">密码</span>
         <input v-model="password" type="password" autocomplete="current-password" required
+               :aria-invalid="errorMsg ? true : undefined"
+               :aria-describedby="errorMsg ? 'login-error' : undefined"
                class="mt-1 w-full rounded bg-surface-2 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary" />
       </label>
       <!-- P4: 按错误码渲染不同 banner 颜色 -->
       <div v-if="errorMsg"
+           id="login-error"
            :class="['rounded px-3 py-2 text-sm', bannerClass]"
            role="alert">
         {{ errorMsg }}
@@ -23,7 +28,7 @@
         {{ submitting ? "登录中..." : "登录" }}
       </button>
     </form>
-  </div>
+  </main>
 </template>
 
 <script setup lang="ts">

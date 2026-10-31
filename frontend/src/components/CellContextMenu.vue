@@ -1,10 +1,12 @@
 <template>
   <div v-if="menu"
+       ref="rootEl"
        class="lb-cell-menu"
+       role="menu"
        :style="{ top: `${menu.y}px`, left: `${menu.x}px` }"
        @click.stop>
     <button v-for="item in items" :key="item.action"
-            type="button" class="lb-cell-menu-item"
+            type="button" role="menuitem" class="lb-cell-menu-item"
             @click="$emit('action', item.action)">
       {{ item.label }}
     </button>
@@ -12,15 +14,40 @@
 </template>
 
 <script setup lang="ts">
+import { nextTick, ref, watch } from "vue"
 import type { CellMenuItem, CellMenuState } from "../composables/useCellMenu"
 
-defineProps<{
+const props = defineProps<{
   menu: CellMenuState | null
   items: CellMenuItem[]
 }>()
 defineEmits<{
   (e: "action", action: string): void
 }>()
+
+const rootEl = ref<HTMLElement | null>(null)
+// 打开菜单时焦点所在的触发器：关闭（Esc / 选中 / 外部点击）后归还。
+let triggerEl: HTMLElement | null = null
+
+// 菜单首次出现（null -> 对象）时把焦点移入首项；关闭时归还触发器，
+// 保证键盘用户焦点不丢。
+watch(
+  () => props.menu,
+  async (menu, old) => {
+    if (menu && !old) {
+      triggerEl = document.activeElement as HTMLElement | null
+      await nextTick()
+      rootEl.value
+        ?.querySelector<HTMLButtonElement>(".lb-cell-menu-item")
+        ?.focus()
+    } else if (!menu && old) {
+      const restore = triggerEl
+      triggerEl = null
+      // 触发器可能已随卡片卸载（如删除后）；此时 focus() 静默无效。
+      restore?.focus?.()
+    }
+  },
+)
 </script>
 
 <style>

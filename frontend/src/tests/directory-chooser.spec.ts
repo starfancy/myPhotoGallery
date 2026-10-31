@@ -306,6 +306,52 @@ describe("DirectoryChooser", () => {
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({ path: "/var" })
   })
 
+  it("moves focus into the dialog on open, Esc closes it, restores focus on close", async () => {
+    mockFetchQueue([{ body: POSIX_HOME }, { body: POSIX_HOME }])
+    // attachTo: jsdom only tracks document.activeElement for connected nodes
+    const trigger = document.createElement("button")
+    trigger.id = "external-trigger"
+    document.body.appendChild(trigger)
+    trigger.focus()
+    const w = mount(DirectoryChooser, {
+      props: { modelValue: false, startPath: "/home/user" },
+      attachTo: document.body,
+    })
+
+    await w.setProps({ modelValue: true })
+    await flushPromises()
+    const dialog = w.find('[role="dialog"]').element
+    expect(dialog.contains(document.activeElement)).toBe(true)
+
+    // Esc (captured by useDialogFocus) requests close
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    )
+    await flushPromises()
+    expect(w.emitted("update:modelValue")).toBeDefined()
+    expect(w.emitted("update:modelValue")![0]).toEqual([false])
+
+    // Parent applies the close -> focus goes back to the trigger
+    await w.setProps({ modelValue: false })
+    await flushPromises()
+    expect(document.activeElement).toBe(trigger)
+
+    trigger.remove()
+    w.unmount()
+  })
+
+  it("exposes an accessible name via aria-labelledby", async () => {
+    mockFetchQueue([{ body: POSIX_HOME }])
+    const w = mount(DirectoryChooser, {
+      props: { modelValue: true, startPath: "/home/user" },
+    })
+    await flushPromises()
+    const dialog = w.find('[role="dialog"]')
+    expect(dialog.attributes("aria-modal")).toBe("true")
+    expect(dialog.attributes("aria-labelledby")).toBe("dir-chooser-title")
+    expect(w.find("#dir-chooser-title").text()).toBe("选择目录")
+  })
+
   it("reopening after close re-fetches the startPath", async () => {
     const fetchMock = mockFetchQueue([{ body: POSIX_HOME }, { body: POSIX_HOME }])
     const w = mount(DirectoryChooser, {

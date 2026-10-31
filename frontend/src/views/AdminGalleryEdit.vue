@@ -5,7 +5,7 @@
         <span class="text-ink-2">管理 · {{ galleryName || "图库" }}</span>
       </template>
     </AppHeader>
-    <main class="p-4 space-y-6">
+    <main id="main-content" class="p-4 space-y-6">
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <div v-else-if="error" class="text-danger-text">{{ error }}</div>
       <template v-else-if="data">
@@ -22,12 +22,12 @@
           <h2 class="mb-3 text-sm font-medium text-ink-2">图库信息</h2>
           <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div class="flex-1">
-              <label class="block text-xs text-ink-muted">名称</label>
+              <label class="block text-xs text-ink-2">名称</label>
               <input v-model="editName"
                      class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
             <div class="flex-1">
-              <label class="block text-xs text-ink-muted">描述</label>
+              <label class="block text-xs text-ink-2">描述</label>
               <input v-model="editDescription"
                      class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
@@ -63,7 +63,7 @@
                   <div class="h-1 rounded bg-primary"
                        :style="{ width: scanPercent(r) + '%' }"></div>
                 </div>
-                <div class="flex items-center justify-between gap-2 text-xs text-ink-muted">
+                <div class="flex items-center justify-between gap-2 text-xs text-ink-2">
                   <span>{{ r.processed_files ?? 0 }} / {{ r.total_files ?? 0 }} ({{ scanPercent(r) }}%)</span>
                   <span v-if="r.current_path" class="truncate" :title="r.current_path">
                     {{ r.current_path }}
@@ -118,7 +118,7 @@
                       </button>
                     </li>
                   </ul>
-                  <div v-else class="py-1 text-xs text-ink-muted">尚未排除任何目录</div>
+                  <div v-else class="py-1 text-xs text-ink-2">尚未排除任何目录</div>
                   <button @click="openExclusionChooser(r)"
                           class="mt-2 rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
                     + 添加排除目录
@@ -129,8 +129,9 @@
 
             <!-- Dashed add card -->
             <button @click="showChooser = true"
+                    aria-label="添加根目录"
                     class="flex items-center justify-center rounded-lg border-2 border-dashed border-line-strong p-6 text-ink-muted hover:border-line-strong hover:text-ink">
-              <span class="text-2xl">+</span>
+              <span class="text-2xl" aria-hidden="true">+</span>
             </button>
           </div>
         </section>

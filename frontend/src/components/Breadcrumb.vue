@@ -4,7 +4,7 @@
       <router-link :to="linkFor(c.relative_path)" class="rounded px-2 py-1 hover:bg-surface-2 hover:text-ink">
         {{ c.name }}
       </router-link>
-      <span v-if="i < crumbs.length - 1" class="text-ink-muted">›</span>
+      <span v-if="i < crumbs.length - 1" class="text-ink-muted" aria-hidden="true">›</span>
     </template>
   </nav>
 </template>

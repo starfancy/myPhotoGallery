@@ -3,7 +3,7 @@
     <AppHeader>
       <template #title><span class="text-ink-2">管理 · 用户</span></template>
     </AppHeader>
-    <main class="p-4 space-y-6">
+    <main id="main-content" class="p-4 space-y-6">
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <div v-else-if="error" class="text-danger-text">{{ error }}</div>
       <template v-else>
@@ -18,10 +18,10 @@
           <h2 v-if="users.length > 0" class="mb-2 text-sm font-medium text-ink-2">
             {{ users.length }} 个用户
           </h2>
-          <div v-else class="text-sm text-ink-muted">暂无用户</div>
+          <div v-else class="text-sm text-ink-2" role="status">暂无用户</div>
           <div v-if="users.length > 0" class="overflow-x-auto rounded-lg bg-surface">
             <table class="w-full min-w-[720px] text-sm">
-              <thead class="bg-surface-2/60 text-left text-xs uppercase text-ink-muted">
+              <thead class="bg-surface-2/60 text-left text-xs uppercase text-ink-2">
                 <tr>
                   <th class="px-3 py-2">用户名</th>
                   <th class="px-3 py-2">角色</th>
@@ -50,7 +50,7 @@
                     </span>
                   </td>
                   <td class="px-3 py-2">
-                    <span :class="u.enabled ? 'text-success' : 'text-ink-muted'">
+                    <span :class="u.enabled ? 'text-success' : 'text-ink-2'">
                       {{ u.enabled ? "是" : "否" }}
                     </span>
                   </td>
@@ -98,28 +98,34 @@
     <!-- Create / Edit modal -->
     <div v-if="modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
          @click.self="closeModal" data-testid="user-modal">
-      <div class="w-full max-w-md rounded-lg bg-surface p-6">
-        <h3 class="mb-4 text-lg font-medium">
+      <div class="w-full max-w-md rounded-lg bg-surface p-6"
+           ref="userPanelEl" tabindex="-1"
+           role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+        <h3 class="mb-4 text-lg font-medium" id="user-modal-title">
           {{ modal.mode === "create" ? "新建用户" : "编辑用户" }}
         </h3>
         <div class="space-y-3">
           <label class="block">
-            <span class="text-xs text-ink-muted">用户名 (3-32 字符)</span>
+            <span class="text-xs text-ink-2">用户名 (3-32 字符)</span>
             <input v-model="modal.username" :disabled="modal.mode === 'edit'"
                    data-testid="modal-username"
+                   :aria-invalid="!!modal.error || undefined"
+                   :aria-describedby="modal.error ? 'user-modal-error' : undefined"
                    class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50" />
           </label>
 
           <div v-if="modal.mode === 'create'">
             <label class="block">
-              <span class="text-xs text-ink-muted">密码 (留空 → 自动生成)</span>
+              <span class="text-xs text-ink-2">密码 (留空 → 自动生成)</span>
               <input v-model="modal.password" type="password" data-testid="modal-password"
+                     :aria-invalid="!!modal.error || undefined"
+                     :aria-describedby="modal.error ? 'user-modal-error' : undefined"
                      class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </label>
           </div>
 
           <fieldset>
-            <legend class="text-xs text-ink-muted">角色</legend>
+            <legend class="text-xs text-ink-2">角色</legend>
             <div class="mt-1 flex gap-4 text-sm">
               <label class="flex items-center gap-1.5">
                 <input v-model="modal.role" type="radio" value="admin" data-testid="modal-role-admin" />
@@ -133,7 +139,7 @@
           </fieldset>
 
           <fieldset>
-            <legend class="text-xs text-ink-muted">访问域</legend>
+            <legend class="text-xs text-ink-2">访问域</legend>
             <div class="mt-1 flex gap-4 text-sm">
               <label class="flex items-center gap-1.5">
                 <input v-model="modal.access_scope" type="radio" value="lan_only" />
@@ -147,11 +153,12 @@
           </fieldset>
 
           <div v-if="modal.role === 'viewer'">
-            <span class="text-xs text-ink-muted">授权图库 (多选)</span>
-            <div v-if="allGalleries.length === 0" class="mt-1 text-xs text-ink-muted">
+            <span class="text-xs text-ink-2" id="gallery-group-label">授权图库 (多选)</span>
+            <div v-if="allGalleries.length === 0" class="mt-1 text-xs text-ink-2">
               尚无图库可选
             </div>
-            <div v-else class="mt-1 max-h-40 space-y-1 overflow-y-auto rounded bg-surface-2 p-2">
+            <div v-else role="group" aria-labelledby="gallery-group-label"
+                 class="mt-1 max-h-40 space-y-1 overflow-y-auto rounded bg-surface-2 p-2">
               <label v-for="g in allGalleries" :key="g.id"
                      class="flex items-center gap-2 text-sm">
                 <input type="checkbox" :value="g.id" v-model="modal.gallery_ids"
@@ -160,11 +167,12 @@
               </label>
             </div>
           </div>
-          <div v-else class="text-xs text-ink-muted">
+          <div v-else class="text-xs text-ink-2">
             管理员自动可见所有图库，无需授权
           </div>
 
-          <div v-if="modal.error" class="text-sm text-danger-text" data-testid="modal-error">
+          <div v-if="modal.error" class="text-sm text-danger-text" data-testid="modal-error"
+               id="user-modal-error" role="alert">
             {{ modal.error }}
           </div>
         </div>
@@ -184,14 +192,19 @@
     <!-- Reset password modal -->
     <div v-if="resetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
          @click.self="closeResetModal" data-testid="reset-pw-modal">
-      <div class="w-full max-w-md rounded-lg bg-surface p-6">
-        <h3 class="mb-4 text-lg font-medium">重置密码 — {{ resetModal.username }}</h3>
+      <div class="w-full max-w-md rounded-lg bg-surface p-6"
+           ref="resetPanelEl" tabindex="-1"
+           role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+        <h3 class="mb-4 text-lg font-medium" id="reset-modal-title">重置密码 — {{ resetModal.username }}</h3>
         <label class="block">
-          <span class="text-xs text-ink-muted">新密码 (留空 → 自动生成)</span>
+          <span class="text-xs text-ink-2">新密码 (留空 → 自动生成)</span>
           <input v-model="resetModal.password" type="password" data-testid="reset-pw-input"
+                 :aria-invalid="!!resetModal.error || undefined"
+                 :aria-describedby="resetModal.error ? 'reset-modal-error' : undefined"
                  class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
         </label>
-        <div v-if="resetModal.error" class="mt-2 text-sm text-danger-text">{{ resetModal.error }}</div>
+        <div v-if="resetModal.error" class="mt-2 text-sm text-danger-text"
+             id="reset-modal-error" role="alert">{{ resetModal.error }}</div>
         <div class="mt-5 flex justify-end gap-2">
           <button @click="closeResetModal" class="min-h-11 rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4">
             取消
@@ -208,13 +221,15 @@
     <!-- Initial password / reset result modal (one-time display) -->
     <div v-if="revealModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
          @click.self="closeReveal" data-testid="reveal-pw-modal">
-      <div class="w-full max-w-md rounded-lg bg-surface p-6">
-        <h3 class="mb-2 text-lg font-medium">{{ revealModal.title }}</h3>
+      <div class="w-full max-w-md rounded-lg bg-surface p-6"
+           ref="revealPanelEl" tabindex="-1"
+           role="dialog" aria-modal="true" aria-labelledby="reveal-modal-title">
+        <h3 class="mb-2 text-lg font-medium" id="reveal-modal-title">{{ revealModal.title }}</h3>
         <p class="mb-3 text-sm text-warning">
           {{ revealModal.subtitle }}
         </p>
         <div class="rounded bg-surface-2 px-3 py-2 font-mono text-lg text-ink"
-             data-testid="reveal-pw-value">
+             data-testid="reveal-pw-value" role="alert">
           {{ revealModal.password }}
         </div>
         <div class="mt-5 flex justify-end">
@@ -233,6 +248,7 @@ import { onMounted, ref, computed } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiDelete, apiGet, apiPatch, apiPost, HttpError } from "../api"
 import { useAuthStore } from "../stores/auth"
+import { useDialogFocus } from "../composables/useDialogFocus"
 
 interface UserRow {
   id: number
@@ -293,6 +309,14 @@ const error = ref("")
 const modal = ref<UserModal | null>(null)
 const resetModal = ref<ResetPwModal | null>(null)
 const revealModal = ref<RevealModal | null>(null)
+
+// ---- 模态焦点管理：进入聚焦、Esc 关闭、Tab 循环、关闭归还触发器 ----
+const userPanelEl = ref<HTMLElement | null>(null)
+const resetPanelEl = ref<HTMLElement | null>(null)
+const revealPanelEl = ref<HTMLElement | null>(null)
+useDialogFocus(computed(() => modal.value !== null), userPanelEl, closeModal)
+useDialogFocus(computed(() => resetModal.value !== null), resetPanelEl, closeResetModal)
+useDialogFocus(computed(() => revealModal.value !== null), revealPanelEl, closeReveal)
 
 async function loadUsers() {
   loading.value = true

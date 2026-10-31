@@ -4,9 +4,9 @@
     <div class="flex-1 min-w-0 overflow-hidden">
       <slot name="title"></slot>
     </div>
-    <div v-if="auth.user" class="flex items-center gap-2 text-sm">
+    <nav v-if="auth.user" aria-label="账户与管理" class="flex items-center gap-2 text-sm">
       <div v-if="auth.isAdmin" ref="adminMenuRef" class="relative">
-        <button type="button"
+        <button type="button" ref="adminTriggerEl"
           class="min-h-11 min-w-11 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink md:min-h-0 md:min-w-0"
           :class="{ 'bg-surface-2 text-ink': adminOpen }"
           :aria-expanded="adminOpen"
@@ -49,7 +49,7 @@
         </div>
       </div>
       <div ref="menuRef" class="relative">
-        <button type="button"
+        <button type="button" ref="userTriggerEl"
           class="flex min-h-11 min-w-11 items-center gap-1 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink md:min-h-0 md:min-w-0"
           :class="{ 'bg-surface-2 text-ink': open }"
           :aria-expanded="open"
@@ -89,12 +89,12 @@
           </button>
         </div>
       </div>
-    </div>
+    </nav>
   </header>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue"
+import { onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import { useAuthStore } from "../stores/auth"
 
@@ -103,8 +103,19 @@ const router = useRouter()
 
 const open = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
+const userTriggerEl = ref<HTMLElement | null>(null)
 const adminOpen = ref(false)
 const adminMenuRef = ref<HTMLElement | null>(null)
+const adminTriggerEl = ref<HTMLElement | null>(null)
+
+// 菜单关闭（Esc / 外部点击 / 选中 / 登出）后把焦点归还触发按钮，
+// 键盘用户不会在页面中丢失焦点。
+watch(open, (v, old) => {
+  if (!v && old) userTriggerEl.value?.focus()
+})
+watch(adminOpen, (v, old) => {
+  if (!v && old) adminTriggerEl.value?.focus()
+})
 
 function onDocClick(e: MouseEvent) {
   if (open.value) {

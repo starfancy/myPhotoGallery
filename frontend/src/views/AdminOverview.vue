@@ -13,29 +13,29 @@
     <AppHeader>
       <template #title><span class="text-ink-2">管理</span></template>
     </AppHeader>
-    <main class="p-4 space-y-6">
+    <main id="main-content" class="p-4 space-y-6">
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <div v-else-if="error" class="text-danger-text">{{ error }}</div>
       <template v-else-if="data">
         <!-- Stats cards -->
         <section class="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div class="rounded-lg bg-surface p-4">
-            <div class="text-xs text-ink-muted">图片</div>
+            <div class="text-xs text-ink-2">图片</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.images.toLocaleString() }}</div>
           </div>
           <div class="rounded-lg bg-surface p-4">
-            <div class="text-xs text-ink-muted">图库</div>
+            <div class="text-xs text-ink-2">图库</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.galleries.toLocaleString() }}</div>
           </div>
           <div class="rounded-lg bg-surface p-4">
-            <div class="text-xs text-ink-muted">根目录</div>
+            <div class="text-xs text-ink-2">根目录</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.roots.toLocaleString() }}</div>
           </div>
           <!-- P4: 用户卡片 → 链接到 /admin/users -->
           <router-link to="/admin/users"
             class="rounded-lg bg-surface p-4 transition-colors hover:bg-surface-2"
             data-testid="users-stat-card">
-            <div class="text-xs text-ink-muted">用户</div>
+            <div class="text-xs text-ink-2">用户</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.users.toLocaleString() }}</div>
           </router-link>
         </section>
@@ -43,7 +43,7 @@
         <!-- Scan status list -->
         <section>
           <h2 class="mb-2 text-sm font-medium text-ink-2">扫描状态</h2>
-          <div v-if="data.scan_statuses.length === 0" class="text-sm text-ink-muted">
+          <div v-if="data.scan_statuses.length === 0" class="text-sm text-ink-2" role="status">
             暂无根目录
           </div>
           <ul v-else class="divide-y divide-line rounded-lg bg-surface">
@@ -76,7 +76,7 @@
                   <div class="h-1 rounded bg-primary"
                        :style="{ width: scanPercent(s) + '%' }"></div>
                 </div>
-                <div class="mt-1 text-xs text-ink-muted">
+                <div class="mt-1 text-xs text-ink-2">
                   {{ s.processed_files ?? 0 }} / {{ s.total_files ?? 0 }} ({{ scanPercent(s) }}%)
                   <span v-if="s.current_path" class="ml-2 truncate" :title="s.current_path">
                     {{ s.current_path }}
@@ -95,7 +95,7 @@
               查看全部 →
             </router-link>
           </h2>
-          <div v-if="data.recent_audit.length === 0" class="text-sm text-ink-muted">
+          <div v-if="data.recent_audit.length === 0" class="text-sm text-ink-2" role="status">
             暂无审计记录
           </div>
           <ul v-else class="divide-y divide-line rounded-lg bg-surface">

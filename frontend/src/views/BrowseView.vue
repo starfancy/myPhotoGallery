@@ -5,7 +5,7 @@
         <Breadcrumb v-if="crumbs.length" :crumbs="crumbs" :gid="gid" :rid="rid" />
       </template>
     </AppHeader>
-    <main class="p-3">
+    <main id="main-content" class="p-3">
       <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换 -->
       <div v-if="images.length || folders.length || searchQ"
            class="mb-2 flex flex-wrap items-center gap-2 text-sm">
@@ -63,7 +63,8 @@
                        @open="onOpen"
                        @menu-action="onGridMenuAction"
                        @toggle-select="onToggleSelect" />
-        <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-ink-muted">
+        <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-ink-2"
+             role="status">
           此目录暂无图片
         </div>
         <PaginationBar v-if="totalPages > 1" :page="page" :total-pages="totalPages"
