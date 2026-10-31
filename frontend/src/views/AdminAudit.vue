@@ -42,7 +42,8 @@
 
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <!-- 替换式错误条仅限首页失败（尚无数据）；已有数据时失败不吞表格 -->
-      <div v-else-if="error && entries.length === 0" class="flex items-center gap-3 text-danger-text">
+      <div v-else-if="error && entries.length === 0" role="alert"
+           class="flex items-center gap-3 text-danger-text">
         <span>{{ error }}</span>
         <button type="button" class="rounded bg-surface-2 px-2 py-1 text-xs"
                 @click="reload">重试</button>
@@ -51,7 +52,7 @@
         <p v-if="entries.length === 0" class="text-sm text-ink-2" role="status">暂无审计记录</p>
         <template v-else>
           <!-- 过滤/重试失败但已有数据：行内错误条，重试走 reload -->
-          <div v-if="error" class="mb-2 flex items-center gap-3 text-danger-text">
+          <div v-if="error" role="alert" class="mb-2 flex items-center gap-3 text-danger-text">
             <span>{{ error }}</span>
             <button type="button" class="rounded bg-surface-2 px-2 py-1 text-xs"
                     @click="reload">重试</button>
@@ -77,7 +78,7 @@
                   <td class="max-w-[200px] truncate px-3 py-2 font-mono text-xs" :title="e.target ?? ''">
                     {{ e.target ?? "" }}
                   </td>
-                  <td class="max-w-[320px] truncate px-3 py-2 font-mono text-xs text-ink-muted"
+                  <td class="max-w-[320px] truncate px-3 py-2 font-mono text-xs text-ink-2"
                       :title="e.detail ?? ''">
                     {{ e.detail ?? "" }}
                   </td>
@@ -91,7 +92,8 @@
              重试由上方行内 reload 错误条承接（loadMoreError 仅在无 reload 错误时可达） -->
         <div v-if="nextCursor !== null && !error" class="space-y-2 text-center" aria-live="polite">
           <!-- 分页失败：错误条紧邻「加载更多」，重试带同一游标再拉一次 -->
-          <div v-if="loadMoreError" class="flex items-center justify-center gap-3 text-danger-text">
+          <div v-if="loadMoreError" role="alert"
+               class="flex items-center justify-center gap-3 text-danger-text">
             <span>{{ loadMoreError }}</span>
             <button type="button" class="rounded bg-surface-2 px-2 py-1 text-xs"
                     @click="loadMore">重试</button>

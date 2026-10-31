@@ -5,7 +5,7 @@
     </AppHeader>
     <main id="main-content" class="p-4">
       <div v-if="loading" class="text-ink-2">加载中...</div>
-      <div v-else-if="error" class="text-danger-text">{{ error }}</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         <router-link v-for="g in items" :key="g.id" :to="`/galleries/${g.id}`"
                      class="block rounded-lg bg-surface p-4 hover:ring-2 hover:ring-primary">

@@ -40,7 +40,7 @@
       </div>
 
       <div v-if="loading" class="text-ink-2">加载中...</div>
-      <div v-else-if="error" class="text-danger-text">{{ error }}</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <template v-else>
         <p v-if="entries.length === 0" class="text-sm text-ink-2" role="status">
           回收站为空

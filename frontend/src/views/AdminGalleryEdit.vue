@@ -7,7 +7,7 @@
     </AppHeader>
     <main id="main-content" class="p-4 space-y-6">
       <div v-if="loading" class="text-ink-2">加载中...</div>
-      <div v-else-if="error" class="text-danger-text">{{ error }}</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <template v-else-if="data">
         <!-- Back link -->
         <section>
@@ -38,7 +38,7 @@
             </button>
           </div>
           <div v-if="saveSuccess" class="mt-2 text-xs text-success">已保存</div>
-          <div v-if="saveError" class="mt-2 text-xs text-danger-text">{{ saveError }}</div>
+          <div v-if="saveError" role="alert" class="mt-2 text-xs text-danger-text">{{ saveError }}</div>
         </section>
 
         <!-- Root cards -->
@@ -107,10 +107,10 @@
                       <span class="min-w-0 flex-1 truncate font-mono" :title="e.relative_path">
                         {{ e.relative_path }}
                       </span>
-                      <span v-if="e.reason" class="truncate text-ink-muted" :title="e.reason">
+                      <span v-if="e.reason" class="truncate text-ink-2" :title="e.reason">
                         {{ e.reason }}
                       </span>
-                      <span class="shrink-0 text-ink-muted">{{ e.excluded_by_username || "—" }}</span>
+                      <span class="shrink-0 text-ink-2">{{ e.excluded_by_username || "—" }}</span>
                       <span class="shrink-0 text-ink-muted">排除于 {{ formatDateTime(e.excluded_at) }}</span>
                       <button @click="removeExclusion(r, e)"
                               class="shrink-0 rounded bg-surface-3 px-2 py-0.5 hover:bg-surface-4">

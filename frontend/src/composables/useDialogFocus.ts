@@ -89,7 +89,15 @@ export function useDialogFocus(
   }, { immediate: true, flush: "post" })
 
   // 单测在组件实例外调用本 composable；无实例时不注册卸载钩子。
+  // 弹窗仍处于打开状态时组件被卸载（如路由切走）：除移除监听外还要把焦点
+  // 归还触发器；触发器若已随视图一起卸载（document.contains 为假）则不处理。
   if (getCurrentInstance()) {
-    onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown, true))
+    onBeforeUnmount(() => {
+      document.removeEventListener("keydown", onKeydown, true)
+      if (previous && document.contains(previous)) {
+        previous.focus()
+      }
+      previous = null
+    })
   }
 }

@@ -8,7 +8,7 @@
     <main id="main-content" class="mx-auto max-w-2xl space-y-6 p-4">
       <div v-if="loading" class="text-ink-2">加载中...</div>
       <template v-else>
-        <div v-if="error"
+        <div v-if="error" role="alert"
              class="rounded bg-danger-soft/30 px-3 py-2 text-sm text-danger-text">
           {{ error }}
         </div>
@@ -31,7 +31,7 @@
               {{ opt.label }}
             </label>
           </div>
-          <p class="mt-2 text-xs text-ink-muted">
+          <p class="mt-2 text-xs text-ink-2">
             对新删除的图片生效；已在回收站中的条目到期时间不变。
           </p>
         </section>
@@ -45,7 +45,7 @@
           <input id="settings-lockout" v-model.number="form.login_lockout_threshold"
                  type="number" min="1" max="100"
                  class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
-          <p class="mt-2 text-xs text-ink-muted">
+          <p class="mt-2 text-xs text-ink-2">
             连续登录失败达到此次数后将被临时锁定；锁定时长在 config.toml 中配置。
           </p>
 
@@ -53,7 +53,7 @@
           <input id="settings-session" v-model.number="form.session_hours"
                  type="number" min="1" max="720"
                  class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
-          <p class="mt-2 text-xs text-ink-muted">对新登录生效。</p>
+          <p class="mt-2 text-xs text-ink-2">对新登录生效。</p>
         </section>
 
         <!-- 可信代理 -->
@@ -85,7 +85,7 @@
               恢复默认
             </button>
           </div>
-          <p class="mt-2 text-xs text-ink-muted">
+          <p class="mt-2 text-xs text-ink-2">
             仅这些来源（IP 或 CIDR）转发的 X-Forwarded-For 会被采纳；留空表示不信任任何代理。
             本机 Caddy 反代的推荐默认值为 127.0.0.1 与 ::1。
           </p>
@@ -100,7 +100,7 @@
           <input id="settings-download" v-model.number="form.download_batch_limit"
                  type="number" min="10" max="200"
                  class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
-          <p class="mt-2 text-xs text-ink-muted">
+          <p class="mt-2 text-xs text-ink-2">
             对所有用户生效；保存后立即生效。
           </p>
         </section>
@@ -119,7 +119,7 @@
             <option :value="365">365 天</option>
             <option :value="0">永不清理</option>
           </select>
-          <p class="mt-2 text-xs text-ink-muted">
+          <p class="mt-2 text-xs text-ink-2">
             超期记录在服务启动时及每日定时清理；保存后立即生效。
           </p>
         </section>

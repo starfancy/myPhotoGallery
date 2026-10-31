@@ -5,7 +5,7 @@
     </AppHeader>
     <main id="main-content" class="p-4 space-y-6">
       <div v-if="loading" class="text-ink-2">加载中...</div>
-      <div v-else-if="error" class="text-danger-text">{{ error }}</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <template v-else>
         <!-- Create gallery -->
         <section>
@@ -39,7 +39,7 @@
                 取消
               </button>
             </div>
-            <div v-if="createError" class="mt-2 text-xs text-danger-text">{{ createError }}</div>
+            <div v-if="createError" role="alert" class="mt-2 text-xs text-danger-text">{{ createError }}</div>
           </div>
         </section>
 
@@ -59,11 +59,11 @@
                              class="font-medium text-primary-text hover:text-primary-text">
                   {{ g.name }}
                 </router-link>
-                <div v-if="g.description" class="truncate text-xs text-ink-muted">
+                <div v-if="g.description" class="truncate text-xs text-ink-2">
                   {{ g.description }}
                 </div>
               </div>
-              <div class="flex items-center gap-4 text-xs text-ink-muted">
+              <div class="flex items-center gap-4 text-xs text-ink-2">
                 <span>{{ g.root_count }} 个根目录</span>
                 <span>{{ g.image_count }} 张图片</span>
               </div>

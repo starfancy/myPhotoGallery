@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { ref, nextTick } from "vue"
+import { computed, defineComponent, h, nextTick, ref } from "vue"
+import { mount } from "@vue/test-utils"
 import { useDialogFocus } from "../composables/useDialogFocus"
 
 function setupDom() {
@@ -43,5 +44,36 @@ describe("useDialogFocus", () => {
     document.dispatchEvent(ev)
     expect(ev.defaultPrevented).toBe(true)
     expect(document.activeElement?.id).toBe("a")
+  })
+
+  it("restores focus to the trigger when unmounted while still open", async () => {
+    // onBeforeUnmount only registers inside a component instance; drive the
+    // composable through a tiny host. The trigger lives outside the wrapper so
+    // it stays connected after unmount (like persistent page chrome).
+    const DialogHost = defineComponent({
+      props: { open: { type: Boolean, required: true } },
+      setup(props) {
+        const panel = ref<HTMLElement | null>(null)
+        useDialogFocus(computed(() => props.open), panel, () => {})
+        return () =>
+          h("div", { ref: panel, tabindex: "-1" }, [h("input"), h("button", "x")])
+      },
+    })
+
+    document.body.innerHTML = `<button id="trigger">open</button>`
+    const trigger = document.getElementById("trigger") as HTMLElement
+    trigger.focus()
+
+    const wrapper = mount(DialogHost, {
+      props: { open: false },
+      attachTo: document.body,
+    })
+    await wrapper.setProps({ open: true })
+    await nextTick()
+    expect(document.activeElement?.tagName).toBe("INPUT")
+
+    // Route-away-while-open: no close transition, the component is torn down.
+    wrapper.unmount()
+    expect(document.activeElement).toBe(trigger)
   })
 })

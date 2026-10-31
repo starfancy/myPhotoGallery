@@ -5,7 +5,7 @@
     </AppHeader>
     <main id="main-content" class="p-4 space-y-6">
       <div v-if="loading" class="text-ink-2">加载中...</div>
-      <div v-else-if="error" class="text-danger-text">{{ error }}</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <template v-else>
         <section class="flex items-center gap-2">
           <button @click="openCreate" data-testid="new-user-btn"

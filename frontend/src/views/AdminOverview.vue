@@ -15,7 +15,7 @@
     </AppHeader>
     <main id="main-content" class="p-4 space-y-6">
       <div v-if="loading" class="text-ink-2">加载中...</div>
-      <div v-else-if="error" class="text-danger-text">{{ error }}</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <template v-else-if="data">
         <!-- Stats cards -->
         <section class="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -103,7 +103,7 @@
                 class="flex flex-col gap-1 p-3 text-sm sm:flex-row sm:items-baseline sm:gap-4">
               <span class="w-32 shrink-0 text-xs text-ink-muted">{{ formatTs(a.ts) }}</span>
               <span class="w-24 shrink-0 font-medium">{{ auditActionLabel(a.action) }}</span>
-              <span class="w-36 shrink-0 truncate text-xs text-ink-muted"
+              <span class="w-36 shrink-0 truncate text-xs text-ink-2"
                     :title="a.actor_ip">{{ a.actor_ip }}</span>
               <span class="min-w-0 flex-1 truncate text-xs text-ink-2"
                     :title="auditDetailText(a)">

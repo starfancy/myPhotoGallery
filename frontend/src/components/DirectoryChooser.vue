@@ -49,7 +49,7 @@
                 <span class="flex min-w-0 items-baseline">
                   <span class="truncate min-w-0">{{ e.name }}</span>
                   <span v-if="e.is_root && e.label"
-                        class="min-w-0 truncate text-ink-muted">（{{ e.label }}）</span>
+                        class="min-w-0 truncate text-ink-2">（{{ e.label }}）</span>
                 </span>
               </button>
             </li>
