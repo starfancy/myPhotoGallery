@@ -955,6 +955,7 @@ def test_analytics_cache_reuses_until_signature_changes(app_client, monkeypatch)
         assert calls == 2  # 签名变化后重建
 
     client.portal.call(scenario)
+```
 
 - [ ] **Step 2: 运行测试确认失败**
 
