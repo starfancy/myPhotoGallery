@@ -4,8 +4,8 @@
       <template #title><span class="text-ink-2">管理 · 审计日志</span></template>
     </AppHeader>
     <main class="space-y-4 p-4">
-      <!-- 过滤工具条（Task 8 接入导出按钮） -->
-      <div class="flex flex-wrap items-center gap-3">
+      <!-- 过滤工具条（sticky 贴在 57px 高的 AppHeader 之下；Task 8 接入导出按钮） -->
+      <div class="sticky top-[57px] z-30 -mx-4 flex flex-wrap items-center gap-3 bg-surface px-4 py-2">
         <label for="audit-action" class="text-sm text-ink-2">事件</label>
         <select id="audit-action" v-model="filterAction"
                 class="rounded bg-surface-2 px-2 py-1 text-sm text-ink"
@@ -30,44 +30,59 @@
       </div>
 
       <div v-if="loading" class="text-ink-2">加载中...</div>
-      <div v-else-if="error" class="flex items-center gap-3 text-danger-text">
+      <!-- 替换式错误条仅限首页失败（尚无数据）；已有数据时失败不吞表格 -->
+      <div v-else-if="error && entries.length === 0" class="flex items-center gap-3 text-danger-text">
         <span>{{ error }}</span>
         <button type="button" class="rounded bg-surface-2 px-2 py-1 text-xs"
                 @click="reload">重试</button>
       </div>
       <template v-else>
         <p v-if="entries.length === 0" class="text-sm text-ink-muted">暂无审计记录</p>
-        <div v-else class="overflow-x-auto rounded-lg bg-surface">
-          <table class="w-full min-w-[860px] text-left text-sm">
-            <thead class="border-b border-line text-xs text-ink-muted">
-              <tr>
-                <th class="px-3 py-2">时间</th>
-                <th class="px-3 py-2">操作人</th>
-                <th class="px-3 py-2">IP</th>
-                <th class="px-3 py-2">事件</th>
-                <th class="px-3 py-2">目标</th>
-                <th class="px-3 py-2">详情</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-line">
-              <tr v-for="e in entries" :key="e.id" class="hover:bg-surface-2/60">
-                <td class="whitespace-nowrap px-3 py-2 text-xs">{{ formatDateTime(e.ts) }}</td>
-                <td class="px-3 py-2">{{ actorLabel(e) }}</td>
-                <td class="px-3 py-2 text-xs">{{ e.actor_ip }}</td>
-                <td class="px-3 py-2">{{ auditActionLabel(e.action) }}</td>
-                <td class="max-w-[200px] truncate px-3 py-2 font-mono text-xs" :title="e.target ?? ''">
-                  {{ e.target ?? "" }}
-                </td>
-                <td class="max-w-[320px] truncate px-3 py-2 font-mono text-xs text-ink-muted"
-                    :title="e.detail ?? ''">
-                  {{ e.detail ?? "" }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <template v-else>
+          <!-- 过滤/重试失败但已有数据：行内错误条，重试走 reload -->
+          <div v-if="error" class="mb-2 flex items-center gap-3 text-danger-text">
+            <span>{{ error }}</span>
+            <button type="button" class="rounded bg-surface-2 px-2 py-1 text-xs"
+                    @click="reload">重试</button>
+          </div>
+          <div class="overflow-x-auto rounded-lg bg-surface">
+            <table class="w-full min-w-[860px] text-left text-sm">
+              <thead class="border-b border-line text-xs text-ink-muted">
+                <tr>
+                  <th class="px-3 py-2">时间</th>
+                  <th class="px-3 py-2">操作人</th>
+                  <th class="px-3 py-2">IP</th>
+                  <th class="px-3 py-2">事件</th>
+                  <th class="px-3 py-2">目标</th>
+                  <th class="px-3 py-2">详情</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-line">
+                <tr v-for="e in entries" :key="e.id" class="hover:bg-surface-2/60">
+                  <td class="whitespace-nowrap px-3 py-2 text-xs">{{ formatDateTime(e.ts) }}</td>
+                  <td class="px-3 py-2">{{ actorLabel(e) }}</td>
+                  <td class="px-3 py-2 text-xs">{{ e.actor_ip }}</td>
+                  <td class="px-3 py-2">{{ auditActionLabel(e.action) }}</td>
+                  <td class="max-w-[200px] truncate px-3 py-2 font-mono text-xs" :title="e.target ?? ''">
+                    {{ e.target ?? "" }}
+                  </td>
+                  <td class="max-w-[320px] truncate px-3 py-2 font-mono text-xs text-ink-muted"
+                      :title="e.detail ?? ''">
+                    {{ e.detail ?? "" }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
 
-        <div v-if="nextCursor !== null" class="text-center">
+        <div v-if="nextCursor !== null" class="space-y-2 text-center">
+          <!-- 分页失败：错误条紧邻「加载更多」，重试带同一游标再拉一次 -->
+          <div v-if="loadMoreError" class="flex items-center justify-center gap-3 text-danger-text">
+            <span>{{ loadMoreError }}</span>
+            <button type="button" class="rounded bg-surface-2 px-2 py-1 text-xs"
+                    @click="loadMore">重试</button>
+          </div>
           <button type="button"
                   class="rounded bg-surface-2 px-3 py-1.5 text-sm hover:bg-surface-3 disabled:opacity-40"
                   :disabled="loadingMore" @click="loadMore">
@@ -82,7 +97,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
-import { apiGet, HttpError } from "../api"
+import { apiGet, errorMessage } from "../api"
 import { formatDateTime } from "../utils/datetime"
 import { AUDIT_ACTION_LABELS, auditActionLabel } from "../utils/audit"
 
@@ -104,6 +119,8 @@ const nextCursor = ref<string | null>(null)
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref("")
+// 分页错误独立于首页错误：失败时不替换已加载的表格
+const loadMoreError = ref("")
 
 const filterAction = ref<string | null>(null)
 const filterFrom = ref("")  // YYYY-MM-DD
@@ -149,6 +166,10 @@ async function reload() {
   const my = ++seq
   loading.value = true
   error.value = ""
+  loadMoreError.value = ""
+  // 过滤变化/重试会使在途 loadMore 失效；其 finally 被 seq 令牌挡住，
+  // 必须在这里复位，否则按钮会永久停在「加载中...」。
+  loadingMore.value = false
   try {
     const r = await apiGet<{ entries: AuditEntry[]; next_cursor: string | null }>(
       `/api/admin/audit${buildQuery(null)}`,
@@ -157,7 +178,7 @@ async function reload() {
     entries.value = r.entries
     nextCursor.value = r.next_cursor
   } catch (err) {
-    if (my === seq) error.value = (err as HttpError).message || "加载失败"
+    if (my === seq) error.value = errorMessage(err, "加载失败")
   } finally {
     if (my === seq) loading.value = false
   }
@@ -167,6 +188,7 @@ async function loadMore() {
   if (nextCursor.value === null) return
   const my = seq
   loadingMore.value = true
+  loadMoreError.value = ""
   try {
     const r = await apiGet<{ entries: AuditEntry[]; next_cursor: string | null }>(
       `/api/admin/audit${buildQuery(nextCursor.value)}`,
@@ -175,7 +197,8 @@ async function loadMore() {
     entries.value.push(...r.entries)
     nextCursor.value = r.next_cursor
   } catch (err) {
-    if (my === seq) error.value = (err as HttpError).message || "加载失败"
+    // 失败不推进 nextCursor：重试以同一游标再拉
+    if (my === seq) loadMoreError.value = errorMessage(err, "加载失败")
   } finally {
     if (my === seq) loadingMore.value = false
   }
