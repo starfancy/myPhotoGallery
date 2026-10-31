@@ -36,6 +36,11 @@
             @click="adminOpen = false">
             用户
           </router-link>
+          <router-link to="/admin/audit" role="menuitem"
+            class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            @click="adminOpen = false">
+            审计日志
+          </router-link>
           <router-link to="/admin/settings" role="menuitem"
             class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="adminOpen = false">

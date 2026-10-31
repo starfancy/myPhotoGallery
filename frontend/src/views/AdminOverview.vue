@@ -89,7 +89,12 @@
 
         <!-- Recent audit -->
         <section>
-          <h2 class="mb-2 text-sm font-medium text-ink-2">最近审计 (20 条)</h2>
+          <h2 class="mb-2 flex items-center justify-between text-sm font-medium text-ink-2">
+            <span>最近审计 (20 条)</span>
+            <router-link to="/admin/audit" class="text-xs text-primary-text hover:underline">
+              查看全部 →
+            </router-link>
+          </h2>
           <div v-if="data.recent_audit.length === 0" class="text-sm text-ink-muted">
             暂无审计记录
           </div>
