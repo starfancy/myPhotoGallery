@@ -8,11 +8,16 @@ docs/superpowers/specs/2026-10-31-exif-analytics-overview-design.md §2。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
 from collections import Counter
 from typing import Iterable
+
+from sqlalchemy import func, select
+
+from myphoto.models import Image
 
 # ---- 厂商归一 -------------------------------------------------------------
 
@@ -365,3 +370,63 @@ def aggregate_rows(
         ],
         "months": _zero_fill_months(months_c),
     }
+
+# ---- 取数与缓存 ------------------------------------------------------------
+
+_CACHE_TTL_SECONDS = 300.0
+
+
+async def build_analytics(session) -> dict[str, object]:
+    """读全表 (taken_at, exif_json) 两列，在工作线程里做 CPU 聚合。"""
+    rows = (
+        await session.execute(select(Image.taken_at, Image.exif_json))
+    ).all()
+    return await asyncio.to_thread(aggregate_rows, rows)
+
+
+class AnalyticsCache:
+    """按 (COUNT, MAX(mtime), MAX(indexed_at)) 签名缓存聚合结果。
+
+    签名不变且未过 TTL 直接复用；扫描增删行改 count、更新行改
+    mtime/indexed_at，签名自然变化。asyncio.Lock 防并发惊群。
+    """
+
+    def __init__(self, ttl: float = _CACHE_TTL_SECONDS) -> None:
+        self._ttl = ttl
+        self._lock = asyncio.Lock()
+        self._signature: tuple[int, int, int] | None = None
+        self._payload: dict[str, object] | None = None
+        self._built_at = 0.0
+
+    async def _signature_now(self, session) -> tuple[int, int, int]:
+        row = (
+            await session.execute(
+                select(
+                    func.count(),
+                    func.coalesce(func.max(Image.mtime), 0),
+                    func.coalesce(func.max(Image.indexed_at), 0),
+                )
+            )
+        ).one()
+        return int(row[0]), int(row[1]), int(row[2])
+
+    async def get(self, sessionmaker) -> dict[str, object]:
+        async with sessionmaker() as session:
+            signature = await self._signature_now(session)
+
+        async with self._lock:
+            # double-check：排队等锁的请求在首个请求构建完后直接复用
+            now = time.time()
+            if (
+                self._payload is not None
+                and self._signature == signature
+                and now - self._built_at < self._ttl
+            ):
+                return self._payload
+
+            async with sessionmaker() as session:
+                payload = await build_analytics(session)
+            self._payload = payload
+            self._signature = signature
+            self._built_at = now
+            return payload

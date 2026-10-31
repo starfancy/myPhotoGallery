@@ -1,6 +1,13 @@
 import json
+import re
+import time
 
 import pytest
+from fastapi.testclient import TestClient
+
+from myphoto.main import build_app
+from myphoto.models import Folder, Gallery, GalleryRoot, Image, User
+from myphoto.security import hash_password
 
 from myphoto.analytics import (
     aggregate_rows,
@@ -279,3 +286,148 @@ def test_aggregate_string_numeric_exif_values():
     focal = {s["key"]: s["count"] for s in out["focal_ranges"]}
     assert focal["standard"] == 1
     assert {s["key"]: s["count"] for s in out["apertures"]}["f28"] == 1
+
+# ---------- 路由与缓存 ----------
+
+@pytest.fixture
+def app_client(tmp_path, capsys):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    cfg = tmp_path / "config.toml"
+    app = build_app(config_path=str(cfg))
+    with TestClient(app) as client:
+        out = capsys.readouterr().out
+        pw = re.search(r"password=(\S+)", out).group(1)
+        yield app, client, pw, photos
+
+
+def _login(client, username, password):
+    r = client.post("/api/auth/login",
+                    json={"username": username, "password": password})
+    assert r.status_code == 200, r.text
+
+
+def test_analytics_endpoint_empty_db_admin(app_client):
+    _, client, pw, _ = app_client
+    _login(client, "admin", pw)
+    r = client.get("/api/admin/analytics")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    body = r.json()
+    assert body["total"] == 0
+    assert body["makes"] == []
+    assert body["months"] == []
+    assert len(body["focal_ranges"]) == 4
+    assert len(body["apertures"]) == 6
+
+
+def test_analytics_endpoint_requires_auth(app_client):
+    _, client, _, _ = app_client
+    assert client.get("/api/admin/analytics").status_code == 401
+
+
+def test_analytics_endpoint_forbids_viewer(app_client):
+    app, client, _, _ = app_client
+
+    async def _make_viewer():
+        async with app.state.sessionmaker() as s:
+            # remote_allowed：避免 TestClient 的 "testclient" 主机名触发 lan_only 登录限制；
+            # 本用例要验证的是角色 403，与访问范围无关。
+            s.add(User(
+                username="viewer1", password_hash=hash_password("viewerpass123"),
+                role="viewer", access_scope="remote_allowed", enabled=1,
+                created_at=int(time.time()),
+            ))
+            await s.commit()
+
+    client.portal.call(_make_viewer)
+    _login(client, "viewer1", "viewerpass123")
+    assert client.get("/api/admin/analytics").status_code == 403
+
+
+def test_analytics_endpoint_seeded_counts(app_client):
+    app, client, pw, photos = app_client
+
+    async def _seed():
+        async with app.state.sessionmaker() as s:
+            g = Gallery(name="G", created_at=1)
+            s.add(g)
+            await s.flush()
+            r = GalleryRoot(gallery_id=g.id, label="R",
+                            absolute_path=str(photos), enabled=1)
+            s.add(r)
+            await s.flush()
+            f = Folder(root_id=r.id, relative_path="", name="",
+                       image_count=0, descendant_count=0)
+            s.add(f)
+            await s.flush()
+            for i, (make, model, focal) in enumerate([
+                ("NIKON CORPORATION", "NIKON D7000", 24),
+                ("NIKON CORPORATION", "NIKON D800", 24),
+                ("vivo", "vivo X100 Ultra", 5.2),
+            ]):
+                s.add(Image(
+                    root_id=r.id, folder_id=f.id, relative_path=f"a{i}.jpg",
+                    filename=f"a{i}.jpg", ext="jpg", size_bytes=1, sha1=f"x{i}",
+                    mtime=100 + i, width=10, height=10,
+                    # 间隔 31 天 → 2025-01-15 / 02-15 / 03-18，跨 3 个月
+                    taken_at=1_736_942_400 + i * 31 * 86400, is_raw=0,
+                    indexed_at=1, exif_json=json.dumps(
+                        {"Make": make, "Model": model, "FocalLength": focal,
+                         "FNumber": 5.6}),
+                ))
+            await s.commit()
+
+    client.portal.call(_seed)
+
+    _login(client, "admin", pw)
+    body = client.get("/api/admin/analytics").json()
+    assert body["total"] == 3
+    assert {m["name"]: m["count"] for m in body["makes"]}["Nikon"] == 2
+    focal = {s["key"]: s["count"] for s in body["focal_ranges"]}
+    assert focal["wide"] == 1       # D800 24mm 全幅
+    assert focal["standard"] == 1   # D7000 24x1.5=36mm
+    assert focal["unknown"] == 1    # 手机
+    assert len(body["months"]) == 3
+
+
+def test_analytics_cache_reuses_until_signature_changes(app_client, monkeypatch):
+    app, client, _, _ = app_client
+    sm = app.state.sessionmaker
+    calls = 0
+
+    async def fake_build(session):
+        nonlocal calls
+        calls += 1
+        return {"total": calls}
+
+    monkeypatch.setattr("myphoto.analytics.build_analytics", fake_build)
+
+    async def scenario():
+        await app.state.analytics.get(sm)
+        await app.state.analytics.get(sm)
+        assert calls == 1  # 签名未变，第二次命中缓存
+        # 插入一行改变签名（COUNT 与 MAX(indexed_at) 都变）
+        async with sm() as s:
+            g = Gallery(name="G2", created_at=1)
+            s.add(g)
+            await s.flush()
+            r = GalleryRoot(gallery_id=g.id, label="R2",
+                            absolute_path=str(app.state.config.data_dir), enabled=1)
+            s.add(r)
+            await s.flush()
+            f = Folder(root_id=r.id, relative_path="", name="",
+                       image_count=0, descendant_count=0)
+            s.add(f)
+            await s.flush()
+            s.add(Image(
+                root_id=r.id, folder_id=f.id, relative_path="z.jpg",
+                filename="z.jpg", ext="jpg", size_bytes=1, sha1="zz",
+                mtime=999, width=1, height=1, taken_at=None, is_raw=0,
+                indexed_at=999, exif_json=None,
+            ))
+            await s.commit()
+        await app.state.analytics.get(sm)
+        assert calls == 2  # 签名变化后重建
+
+    client.portal.call(scenario)
