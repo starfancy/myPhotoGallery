@@ -47,6 +47,8 @@ class AppConfig:
     scanner_hash_workers: int | None  # 扫描并发哈希/EXIF 线程数；None = 源码默认 min(8, CPU 核数)
     # [download] section
     download_batch_limit: int  # 单次批量下载 ZIP 图片数上限，合法 10–200，默认 100
+    # [audit] section
+    audit_retention_days: int  # 审计日志保留天数，合法 {0,30,90,180,365}，默认 180，0=永不清理
 
 
 _DEFAULT_TEMPLATE = """\
@@ -70,6 +72,10 @@ login_lockout_minutes = 15
 [download]
 # 单次批量下载 ZIP 的图片数量上限（10–200），对所有用户生效
 batch_limit = 100
+
+[audit]
+# 审计日志保留天数，合法值: 0(永不清理) / 30 / 90 / 180 / 365
+retention_days = 180
 
 [scanner]
 # 扫描时并发计算 sha1 / 读取 EXIF 的工作线程数。
@@ -122,6 +128,27 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
         )
         download_batch_limit = clamped
 
+    # [audit] retention_days：缺失/非法类型=180；越界整数钳到最近合法值。
+    # 与 download.batch_limit 同理：手改 config.toml 不应导致启动失败。
+    audit_section = data.get("audit", {})
+    raw_retention = audit_section.get("retention_days", 180)
+    try:
+        audit_retention_days = int(raw_retention)
+    except (TypeError, ValueError):
+        log.warning(
+            "invalid [audit].retention_days=%r; falling back to 180", raw_retention,
+        )
+        audit_retention_days = 180
+    else:
+        _AUDIT_CHOICES = (0, 30, 90, 180, 365)
+        if audit_retention_days not in _AUDIT_CHOICES:
+            clamped = min(_AUDIT_CHOICES, key=lambda c: abs(c - audit_retention_days))
+            log.warning(
+                "[audit].retention_days=%s not in %s; clamped to %s",
+                audit_retention_days, _AUDIT_CHOICES, clamped,
+            )
+            audit_retention_days = clamped
+
     # ---- data_dir resolution ----
     raw = app_section.get("data_dir")
     if raw is None:
@@ -149,4 +176,5 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
         login_lockout_minutes=int(security_section.get("login_lockout_minutes", 15)),
         scanner_hash_workers=scanner_hash_workers,
         download_batch_limit=download_batch_limit,
+        audit_retention_days=audit_retention_days,
     )

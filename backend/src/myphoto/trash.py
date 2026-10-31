@@ -17,7 +17,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from myphoto.audit import write_audit
+from myphoto.audit import purge_expired as purge_audit_expired, write_audit
 from myphoto.models import GalleryRoot, Trash
 
 log = logging.getLogger("myphoto.trash")
@@ -89,20 +89,37 @@ async def daily_purge_loop(sessionmaker, config_getter) -> None:
                 now_dt, cfg.trash_purge_hour, cfg.trash_purge_minute
             )
             await asyncio.sleep(max(1.0, (nxt - now_dt).total_seconds()))
-            async with sessionmaker() as session:
-                result = await purge_expired(
-                    session, actor_user_id=None, actor_ip="scheduled",
-                )
-                if any(result.values()):
-                    await write_audit(
-                        session, "trash_purge", None, "scheduled",
-                        target="scheduled",
-                        detail=(
-                            "purged={purged} blocked={blocked} "
-                            "missing={missing} errors={errors}"
-                        ).format(**result),
+            # 同一 tick 内先 trash 后 audit；两段清理各自独立 try，
+            # trash 失败不应跳过 audit（两者都仍在外层总 try 之内）。
+            try:
+                async with sessionmaker() as session:
+                    result = await purge_expired(
+                        session, actor_user_id=None, actor_ip="scheduled",
                     )
-                await session.commit()
+                    if any(result.values()):
+                        await write_audit(
+                            session, "trash_purge", None, "scheduled",
+                            target="scheduled",
+                            detail=(
+                                "purged={purged} blocked={blocked} "
+                                "missing={missing} errors={errors}"
+                            ).format(**result),
+                        )
+                    await session.commit()
+            except Exception:
+                log.exception("scheduled trash purge failed")
+
+            # audit 清理块在 trash try 外面：trash 失败不影响 audit。
+            try:
+                async with sessionmaker() as session:
+                    removed = await purge_audit_expired(
+                        session, config_getter().audit_retention_days
+                    )
+                    await session.commit()
+                if removed:
+                    log.info("scheduled audit purge removed=%s", removed)
+            except Exception:
+                log.exception("scheduled audit purge failed")
         except asyncio.CancelledError:
             raise
         except Exception:

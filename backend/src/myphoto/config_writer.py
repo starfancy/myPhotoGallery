@@ -22,6 +22,7 @@ _FIELD_MAP: dict[str, tuple[str, str]] = {
     "trusted_proxies": ("security", "trusted_proxies"),
     "session_hours": ("app", "session_hours"),
     "download_batch_limit": ("download", "batch_limit"),
+    "audit_retention_days": ("audit", "retention_days"),
 }
 
 
@@ -32,6 +33,7 @@ class SettingsUpdates:
     trusted_proxies: list[str] | None = None
     session_hours: int | None = None
     download_batch_limit: int | None = None
+    audit_retention_days: int | None = None
 
 
 def _toml_escape(s: str) -> str:

@@ -31,6 +31,7 @@ def test_get_settings_defaults(client):
         "trusted_proxies": [],
         "session_hours": 8,
         "download_batch_limit": 100,
+        "audit_retention_days": 180,
     }
 
 

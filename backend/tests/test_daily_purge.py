@@ -42,6 +42,7 @@ def test_next_daily_run_invalid_config_falls_back(hour, minute):
 class _Cfg:
     trash_purge_hour = 3
     trash_purge_minute = 30
+    audit_retention_days = 180
 
 
 @pytest.fixture
@@ -117,8 +118,8 @@ async def test_daily_loop_survives_purge_error(loop_env, monkeypatch, caplog):
 
     加强版（相对 brief 的退化版）：第一次 sleep 正常返回，让循环真的走到
     purge_expired（被 monkeypatch 成抛 RuntimeError）；第二次 sleep 抛
-    CancelledError。由此证明：(a) RuntimeError 被捕获并记录，(b) 循环没有
-    死在第一轮 —— CancelledError 只可能来自第二次 sleep。
+    CancelledError。由此证明：(a) RuntimeError 被 trash 段内层 try 捕获并
+    记录，(b) 循环没有死在第一轮 —— CancelledError 只可能来自第二次 sleep。
     """
     sm, _trash_file = loop_env
     sleeps = {"n": 0}
@@ -144,10 +145,10 @@ async def test_daily_loop_survives_purge_error(loop_env, monkeypatch, caplog):
 
     # CancelledError 来自第二次 sleep —— 循环在第一轮 RuntimeError 后存活了
     assert sleeps["n"] == 2
-    # RuntimeError 被 log.exception 记录（带 traceback）
+    # RuntimeError 被 trash 段内层 try 的 log.exception 记录（带 traceback）
     matched = [
         r for r in caplog.records
-        if "scheduled purge loop iteration failed" in r.getMessage()
+        if "scheduled trash purge failed" in r.getMessage()
         and r.exc_info is not None
         and issubclass(r.exc_info[0], RuntimeError)
     ]

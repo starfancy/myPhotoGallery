@@ -1055,9 +1055,11 @@ class SettingsPatch(BaseModel):
     trusted_proxies: list[str] | None = None
     session_hours: int | None = None
     download_batch_limit: int | None = None
+    audit_retention_days: int | None = None
 
 
 _RETENTION_CHOICES = {0, 7, 30, 90}
+_AUDIT_RETENTION_CHOICES = {0, 30, 90, 180, 365}
 
 
 def _valid_proxy_entry(entry: str) -> bool:
@@ -1080,6 +1082,7 @@ def _settings_payload(cfg) -> dict:
         "trusted_proxies": list(cfg.trusted_proxies),
         "session_hours": cfg.session_hours,
         "download_batch_limit": cfg.download_batch_limit,
+        "audit_retention_days": cfg.audit_retention_days,
     }
 
 
@@ -1099,6 +1102,10 @@ def _validate_settings(body: SettingsPatch) -> list[str]:
         10 <= body.download_batch_limit <= 200
     ):
         errors.append("download_batch_limit must be between 10 and 200")
+    if body.audit_retention_days is not None and (
+        body.audit_retention_days not in _AUDIT_RETENTION_CHOICES
+    ):
+        errors.append("audit_retention_days must be one of 0/30/90/180/365")
     if body.trusted_proxies is not None:
         if len(body.trusted_proxies) > 16:
             errors.append("trusted_proxies accepts at most 16 entries")
@@ -1145,6 +1152,7 @@ async def admin_update_settings(
         trusted_proxies=proxies,
         session_hours=body.session_hours,
         download_batch_limit=body.download_batch_limit,
+        audit_retention_days=body.audit_retention_days,
     )
     changed = [
         name for name, value in (
@@ -1153,6 +1161,7 @@ async def admin_update_settings(
             ("trusted_proxies", body.trusted_proxies),
             ("session_hours", body.session_hours),
             ("download_batch_limit", body.download_batch_limit),
+            ("audit_retention_days", body.audit_retention_days),
         ) if value is not None
     ]
 
