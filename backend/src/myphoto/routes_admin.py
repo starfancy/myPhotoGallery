@@ -1054,6 +1054,7 @@ class SettingsPatch(BaseModel):
     login_lockout_threshold: int | None = None
     trusted_proxies: list[str] | None = None
     session_hours: int | None = None
+    download_batch_limit: int | None = None
 
 
 _RETENTION_CHOICES = {0, 7, 30, 90}
@@ -1078,6 +1079,7 @@ def _settings_payload(cfg) -> dict:
         "login_lockout_threshold": cfg.login_lockout_threshold,
         "trusted_proxies": list(cfg.trusted_proxies),
         "session_hours": cfg.session_hours,
+        "download_batch_limit": cfg.download_batch_limit,
     }
 
 
@@ -1093,6 +1095,10 @@ def _validate_settings(body: SettingsPatch) -> list[str]:
         errors.append("login_lockout_threshold must be between 1 and 100")
     if body.session_hours is not None and not (1 <= body.session_hours <= 720):
         errors.append("session_hours must be between 1 and 720")
+    if body.download_batch_limit is not None and not (
+        10 <= body.download_batch_limit <= 200
+    ):
+        errors.append("download_batch_limit must be between 10 and 200")
     if body.trusted_proxies is not None:
         if len(body.trusted_proxies) > 16:
             errors.append("trusted_proxies accepts at most 16 entries")
@@ -1138,6 +1144,7 @@ async def admin_update_settings(
         login_lockout_threshold=body.login_lockout_threshold,
         trusted_proxies=proxies,
         session_hours=body.session_hours,
+        download_batch_limit=body.download_batch_limit,
     )
     changed = [
         name for name, value in (
@@ -1145,6 +1152,7 @@ async def admin_update_settings(
             ("login_lockout_threshold", body.login_lockout_threshold),
             ("trusted_proxies", body.trusted_proxies),
             ("session_hours", body.session_hours),
+            ("download_batch_limit", body.download_batch_limit),
         ) if value is not None
     ]
 

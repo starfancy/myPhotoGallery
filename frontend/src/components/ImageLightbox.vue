@@ -19,12 +19,16 @@ import { formatDateTime } from "../utils/datetime"
 const props = defineProps<{
   items: ImageRow[]
   startId: number
+  /** 搜索结果态：返回图片所在目录相对路径（root 根目录返回 ""）。
+   *  传入时才注册目录标注与「在所在文件夹中查看」；普通浏览态不传。 */
+  locationResolver?: (item: ImageRow) => string | null
 }>()
 
 const emit = defineEmits<{
   (e: "close"): void
   (e: "change", id: number): void
   (e: "deleted", id: number): void
+  (e: "viewInFolder", item: ImageRow): void
 }>()
 
 const auth = useAuthStore()
@@ -662,6 +666,14 @@ function open() {
     const it = props.items[pswp.currIndex]
     filenameEl.textContent = it ? it.filename : ""
   }
+  // 搜索结果态目录标注：仅在传入 locationResolver 时注册元素
+  let locationEl: HTMLElement | null = null
+  const updateLocationLabel = () => {
+    if (!locationEl || !pswp) return
+    const it = props.items[pswp.currIndex]
+    locationEl.textContent =
+      it && props.locationResolver ? (props.locationResolver(it) ?? "") : ""
+  }
   // 右下角显示比例：currZoomLevel 即显示尺寸/原图尺寸（1 = 原图 100%）
   let zoomRatioEl: HTMLElement | null = null
   const updateZoomRatio = () => {
@@ -706,6 +718,7 @@ function open() {
     refreshExifPanelIfOpen()
     refreshHistPanelIfOpen()
     updateFilenameLabel()
+    updateLocationLabel()
     updateZoomRatio()
     updateCaptureTime()
     // 相邻幻灯片的缩略图可能已预加载完成（不会再有 loadComplete），补调度预取
@@ -731,6 +744,30 @@ function open() {
         updateFilenameLabel()
       },
     })
+    if (props.locationResolver) {
+      pswp!.ui!.registerElement({
+        name: "location-label",
+        order: 7,
+        isButton: false,
+        tagName: "span",
+        className: "pswp__location-label",
+        onInit: (el) => {
+          locationEl = el
+          updateLocationLabel()
+        },
+      })
+      pswp!.ui!.registerElement({
+        name: "view-in-folder",
+        ariaLabel: "在所在文件夹中查看",
+        order: 10,
+        isButton: true,
+        html: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+        onClick: () => {
+          const it = pswp ? props.items[pswp.currIndex] : undefined
+          if (it) emit("viewInFolder", it)
+        },
+      })
+    }
     // 右下角：当前显示比例（相对原图）。appendTo wrapper 挂到全屏
     // scrollWrap——默认的 'bar' 是顶部 60px 高的顶栏，bottom 定位会落在右上角
     pswp!.ui!.registerElement({
@@ -891,6 +928,20 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 搜索结果态：文件名右侧的所在目录，弱化一档 */
+.pswp__location-label {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+  line-height: 1;
+  margin-inline-start: 10px;
+  align-self: center;
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
 }
 
 /* ---- 右下角显示比例 ---- */

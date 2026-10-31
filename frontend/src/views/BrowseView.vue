@@ -6,25 +6,31 @@
       </template>
     </AppHeader>
     <main class="p-3">
-      <!-- 工具栏：左侧选择操作（admin only），右侧排版切换 -->
-      <div v-if="images.length" class="mb-2 flex items-center gap-2 text-sm">
-        <template v-if="auth.isAdmin">
-          <button v-if="!selectionMode"
-                  type="button"
+      <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换 -->
+      <div v-if="images.length || folders.length || searchQ"
+           class="mb-2 flex items-center gap-2 text-sm">
+        <button v-if="!selectionMode"
+                type="button"
+                class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
+                @click="enterSelectionMode">
+          选择
+        </button>
+        <template v-else>
+          <span class="text-neutral-400">已选 {{ selectedIds.size }} 项</span>
+          <button type="button"
                   class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
-                  @click="enterSelectionMode">
-            选择
+                  @click="selectAll">
+            {{ isAllSelected ? "取消全选" : "全选" }}
           </button>
-          <template v-else>
-            <span class="text-neutral-400">已选 {{ selectedIds.size }} 项</span>
-            <button type="button"
-                    class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
-                    @click="selectAll">
-              {{ isAllSelected ? "取消全选" : "全选" }}
-            </button>
-          </template>
         </template>
         <div class="ml-auto flex items-center gap-1.5">
+          <SearchBox
+            :model-value="searchQ"
+            :scope-all="scopeAll"
+            :is-root="path === ''"
+            @update:model-value="onSearchQuery"
+            @update:scope-all="onScopeAll"
+          />
           <GridLayoutSwitch v-model="gridLayout" />
           <button type="button"
                   class="flex items-center rounded px-1.5 py-1"
@@ -46,21 +52,39 @@
         </div>
       </div>
 
-      <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid"
-                      :can-exclude="auth.isAdmin"
-                      @exclude="onExcludeFolder" />
-      <component :is="gridComponent" v-if="images.length" :items="images"
-                     :selection-mode="selectionMode"
-                     :selected-ids="selectedIds"
-                     :show-filename="showFilenames"
-                     @open="onOpen"
-                     @menu-action="onGridMenuAction"
-                     @toggle-select="onToggleSelect" />
-      <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-neutral-500">
-        此目录暂无图片
-      </div>
-      <PaginationBar v-if="totalPages > 1" :page="page" :total-pages="totalPages"
-                     @change="changePage" />
+      <template v-if="!searchQ">
+        <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid"
+                        :can-exclude="auth.isAdmin"
+                        @exclude="onExcludeFolder" />
+        <component :is="gridComponent" v-if="images.length" :items="images"
+                       :selection-mode="selectionMode"
+                       :selected-ids="selectedIds"
+                       :show-filename="showFilenames"
+                       @open="onOpen"
+                       @menu-action="onGridMenuAction"
+                       @toggle-select="onToggleSelect" />
+        <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-neutral-500">
+          此目录暂无图片
+        </div>
+        <PaginationBar v-if="totalPages > 1" :page="page" :total-pages="totalPages"
+                       @change="changePage" />
+      </template>
+      <SearchResults
+        v-else
+        ref="resultsRef"
+        :gid="gid"
+        :rid="rid"
+        :q="searchQ"
+        :path="scopeAll ? '' : path"
+        :grid="gridLayout"
+        :selection-mode="selectionMode"
+        :selected-ids="selectedIds"
+        :show-filename="showFilenames"
+        @open="onSearchOpen"
+        @toggle-select="onToggleSelect"
+        @menu-action="onSearchMenuAction"
+        @items-change="onSearchItems"
+      />
 
       <!-- 选择模式底部浮动工具条 -->
       <div v-if="selectionMode"
@@ -68,6 +92,13 @@
         <span class="text-sm text-neutral-300">已选 {{ selectedIds.size }} 项</span>
         <div class="flex items-center gap-2">
           <button type="button"
+                  :disabled="selectedIds.size === 0 || downloading"
+                  class="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  @click="onBatchDownload">
+            {{ downloading ? "准备中..." : `下载 ZIP（${selectedIds.size}）` }}
+          </button>
+          <button v-if="auth.isAdmin"
+                  type="button"
                   :disabled="selectedIds.size === 0 || batchDeleting"
                   class="rounded bg-red-700 px-3 py-1.5 text-sm hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                   @click="onBatchDelete">
@@ -81,9 +112,19 @@
         </div>
       </div>
     </main>
-    <ImageLightbox v-if="lightboxId !== null" :items="images" :start-id="lightboxId"
+    <ImageLightbox v-if="lightboxId !== null && !searchQ" :items="images" :start-id="lightboxId"
                     @close="onLightboxClose" @change="onLightboxChange"
                     @deleted="onImageDeleted" />
+    <ImageLightbox
+      v-else-if="searchImageId !== null && searchItems.some((it) => it.id === searchImageId)"
+      :items="searchItems"
+      :start-id="searchImageId"
+      :location-resolver="searchLocation"
+      @close="onSearchLightboxClose"
+      @change="onSearchLightboxChange"
+      @view-in-folder="onViewInFolder"
+      @deleted="onSearchImageDeleted"
+    />
   </div>
 </template>
 
@@ -99,13 +140,22 @@ import GridLayoutSwitch from "../components/GridLayoutSwitch.vue"
 import type { GridLayout } from "../components/GridLayoutSwitch.vue"
 import PaginationBar from "../components/PaginationBar.vue"
 import ImageLightbox from "../components/ImageLightbox.vue"
-import { apiGet, apiDelete, apiPost, HttpError } from "../api"
+import SearchBox from "../components/SearchBox.vue"
+import SearchResults from "../components/SearchResults.vue"
+import { apiGet, apiDelete, apiPost, HttpError, errorMessage } from "../api"
 import { useBrowseStore, PAGE_SIZE, type BrowseKey, type ImageRow } from "../stores/browse"
 import { useAuthStore } from "../stores/auth"
+import { useToastStore } from "../stores/toast"
+import { encodePathSegments } from "../utils/path"
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const toast = useToastStore()
+
+/** 前端选择集硬上限（下载 API Pydantic 上限同为 200）。 */
+const SELECT_HARD_LIMIT = 200
+const downloading = ref(false)
 const gid = computed(() => Number(route.params.gid))
 const rid = computed(() => Number(route.params.rid))
 const path = computed(() => {
@@ -125,6 +175,100 @@ function onLightboxChange(id: number) {
   const suffix = path.value ? `/${path.value}` : ""
   router.replace(`/galleries/${gid.value}/r/${rid.value}${suffix}/image/${id}`)
 }
+
+// ---------- 搜索态 ----------
+
+const searchQ = computed(() => String(route.query.q ?? "").trim())
+const scopeAll = computed(() => route.query.scope === "all")
+const searchItems = ref<ImageRow[]>([])
+const resultsRef = ref<InstanceType<typeof SearchResults> | null>(null)
+
+const searchImageId = computed(() => {
+  if (!searchQ.value || route.query.image === undefined) return null
+  const n = Number(route.query.image)
+  return Number.isInteger(n) && n > 0 ? n : null
+})
+
+function queryWithoutImage(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(route.query)) {
+    if (k === "image" || v === undefined || v === null) continue
+    out[k] = Array.isArray(v) ? v.join("/") : String(v)
+  }
+  return out
+}
+
+function onSearchQuery(q: string) {
+  const query = queryWithoutImage()
+  if (q) query.q = q
+  else delete query.q
+  router.replace({ query })
+}
+
+function onScopeAll(v: boolean) {
+  const query = queryWithoutImage()
+  if (v) query.scope = "all"
+  else delete query.scope
+  router.replace({ query })
+}
+
+function onSearchItems(items: ImageRow[]) {
+  searchItems.value = items
+}
+
+function onSearchOpen(id: number) {
+  router.replace({ query: { ...queryWithoutImage(), image: String(id) } })
+}
+
+function onSearchLightboxClose() {
+  router.replace({ query: queryWithoutImage() })
+}
+
+function onSearchLightboxChange(id: number) {
+  router.replace({ query: { ...queryWithoutImage(), image: String(id) } })
+}
+
+/** 图片 → 所在目录（root 根目录返回 ""，Lightbox 仍显示跳转按钮）。 */
+function searchLocation(it: ImageRow): string {
+  const p = it.relative_path ?? ""
+  const i = p.lastIndexOf("/")
+  return i >= 0 ? p.slice(0, i) : ""
+}
+
+function onViewInFolder(it: ImageRow) {
+  const dir = searchLocation(it)
+  router.push(
+    `/galleries/${gid.value}/r/${rid.value}${dir ? `/${encodePathSegments(dir)}` : ""}`,
+  )
+}
+
+async function onSearchMenuAction(id: number, action: "delete") {
+  if (action !== "delete") return
+  const image = searchItems.value.find((it) => it.id === id)
+  if (!image) return
+  const msg = `确定将「${image.filename}」移入回收站？\n\n30 天内可从「回收站」恢复。`
+  if (!window.confirm(msg)) return
+  try {
+    await apiDelete(`/api/images/${id}`)
+  } catch (err) {
+    const m = err instanceof HttpError ? err.message : "删除失败"
+    window.alert(`删除失败：${m}`)
+    return
+  }
+  await onSearchImageDeleted(id)
+}
+
+/** Lightbox 删除成功后的回调：Lightbox 内部已调过 DELETE，这里只做本地摘除 + 重拉。 */
+async function onSearchImageDeleted(id: number) {
+  searchItems.value = searchItems.value.filter((it) => it.id !== id)
+  const s = new Set(selectedIds.value)
+  s.delete(id)
+  selectedIds.value = s
+  // 删除项可能位于任意文件夹：普通浏览缓存无 TTL，整体清空，避免幽灵卡片
+  browse.clearAll()
+  await resultsRef.value?.reload()
+}
+
 const sort = ref("name_asc")
 
 const crumbs = ref<{ name: string; relative_path: string }[]>([])
@@ -166,8 +310,14 @@ const selectionMode = ref(false)
 const selectedIds = ref(new Set<number>())
 const batchDeleting = ref(false)
 
+/** 当前可见批次：搜索态为累积的搜索结果，普通浏览态为当前页图片。 */
+const visibleItems = computed<ImageRow[]>(() =>
+  searchQ.value ? searchItems.value : images.value,
+)
+
 const isAllSelected = computed(() =>
-  images.value.length > 0 && images.value.every((it) => selectedIds.value.has(it.id)),
+  visibleItems.value.length > 0 &&
+  visibleItems.value.every((it) => selectedIds.value.has(it.id)),
 )
 
 function enterSelectionMode() {
@@ -182,16 +332,67 @@ function exitSelectionMode() {
 
 function onToggleSelect(id: number) {
   const s = new Set(selectedIds.value)
-  if (s.has(id)) s.delete(id)
-  else s.add(id)
+  if (s.has(id)) {
+    s.delete(id)
+  } else {
+    if (s.size >= SELECT_HARD_LIMIT) {
+      toast.push("error", `一次最多选择 ${SELECT_HARD_LIMIT} 张`)
+      return
+    }
+    s.add(id)
+  }
   selectedIds.value = s
 }
 
 function selectAll() {
+  const s = new Set(selectedIds.value)
   if (isAllSelected.value) {
-    selectedIds.value = new Set()
+    // 只摘除当前可见批次（普通页=当前页；搜索态=已加载结果），保留其他批次的勾选
+    for (const it of visibleItems.value) s.delete(it.id)
   } else {
-    selectedIds.value = new Set(images.value.map((it) => it.id))
+    // 与单张切换同一硬上限：只补未选项，按批次顺序最多补到 SELECT_HARD_LIMIT 张
+    const room = Math.max(0, SELECT_HARD_LIMIT - s.size)
+    const missing = visibleItems.value.filter((it) => !s.has(it.id))
+    for (const it of missing.slice(0, room)) s.add(it.id)
+    if (missing.length > room) toast.push("error", `一次最多选择 ${SELECT_HARD_LIMIT} 张`)
+  }
+  selectedIds.value = s
+}
+
+function triggerAnchorDownload(href: string, filename: string) {
+  const a = document.createElement("a")
+  a.href = href
+  a.download = filename
+  a.rel = "noopener"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+async function onBatchDownload() {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+  const limit = auth.user?.download_batch_limit ?? 100
+  if (ids.length > limit) {
+    window.alert(
+      `当前设置单次最多下载 ${limit} 张（已选 ${ids.length} 张），请减少选择。` +
+      (auth.isAdmin ? "管理员可在「设置」中调整，最高 200。" : ""),
+    )
+    return
+  }
+  downloading.value = true
+  try {
+    const r = await apiPost<{ ticket: string; filename: string; count: number }>(
+      "/api/download-batch",
+      { image_ids: ids },
+    )
+    triggerAnchorDownload(`/api/download-batch/${r.ticket}`, r.filename)
+    // 浏览器原生下载已接管；无法感知完成，给 1s 防连点窗口
+    await new Promise((res) => setTimeout(res, 1000))
+  } catch (err) {
+    window.alert(`下载失败：${errorMessage(err, "请稍后重试")}`)
+  } finally {
+    downloading.value = false
   }
 }
 
@@ -207,7 +408,13 @@ async function onBatchDelete() {
       { image_ids: ids },
     )
     if (r.deleted.length > 0) {
-      await reloadAfterChange()
+      if (searchQ.value) {
+        // 搜索态：刷新可见结果（删除项可能跨目录）；清空普通浏览缓存防幽灵卡片
+        browse.clearAll()
+        await resultsRef.value?.reload()
+      } else {
+        await reloadAfterChange()
+      }
     }
     if (r.failed.length > 0) {
       window.alert(`部分删除失败：${r.failed.length} 项`)
@@ -232,6 +439,22 @@ async function reloadAfterChange() {
   const key = currentKey()
   browse.invalidate(key)
   await renderPage(key, page.value)
+}
+
+/**
+ * 退出搜索态后补拉当前目录普通视图：folders 在搜索期间已加载、无需重拉；
+ * 先 invalidate 再渲染第 1 页，确保搜索结果里删除过的图片不会由旧缓存回显。
+ */
+async function loadNormalAfterSearch() {
+  const key = currentKey()
+  browse.invalidate(key)
+  page.value = 1
+  loading.value = true
+  try {
+    await renderPage(key, 1)
+  } finally {
+    loading.value = false
+  }
 }
 
 async function onGridMenuAction(id: number, action: "delete") {
@@ -293,6 +516,7 @@ async function loadAll() {
   try {
     const key = currentKey()
     await loadFolders()
+    if (searchQ.value) return // 搜索结果由 SearchResults 自取
     page.value = 1
     await renderPage(key, 1)
     // restore scroll
@@ -354,7 +578,7 @@ async function renderPage(key: BrowseKey, p: number) {
 
 async function changePage(p: number) {
   if (p === page.value || p < 1 || p > totalPages.value) return
-  exitSelectionMode()
+  // 跨页累积选择：翻页不清空选择集（切换 gid/rid/path 时仍由 watcher 清空）
   const key = currentKey()
   page.value = p
   await renderPage(key, p)
@@ -380,9 +604,25 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("scroll", onScroll)
 })
-// 切换目录/图库/根目录时退出选择模式，避免旧选中 id 混入新数据
-watch([gid, rid, path], () => {
+// 位置（图库/根/目录）与搜索词合并监听：view-in-folder 可能在同一 tick
+// 同时改 path 和清 q，必须合并成一次判定，避免普通视图被拉两遍。
+watch([gid, rid, path, searchQ], (now, old) => {
   exitSelectionMode()
-  loadAll()
+  const [ogid, orid, opath, oq] = old ?? [0, 0, "", ""]
+  const locChanged =
+    now[0] !== ogid || now[1] !== orid || now[2] !== opath
+  if (locChanged) {
+    // loadAll 在搜索态会跳过 /images，由 SearchResults 自取
+    loadAll()
+  } else if (oq && !now[3]) {
+    // 同路径 q 由非空变空（刷新在 ?q= 页后清除、同目录 view-in-folder）：
+    // 此前从未拉过普通页，补拉当前 key；走 invalidate 防缓存里残留已删图片
+    void loadNormalAfterSearch()
+  }
+})
+// 仅切换范围：结果集整体替换，旧选择不应保留；普通 /images 不得触发，
+// SearchResults 靠自身 prop watcher 重查
+watch(scopeAll, () => {
+  exitSelectionMode()
 })
 </script>

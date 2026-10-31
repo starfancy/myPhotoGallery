@@ -51,6 +51,7 @@ const ADMIN_USER: AuthUser = {
   username: "admin",
   role: "admin",
   access_scope: "remote_allowed",
+  download_batch_limit: 100,
 }
 
 const SAMPLE_USERS = [

@@ -74,6 +74,8 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         app.state.thumbnails = ThumbnailGenerator(
             Path(cfg.data_dir) / ".cache" / "thumbnails"
         )
+        from myphoto.routes_download import TicketStore
+        app.state.download_tickets = TicketStore()
         # 每日定时清理：所有 app.state 赋值完成后再挂后台循环（循环首轮即读
         # app.state.config）；关停时在 finally 中取消。
         purge_task = asyncio.create_task(
@@ -114,6 +116,10 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
     from myphoto.routes_images import router as images_router
 
     app.include_router(images_router)
+
+    from myphoto.routes_download import router as download_router
+
+    app.include_router(download_router)
 
     from myphoto.routes_trash import router as trash_router
 

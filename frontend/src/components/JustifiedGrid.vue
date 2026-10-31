@@ -12,6 +12,7 @@
                  :show-menu="isAdmin && !selectionMode"
                  :show-filename="showFilename"
                  :cell-style="{ width: `${cell.scaledW}px`, height: `${cell.scaledH}px` }"
+                 :badge="badgeFor ? badgeFor(itemById.get(cell.id)!) ?? undefined : undefined"
                  @activate="onCellClick(cell.id)"
                  @toggle-select="toggleSelect(cell.id)"
                  @menu="onMenu(cell.id, $event)"
@@ -41,6 +42,8 @@ const props = defineProps<{
   selectedIds?: Set<number>
   /** 在缩略图底部渐变阴影上叠加文件名 */
   showFilename?: boolean
+  /** 搜索结果用：把图片映射成角标文本（所在目录）；不传则无角标 */
+  badgeFor?: (item: ImageRow) => string | null
 }>()
 
 const emit = defineEmits<{
@@ -72,6 +75,8 @@ onUnmounted(() => {
 })
 
 const gap = 16
+
+const itemById = computed(() => new Map(props.items.map((it) => [it.id, it])))
 
 const rows = computed(() => {
   const input: (LayoutInput & { id: number; sha1: string; filename: string })[] = props.items.map((it) => ({

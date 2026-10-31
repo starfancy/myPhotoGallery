@@ -69,7 +69,7 @@ async function mountView(role: "admin" | "viewer" = "admin") {
 
   setActivePinia(createPinia())
   const auth = useAuthStore()
-  auth.$patch({ user: { id: 1, username: "u", role, access_scope: "lan_only" } })
+  auth.$patch({ user: { id: 1, username: "u", role, access_scope: "lan_only", download_batch_limit: 100 } })
 
   const router = makeRouter()
   await router.push("/galleries/1/r/1")
@@ -100,12 +100,12 @@ describe("BrowseView delete flows", () => {
     expect(w2.findAll('button[aria-label^="更多操作"]').length).toBe(0)
   })
 
-  it("shows the '选择' button only for admin", async () => {
+  it("所有角色都显示「选择」按钮（P6 下载对 viewer 开放）", async () => {
     const { w } = await mountView("admin")
     expect(w.findAll("button").find((b) => b.text() === "选择")).toBeTruthy()
 
     const { w: w2 } = await mountView("viewer")
-    expect(w2.findAll("button").find((b) => b.text() === "选择")).toBeFalsy()
+    expect(w2.findAll("button").find((b) => b.text() === "选择")).toBeTruthy()
   })
 
   it("deletes a single image via three-dot menu after confirmation", async () => {

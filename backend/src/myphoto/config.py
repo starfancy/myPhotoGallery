@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import secrets
 import tomllib
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ from typing import Union
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+
+log = logging.getLogger("myphoto.config")
 
 
 def resolve_config_path(path: Union[str, Path, None] = None) -> Path:
@@ -42,6 +45,8 @@ class AppConfig:
     login_lockout_minutes: int        # 默认 15
     # [scanner] section
     scanner_hash_workers: int | None  # 扫描并发哈希/EXIF 线程数；None = 源码默认 min(8, CPU 核数)
+    # [download] section
+    download_batch_limit: int  # 单次批量下载 ZIP 图片数上限，合法 10–200，默认 100
 
 
 _DEFAULT_TEMPLATE = """\
@@ -61,6 +66,10 @@ purge_minute = 30
 trusted_proxies = []
 login_lockout_threshold = 5
 login_lockout_minutes = 15
+
+[download]
+# 单次批量下载 ZIP 的图片数量上限（10–200），对所有用户生效
+batch_limit = 100
 
 [scanner]
 # 扫描时并发计算 sha1 / 读取 EXIF 的工作线程数。
@@ -83,6 +92,7 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
     trash_section = data.get("trash", {})
     security_section = data.get("security", {})
     scanner_section = data.get("scanner", {})
+    download_section = data.get("download", {})
 
     # None / 缺失 / 非正数 → None，表示沿用源码内置默认（scanner._HASH_WORKERS）。
     hash_workers_raw = scanner_section.get("hash_workers")
@@ -94,6 +104,23 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
         scanner_hash_workers = None
     if scanner_hash_workers is not None and scanner_hash_workers < 1:
         scanner_hash_workers = None
+
+    # [download] batch_limit：缺失=100；非法类型回退 100；越界钳到 [10,200]。
+    # 故意钳制而非报错：手改 config.toml 不应导致启动失败，也避开
+    # P5 retention 枚举值“手改后设置页保存必 400”的别扭。
+    raw_limit = download_section.get("batch_limit", 100)
+    try:
+        download_batch_limit = int(raw_limit)
+    except (TypeError, ValueError):
+        log.warning("invalid [download].batch_limit=%r; falling back to 100", raw_limit)
+        download_batch_limit = 100
+    if not 10 <= download_batch_limit <= 200:
+        clamped = min(200, max(10, download_batch_limit))
+        log.warning(
+            "[download].batch_limit=%s out of range 10-200; clamped to %s",
+            download_batch_limit, clamped,
+        )
+        download_batch_limit = clamped
 
     # ---- data_dir resolution ----
     raw = app_section.get("data_dir")
@@ -121,4 +148,5 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
         login_lockout_threshold=int(security_section.get("login_lockout_threshold", 5)),
         login_lockout_minutes=int(security_section.get("login_lockout_minutes", 15)),
         scanner_hash_workers=scanner_hash_workers,
+        download_batch_limit=download_batch_limit,
     )
