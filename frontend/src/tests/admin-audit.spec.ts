@@ -222,4 +222,35 @@ describe("AdminAudit", () => {
     expect(w.find("tbody").text()).not.toContain("STALE")
     expect(w.find("tbody").text()).toContain("image:9")
   })
+
+  it("hides pager when a filter reload fails after rows loaded; inline retry restores it", async () => {
+    const { w, fetchFn } = await mountPage()
+    const hasMoreBtn = () => w.findAll("button").some((b) => b.text().includes("加载更多"))
+    expect(hasMoreBtn()).toBe(true)
+    // 过滤变化触发的 reload 失败：首页数据与 next_cursor=t_1 仍在
+    fetchFn.mockClear()
+    fetchFn.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url.startsWith("/api/admin/users")) return response([{ id: 1, username: "alice" }])
+      return response({ error: { code: "internal_error", message: "Raw backend English" } }, 500)
+    })
+    await w.find("select").setValue("image_delete")
+    await flushPromises()
+    // 已有行保留；行内 reload 错误条显示中文映射文案；分页器整块隐藏
+    expect(w.findAll("tbody tr")).toHaveLength(3)
+    expect(w.text()).toContain("image:9")
+    expect(w.text()).toContain("服务器内部错误")
+    expect(w.text()).not.toContain("Raw backend English")
+    expect(hasMoreBtn()).toBe(false)
+    // 行内错误条的重试成功：错误消失、分页器恢复
+    fetchFn.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url.startsWith("/api/admin/users")) return response([{ id: 1, username: "alice" }])
+      return response({ entries: ENTRIES, next_cursor: "t_9" })
+    })
+    await w.findAll("button").find((b) => b.text().includes("重试"))!.trigger("click")
+    await flushPromises()
+    expect(w.text()).not.toContain("服务器内部错误")
+    expect(hasMoreBtn()).toBe(true)
+  })
 })
