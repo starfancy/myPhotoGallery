@@ -2,125 +2,125 @@
   <div>
     <AppHeader>
       <template #title>
-        <span class="text-neutral-400">管理 · {{ galleryName || "图库" }}</span>
+        <span class="text-ink-2">管理 · {{ galleryName || "图库" }}</span>
       </template>
     </AppHeader>
     <main class="p-4 space-y-6">
-      <div v-if="loading" class="text-neutral-400">加载中...</div>
-      <div v-else-if="error" class="text-red-400">{{ error }}</div>
+      <div v-if="loading" class="text-ink-2">加载中...</div>
+      <div v-else-if="error" class="text-danger-text">{{ error }}</div>
       <template v-else-if="data">
         <!-- Back link -->
         <section>
           <router-link to="/admin/galleries"
-                       class="text-xs text-neutral-400 hover:text-neutral-200">
+                       class="text-xs text-ink-2 hover:text-ink">
             ← 返回图库列表
           </router-link>
         </section>
 
         <!-- Gallery edit form -->
-        <section class="rounded-lg bg-neutral-900 p-4">
-          <h2 class="mb-3 text-sm font-medium text-neutral-400">图库信息</h2>
+        <section class="rounded-lg bg-surface p-4">
+          <h2 class="mb-3 text-sm font-medium text-ink-2">图库信息</h2>
           <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div class="flex-1">
-              <label class="block text-xs text-neutral-500">名称</label>
+              <label class="block text-xs text-ink-muted">名称</label>
               <input v-model="editName"
-                     class="mt-1 w-full rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                     class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
             <div class="flex-1">
-              <label class="block text-xs text-neutral-500">描述</label>
+              <label class="block text-xs text-ink-muted">描述</label>
               <input v-model="editDescription"
-                     class="mt-1 w-full rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                     class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
             <button @click="saveGallery"
                     :disabled="saving"
-                    class="shrink-0 rounded bg-blue-600 px-4 py-1.5 text-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
+                    class="shrink-0 rounded bg-primary px-4 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50">
               {{ saving ? "保存中..." : "保存" }}
             </button>
           </div>
-          <div v-if="saveSuccess" class="mt-2 text-xs text-green-400">已保存</div>
-          <div v-if="saveError" class="mt-2 text-xs text-red-400">{{ saveError }}</div>
+          <div v-if="saveSuccess" class="mt-2 text-xs text-success">已保存</div>
+          <div v-if="saveError" class="mt-2 text-xs text-danger-text">{{ saveError }}</div>
         </section>
 
         <!-- Root cards -->
         <section>
-          <h2 class="mb-2 text-sm font-medium text-neutral-400">根目录</h2>
+          <h2 class="mb-2 text-sm font-medium text-ink-2">根目录</h2>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div v-for="r in data.roots" :key="r.id"
-                 class="flex flex-col gap-2 rounded-lg bg-neutral-900 p-4">
+                 class="flex flex-col gap-2 rounded-lg bg-surface p-4">
               <div class="font-medium">{{ r.label }}</div>
-              <div class="truncate text-xs text-neutral-500" :title="r.absolute_path">{{ r.absolute_path }}</div>
+              <div class="truncate text-xs text-ink-muted" :title="r.absolute_path">{{ r.absolute_path }}</div>
               <div class="flex items-center gap-2 text-xs">
                 <span>{{ r.image_count }} 张</span>
                 <span :class="scanStatusClass(r.status)">{{ scanStatusLabel(r.status) }}</span>
-                <span v-if="!r.enabled" class="text-yellow-400">已禁用</span>
+                <span v-if="!r.enabled" class="text-warning">已禁用</span>
               </div>
               <div v-if="isRunning(r)" class="mt-1 space-y-1">
-                <div class="h-1 w-full overflow-hidden rounded bg-neutral-800"
+                <div class="h-1 w-full overflow-hidden rounded bg-surface-2"
                      role="progressbar"
                      :aria-valuemin="0"
                      :aria-valuemax="100"
                      :aria-valuenow="scanPercent(r)">
-                  <div class="h-1 rounded bg-blue-500"
+                  <div class="h-1 rounded bg-primary"
                        :style="{ width: scanPercent(r) + '%' }"></div>
                 </div>
-                <div class="flex items-center justify-between gap-2 text-xs text-neutral-500">
+                <div class="flex items-center justify-between gap-2 text-xs text-ink-muted">
                   <span>{{ r.processed_files ?? 0 }} / {{ r.total_files ?? 0 }} ({{ scanPercent(r) }}%)</span>
                   <span v-if="r.current_path" class="truncate" :title="r.current_path">
                     {{ r.current_path }}
                   </span>
                 </div>
               </div>
-              <div v-if="r.last_scan_at" class="text-xs text-neutral-500">
+              <div v-if="r.last_scan_at" class="text-xs text-ink-muted">
                 上次扫描: {{ formatTs(r.last_scan_at) }}
               </div>
-              <div v-if="r.last_scan_error" class="truncate text-xs text-red-400" :title="r.last_scan_error">
+              <div v-if="r.last_scan_error" class="truncate text-xs text-danger-text" :title="r.last_scan_error">
                 {{ r.last_scan_error }}
               </div>
               <div class="mt-1 flex gap-2">
                 <button @click="rescanRoot(r.id)"
-                        class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                        class="rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
                   重扫
                 </button>
                 <button @click="toggleRoot(r.id, r.enabled)"
-                        class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                        class="rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
                   {{ r.enabled ? "禁用" : "启用" }}
                 </button>
                 <button @click="toggleExclusions(r.id)"
-                        class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                        class="rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
                   排除目录
                 </button>
                 <button @click="confirmRemoveRoot(r.id, r.label)"
-                        class="ml-auto rounded bg-red-800 px-2 py-1 text-xs hover:bg-red-700">
+                        class="ml-auto rounded bg-danger px-2 py-1 text-xs text-white hover:bg-danger-hover">
                   移除
                 </button>
               </div>
-              <div v-if="exclusionPanels[r.id]" class="mt-2 rounded bg-neutral-800/50 p-2">
-                <div v-if="exclusionsLoading[r.id]" class="text-xs text-neutral-400">加载中...</div>
-                <div v-else-if="exclusionsError[r.id]" class="text-xs text-red-400">
+              <div v-if="exclusionPanels[r.id]" class="mt-2 rounded bg-surface-2/50 p-2">
+                <div v-if="exclusionsLoading[r.id]" class="text-xs text-ink-2">加载中...</div>
+                <div v-else-if="exclusionsError[r.id]" class="text-xs text-danger-text">
                   {{ exclusionsError[r.id] }}
                 </div>
                 <template v-else>
                   <ul v-if="(exclusions[r.id] || []).length"
-                      class="divide-y divide-neutral-800 text-xs">
+                      class="divide-y divide-line text-xs">
                     <li v-for="e in exclusions[r.id]" :key="e.id"
                         class="flex items-center gap-2 py-1.5">
                       <span class="min-w-0 flex-1 truncate font-mono" :title="e.relative_path">
                         {{ e.relative_path }}
                       </span>
-                      <span v-if="e.reason" class="truncate text-neutral-500" :title="e.reason">
+                      <span v-if="e.reason" class="truncate text-ink-muted" :title="e.reason">
                         {{ e.reason }}
                       </span>
-                      <span class="shrink-0 text-neutral-500">{{ e.excluded_by_username || "—" }}</span>
-                      <span class="shrink-0 text-neutral-500">排除于 {{ formatDateTime(e.excluded_at) }}</span>
+                      <span class="shrink-0 text-ink-muted">{{ e.excluded_by_username || "—" }}</span>
+                      <span class="shrink-0 text-ink-muted">排除于 {{ formatDateTime(e.excluded_at) }}</span>
                       <button @click="removeExclusion(r, e)"
-                              class="shrink-0 rounded bg-neutral-700 px-2 py-0.5 hover:bg-neutral-600">
+                              class="shrink-0 rounded bg-surface-3 px-2 py-0.5 hover:bg-surface-4">
                         解除
                       </button>
                     </li>
                   </ul>
-                  <div v-else class="py-1 text-xs text-neutral-500">尚未排除任何目录</div>
+                  <div v-else class="py-1 text-xs text-ink-muted">尚未排除任何目录</div>
                   <button @click="openExclusionChooser(r)"
-                          class="mt-2 rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                          class="mt-2 rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
                     + 添加排除目录
                   </button>
                 </template>
@@ -129,7 +129,7 @@
 
             <!-- Dashed add card -->
             <button @click="showChooser = true"
-                    class="flex items-center justify-center rounded-lg border-2 border-dashed border-neutral-700 p-6 text-neutral-500 hover:border-neutral-500 hover:text-neutral-300">
+                    class="flex items-center justify-center rounded-lg border-2 border-dashed border-line-strong p-6 text-ink-muted hover:border-line-strong hover:text-ink">
               <span class="text-2xl">+</span>
             </button>
           </div>
@@ -419,10 +419,10 @@ function scanStatusLabel(status: string): string {
 
 function scanStatusClass(status: string): string {
   switch (status) {
-    case "running": return "text-blue-400"
-    case "queued":  return "text-yellow-400"
-    case "idle":    return "text-green-400"
-    default:        return "text-neutral-400"
+    case "running": return "text-primary-text"
+    case "queued":  return "text-warning"
+    case "idle":    return "text-success"
+    default:        return "text-ink-2"
   }
 }
 

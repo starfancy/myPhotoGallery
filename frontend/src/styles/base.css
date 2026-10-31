@@ -3,6 +3,7 @@
  * 这样 UnoCSS 的 /60 /95 透明度修饰符仍可用。
  * 深色值 = P7 之前的既有调色板，保证深色外观零变化。
  * ImageLightbox/PhotoSwipe 不消费这些变量（其样式为常暗字面量）。
+ * 灯箱（ImageLightbox/PhotoSwipe）刻意不接入令牌：其界面常暗且挂在 body 层。
  */
 :root {
   --color-base: 250 250 250;

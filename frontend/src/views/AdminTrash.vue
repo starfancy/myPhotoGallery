@@ -1,14 +1,14 @@
 <template>
   <div>
     <AppHeader>
-      <template #title><span class="text-neutral-400">管理 · 回收站</span></template>
+      <template #title><span class="text-ink-2">管理 · 回收站</span></template>
     </AppHeader>
     <main class="p-4 space-y-4">
       <!-- Filter + bulk toolbar -->
       <div class="flex flex-wrap items-center gap-3">
-        <label class="text-sm text-neutral-400">图库</label>
+        <label class="text-sm text-ink-2">图库</label>
         <select v-model="filterGalleryId"
-                class="rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-100"
+                class="rounded bg-surface-2 px-2 py-1 text-sm text-ink"
                 @change="reload">
           <option :value="null">全部</option>
           <option v-for="g in galleries" :key="g.id" :value="g.id">{{ g.name }}</option>
@@ -16,38 +16,38 @@
 
         <div class="flex-1"></div>
 
-        <span v-if="selectedIds.size > 0" class="text-sm text-neutral-400">
+        <span v-if="selectedIds.size > 0" class="text-sm text-ink-2">
           已选 {{ selectedIds.size }} 项
         </span>
         <button type="button"
                 :disabled="selectedIds.size === 0 || restoring"
-                class="rounded bg-blue-600 px-3 py-1.5 text-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
                 @click="doBatchRestore">
           {{ restoring ? "恢复中..." : "恢复选中" }}
         </button>
         <button type="button"
                 :disabled="selectedIds.size === 0 || deleting"
-                class="rounded bg-red-700 px-3 py-1.5 text-sm hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded bg-danger px-3 py-1.5 text-sm text-white hover:bg-danger-hover disabled:cursor-not-allowed disabled:opacity-40"
                 @click="doBatchDelete">
           {{ deleting ? "删除中..." : "删除选中" }}
         </button>
         <button type="button"
                 :disabled="entries.length === 0 || purging"
-                class="rounded bg-red-900 px-3 py-1.5 text-sm hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+                class="rounded bg-danger px-3 py-1.5 text-sm text-white hover:bg-danger-hover disabled:cursor-not-allowed disabled:opacity-40"
                 @click="doPurge">
           {{ purging ? "清空中..." : "清空所有" }}
         </button>
       </div>
 
-      <div v-if="loading" class="text-neutral-400">加载中...</div>
-      <div v-else-if="error" class="text-red-400">{{ error }}</div>
+      <div v-if="loading" class="text-ink-2">加载中...</div>
+      <div v-else-if="error" class="text-danger-text">{{ error }}</div>
       <template v-else>
-        <p v-if="entries.length === 0" class="text-sm text-neutral-500">
+        <p v-if="entries.length === 0" class="text-sm text-ink-muted">
           回收站为空
         </p>
-        <div v-else class="overflow-x-auto rounded-lg bg-neutral-900">
+        <div v-else class="overflow-x-auto rounded-lg bg-surface">
           <table class="w-full min-w-[720px] text-left text-sm">
-            <thead class="border-b border-neutral-800 text-xs text-neutral-500">
+            <thead class="border-b border-line text-xs text-ink-muted">
               <tr>
                 <th class="w-10 px-3 py-2">
                   <input type="checkbox" :checked="allSelected"
@@ -62,8 +62,8 @@
                 <th class="w-40 px-3 py-2">操作</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-neutral-800">
-              <tr v-for="e in entries" :key="e.id" class="hover:bg-neutral-800/60">
+            <tbody class="divide-y divide-line">
+              <tr v-for="e in entries" :key="e.id" class="hover:bg-surface-2/60">
                 <td class="px-3 py-2">
                   <input type="checkbox"
                          :checked="selectedIds.has(e.id)"
@@ -78,35 +78,35 @@
                          loading="lazy"
                          @error="thumbFailed.add(e.id)"
                          class="h-full w-full object-cover" />
-                    <span v-else class="text-neutral-500 text-[10px] text-center px-1">
+                    <span v-else class="text-ink-muted text-[10px] text-center px-1">
                       无预览
                     </span>
                   </div>
                 </td>
                 <td class="px-3 py-2">
                   <div class="font-medium">{{ basename(e.original_relative_path) }}</div>
-                  <div class="text-xs text-neutral-500 truncate max-w-md"
+                  <div class="text-xs text-ink-muted truncate max-w-md"
                        :title="e.original_relative_path">
                     {{ e.original_relative_path }}
                   </div>
                 </td>
-                <td class="px-3 py-2 text-xs text-neutral-400">
+                <td class="px-3 py-2 text-xs text-ink-2">
                   {{ galleryName(e.gallery_id) }}
                 </td>
-                <td class="px-3 py-2 text-xs text-neutral-500">
+                <td class="px-3 py-2 text-xs text-ink-muted">
                   {{ formatTs(e.deleted_at) }}
                 </td>
-                <td class="px-3 py-2 text-xs text-neutral-500">
+                <td class="px-3 py-2 text-xs text-ink-muted">
                   {{ formatPurgeAfter(e.purge_after) }}
                 </td>
                 <td class="px-3 py-2 space-x-2">
                   <button type="button"
-                          class="rounded bg-blue-600 px-2 py-1 text-xs hover:bg-blue-500"
+                          class="rounded bg-primary px-2 py-1 text-xs text-white hover:bg-primary-hover"
                           @click="doRestore(e.id)">
                     恢复
                   </button>
                   <button type="button"
-                          class="rounded bg-red-800 px-2 py-1 text-xs hover:bg-red-700"
+                          class="rounded bg-danger px-2 py-1 text-xs text-white hover:bg-danger-hover"
                           @click="doDeleteOne(e.id)">
                     立即删除
                   </button>
@@ -118,7 +118,7 @@
 
         <div v-if="nextCursor !== null" class="text-center">
           <button type="button"
-                  class="rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700"
+                  class="rounded bg-surface-2 px-3 py-1.5 text-sm hover:bg-surface-3"
                   :disabled="loadingMore"
                   @click="loadMore">
             {{ loadingMore ? "加载中..." : "加载更多" }}
@@ -372,7 +372,7 @@ onMounted(async () => {
   width: 64px;
   height: 64px;
   border-radius: 4px;
-  background: rgb(23 23 23);
+  background: rgb(var(--color-surface));
   overflow: hidden;
   display: flex;
   align-items: center;
