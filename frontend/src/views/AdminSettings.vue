@@ -103,6 +103,25 @@
           </p>
         </section>
 
+        <!-- 审计日志 -->
+        <section class="rounded-lg bg-neutral-900 p-4">
+          <h2 class="mb-3 text-sm font-medium text-neutral-400">审计日志</h2>
+          <label for="audit-retention" class="block text-xs text-neutral-500">
+            审计日志保留天数
+          </label>
+          <select id="audit-retention" v-model.number="form.audit_retention_days"
+                  class="mt-1 rounded bg-neutral-800 px-2 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <option :value="30">30 天</option>
+            <option :value="90">90 天</option>
+            <option :value="180">180 天</option>
+            <option :value="365">365 天</option>
+            <option :value="0">永不清理</option>
+          </select>
+          <p class="mt-2 text-xs text-neutral-500">
+            超期记录在服务启动时及每日定时清理；保存后立即生效。
+          </p>
+        </section>
+
         <div class="flex items-center gap-3">
           <button @click="save" :disabled="!dirty || saving"
                   class="rounded bg-blue-600 px-4 py-1.5 text-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
@@ -126,6 +145,7 @@ interface SettingsForm {
   trusted_proxies: string[]
   session_hours: number
   download_batch_limit: number
+  audit_retention_days: number
 }
 
 const RETENTION_OPTIONS = [
@@ -145,6 +165,7 @@ const form = ref<SettingsForm>({
   trusted_proxies: [],
   session_hours: 8,
   download_batch_limit: 100,
+  audit_retention_days: 180,
 })
 const loadedJson = ref("")
 
@@ -157,6 +178,7 @@ function normalized(): SettingsForm {
     trusted_proxies: form.value.trusted_proxies.map((s) => s.trim()).filter(Boolean),
     session_hours: form.value.session_hours,
     download_batch_limit: form.value.download_batch_limit,
+    audit_retention_days: form.value.audit_retention_days,
   }
 }
 
@@ -193,6 +215,7 @@ async function load() {
       trusted_proxies: [...data.trusted_proxies],
       session_hours: data.session_hours,
       download_batch_limit: data.download_batch_limit,
+      audit_retention_days: data.audit_retention_days,
     }
     loadedJson.value = JSON.stringify(normalized())
   } catch (err) {
@@ -227,6 +250,7 @@ async function save() {
       trusted_proxies: [...data.trusted_proxies],
       session_hours: data.session_hours,
       download_batch_limit: data.download_batch_limit,
+      audit_retention_days: data.audit_retention_days,
     }
     loadedJson.value = JSON.stringify(normalized())
     savedOk.value = true
