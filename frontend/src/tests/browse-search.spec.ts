@@ -7,6 +7,7 @@ import BrowseView from "../views/BrowseView.vue"
 import SearchResults from "../components/SearchResults.vue"
 import JustifiedGrid from "../components/JustifiedGrid.vue"
 import { useAuthStore } from "../stores/auth"
+import { useBrowseStore } from "../stores/browse"
 
 beforeAll(() => {
   vi.stubGlobal("ResizeObserver", class {
@@ -132,7 +133,12 @@ describe("BrowseView 搜索态", () => {
 
     lb.vm.$emit("viewInFolder", IMG_A)
     await flushPromises()
-    expect(router.currentRoute.value.path).toBe("/galleries/1/r/1/2024/旅行")
+    // 目录按段百分号编码（与 SearchResults 文件夹链接一致）；params 解码后仍为原目录
+    expect(router.currentRoute.value.path).toBe(
+      "/galleries/1/r/1/2024/%E6%97%85%E8%A1%8C",
+    )
+    const rawPath = router.currentRoute.value.params.path
+    expect(Array.isArray(rawPath) ? rawPath.join("/") : String(rawPath ?? "")).toBe("2024/旅行")
     expect(router.currentRoute.value.query.q).toBeUndefined()
   })
 
@@ -226,6 +232,28 @@ describe("BrowseView 搜索态", () => {
       .filter((c) => c[0].includes("/search")).length
     expect(searchesAfter).toBe(1)
     expect(calls.filter((c) => c[0].includes("/images?")).length).toBe(0)
+  })
+
+  it("搜索态单张删除后清空普通浏览缓存（防幽灵卡片 / 批量下载 404）", async () => {
+    const { w } = await mountAt("/galleries/1/r/1?q=%E6%97%85%E8%A1%8C")
+    // 制造非空缓存，证明删除路径真的清了，而不是本来就空
+    const store = useBrowseStore()
+    store.cache.set("1|1|old|name_asc", {
+      pages: new Map([[1, [{ id: 99, filename: "ghost.jpg" }]]]),
+      total: 1, scrollY: 0, keyString: "1|1|old|name_asc", atime: 0,
+    } as never)
+    const clearSpy = vi.spyOn(store, "clearAll")
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true))
+
+    const menuBtn = w.findAll('button[aria-label^="更多操作"]')[0]
+    await menuBtn.trigger("click")
+    await flushPromises()
+    await w.get(".lb-cell-menu-item").trigger("click")
+    await flushPromises()
+    await flushPromises()
+
+    expect(clearSpy).toHaveBeenCalledTimes(1)
+    expect(store.cache.size).toBe(0)
   })
 
   it("仅切换整个 root 范围不触发普通 /images 请求", async () => {

@@ -202,7 +202,6 @@ async def create_download_batch(
 
 _SENTINEL = object()
 _ERROR = object()
-_ABORTED = object()  # raised out of the zip writer after client disconnect
 _CHUNK_MAX = 1024 * 1024
 _QUEUE_DEPTH = 8
 _PUT_TIMEOUT = 0.5

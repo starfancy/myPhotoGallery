@@ -71,6 +71,7 @@ import MasonryGrid from "./MasonryGrid.vue"
 import type { GridLayout } from "./GridLayoutSwitch.vue"
 import { apiGet, errorMessage } from "../api"
 import type { ImageRow } from "../stores/browse"
+import { encodePathSegments } from "../utils/path"
 
 interface SearchFolder {
   name: string
@@ -146,8 +147,7 @@ function dirOf(it: ImageRow): string | null {
 const badgeFor = dirOf
 
 function folderLink(rel: string) {
-  const enc = rel.split("/").map((seg) => encodeURIComponent(seg)).join("/")
-  return `/galleries/${props.gid}/r/${props.rid}/${enc}`
+  return `/galleries/${props.gid}/r/${props.rid}/${encodePathSegments(rel)}`
 }
 
 function searchParams(cursor?: string | null) {

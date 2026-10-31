@@ -105,6 +105,11 @@ export const useBrowseStore = defineStore("browse", () => {
     cache.value.delete(keyOf(k))
   }
 
+  /** 清空全部文件夹缓存（搜索态删除后调用：删除项可能位于任意文件夹）。 */
+  function clearAll() {
+    cache.value.clear()
+  }
+
   function saveScroll(k: BrowseKey, y: number) {
     const e = get(k)
     if (e) {
@@ -113,5 +118,5 @@ export const useBrowseStore = defineStore("browse", () => {
     }
   }
 
-  return { cache, get, loadPage, invalidate, saveScroll }
+  return { cache, get, loadPage, invalidate, clearAll, saveScroll }
 })

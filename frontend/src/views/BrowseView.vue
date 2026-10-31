@@ -146,6 +146,7 @@ import { apiGet, apiDelete, apiPost, HttpError, errorMessage } from "../api"
 import { useBrowseStore, PAGE_SIZE, type BrowseKey, type ImageRow } from "../stores/browse"
 import { useAuthStore } from "../stores/auth"
 import { useToastStore } from "../stores/toast"
+import { encodePathSegments } from "../utils/path"
 
 const route = useRoute()
 const router = useRouter()
@@ -237,7 +238,7 @@ function searchLocation(it: ImageRow): string {
 function onViewInFolder(it: ImageRow) {
   const dir = searchLocation(it)
   router.push(
-    `/galleries/${gid.value}/r/${rid.value}${dir ? `/${dir}` : ""}`,
+    `/galleries/${gid.value}/r/${rid.value}${dir ? `/${encodePathSegments(dir)}` : ""}`,
   )
 }
 
@@ -263,6 +264,8 @@ async function onSearchImageDeleted(id: number) {
   const s = new Set(selectedIds.value)
   s.delete(id)
   selectedIds.value = s
+  // 删除项可能位于任意文件夹：普通浏览缓存无 TTL，整体清空，避免幽灵卡片
+  browse.clearAll()
   await resultsRef.value?.reload()
 }
 
@@ -406,7 +409,8 @@ async function onBatchDelete() {
     )
     if (r.deleted.length > 0) {
       if (searchQ.value) {
-        // 搜索态：刷新可见结果（删除项可能跨目录），隐藏的普通页不动
+        // 搜索态：刷新可见结果（删除项可能跨目录）；清空普通浏览缓存防幽灵卡片
+        browse.clearAll()
         await resultsRef.value?.reload()
       } else {
         await reloadAfterChange()
