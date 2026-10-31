@@ -54,12 +54,15 @@ export function isUnauthenticated(err: unknown): boolean {
   return err instanceof HttpError && err.status === 401
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: string, path: string, body?: unknown, signal?: AbortSignal,
+): Promise<T> {
   const init: RequestInit = {
     method,
     credentials: "include",
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   }
   let res: Response
   try {
@@ -88,7 +91,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T
 }
 
-export const apiGet = <T>(p: string) => request<T>("GET", p)
+export const apiGet = <T>(p: string, signal?: AbortSignal) =>
+  request<T>("GET", p, undefined, signal)
 export const apiPost = <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {})
 export const apiPatch = <T>(p: string, body?: unknown) => request<T>("PATCH", p, body ?? {})
 export const apiDelete = <T>(p: string) => request<T>("DELETE", p)

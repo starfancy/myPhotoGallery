@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { createMemoryHistory, createRouter } from "vue-router"
 import { createPinia, setActivePinia } from "pinia"
 import AdminAudit from "../views/AdminAudit.vue"
+import { useToastStore } from "../stores/toast"
 
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -39,6 +40,47 @@ async function mountPage(auditBody: unknown = { entries: ENTRIES, next_cursor: "
 }
 
 beforeEach(() => { setActivePinia(createPinia()); vi.unstubAllGlobals() })
+afterEach(() => {
+  // jsdom 无 createObjectURL（测试中直接赋值）；click 走 spy，统一还原
+  delete (URL as Partial<typeof URL>).createObjectURL
+  delete (URL as Partial<typeof URL>).revokeObjectURL
+  vi.restoreAllMocks()
+})
+
+// 导出测试专用挂载：组件与断言共享同一个 pinia（toast 断言需要）
+async function mountForExport(auditHandler: (u: URL) => unknown) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+    const raw = typeof input === "string" ? input : (input as Request).url
+    if (raw.startsWith("/api/admin/users")) return response([{ id: 1, username: "alice" }])
+    if (raw.startsWith("/api/admin/audit")) return response(auditHandler(new URL(raw, "http://x")))
+    return response({ error: { code: "not_found", message: "x" } }, 404)
+  })
+  vi.stubGlobal("fetch", fetchFn)
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: "/admin/audit", component: AdminAudit }],
+  })
+  await router.push("/admin/audit")
+  const w = mount(AdminAudit, { global: { plugins: [pinia, router] } })
+  await flushPromises()
+  return { w, fetchFn, pinia }
+}
+
+const exportRow = (id: number) => ({
+  id, ts: now, actor_user_id: 1, actor_ip: "127.0.0.1",
+  action: "image_delete", target: `image:${id}`, detail: null,
+})
+
+function stubDownload() {
+  const createObjectURL = vi.fn(() => "blob:mock")
+  const revokeObjectURL = vi.fn()
+  URL.createObjectURL = createObjectURL
+  URL.revokeObjectURL = revokeObjectURL
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+  return { createObjectURL, revokeObjectURL }
+}
 
 describe("AdminAudit", () => {
   it("renders rows with labels, mapped username, 匿名 for login_fail and 系统 for scans", async () => {
@@ -252,5 +294,55 @@ describe("AdminAudit", () => {
     await flushPromises()
     expect(w.text()).not.toContain("服务器内部错误")
     expect(hasMoreBtn()).toBe(true)
+  })
+
+  it("CSV export pages at limit=500 and triggers one browser download", async () => {
+    const { createObjectURL } = stubDownload()
+    let exportPage = 0
+    const { w, fetchFn } = await mountForExport((u) => {
+      if (u.searchParams.get("limit") === "500") {
+        exportPage += 1
+        if (exportPage === 1) return { entries: [exportRow(101), exportRow(102)], next_cursor: "exp1" }
+        return { entries: [exportRow(103)], next_cursor: null }
+      }
+      // 首屏浏览页（limit=100）：有数据，导出按钮可用
+      return { entries: [ENTRIES[0]], next_cursor: null }
+    })
+    await w.findAll("button").find((b) => b.text().includes("导出 CSV"))!.trigger("click")
+    await flushPromises()
+
+    const exportUrls = (fetchFn.mock.calls as Array<[string]>)
+      .map((c) => c[0])
+      .filter((u) => u.startsWith("/api/admin/audit") &&
+        new URL(u, "http://x").searchParams.get("limit") === "500")
+    expect(exportUrls).toHaveLength(2)
+    expect(new URL(exportUrls[0], "http://x").searchParams.get("cursor")).toBeNull()
+    expect(new URL(exportUrls[1], "http://x").searchParams.get("cursor")).toBe("exp1")
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+  })
+
+  it("CSV export over 10,000 rows shows limit toast and never downloads", async () => {
+    const { createObjectURL } = stubDownload()
+    let exportPages = 0
+    const { w, pinia } = await mountForExport((u) => {
+      if (u.searchParams.get("limit") === "500") {
+        exportPages += 1
+        return {
+          entries: Array.from({ length: 500 }, (_, i) => exportRow((exportPages - 1) * 500 + i)),
+          next_cursor: `exp${exportPages}`, // 永远有下一页
+        }
+      }
+      return { entries: [ENTRIES[0]], next_cursor: null }
+    })
+    await w.findAll("button").find((b) => b.text().includes("导出 CSV"))!.trigger("click")
+    await flushPromises()
+
+    // 500 * 20 = 10,000：恰好拉满 20 页后因仍有下一页中止，不落盘半截文件
+    expect(exportPages).toBe(20)
+    const toast = useToastStore(pinia)
+    expect(toast.items.some((t) => t.text.includes("最多导出 10,000 条"))).toBe(true)
+    expect(createObjectURL).not.toHaveBeenCalled()
+    // 按钮恢复可点（导出态复位）
+    expect(w.findAll("button").some((b) => b.text().includes("导出 CSV"))).toBe(true)
   })
 })

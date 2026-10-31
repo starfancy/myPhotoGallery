@@ -23,9 +23,12 @@
         <input id="audit-to" type="date" v-model="filterTo"
                class="rounded bg-surface-2 px-2 py-1 text-sm text-ink" @change="reload">
 
-        <button type="button" ref="exportBtn" disabled
-                class="rounded bg-surface-2 px-3 py-1.5 text-sm text-ink-muted">
-          导出 CSV
+        <button type="button"
+                class="rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                :disabled="loading || !!error || entries.length === 0 || exporting"
+                @click="onExportClick">
+          <template v-if="!exporting">导出 CSV</template>
+          <template v-else>导出中…（已拉取 {{ exportCount }} 条）<span class="ml-1 underline">取消</span></template>
         </button>
       </div>
 
@@ -102,6 +105,10 @@ import AppHeader from "../components/AppHeader.vue"
 import { apiGet, errorMessage } from "../api"
 import { formatDateTime } from "../utils/datetime"
 import { AUDIT_ACTION_LABELS, auditActionLabel } from "../utils/audit"
+import {
+  auditCsvFilename, collectAuditCsv, AuditExportAborted, AuditExportLimitError,
+} from "../utils/csv"
+import { useToastStore } from "../stores/toast"
 
 interface AuditEntry {
   id: number
@@ -217,8 +224,45 @@ async function loadUsers() {
   }
 }
 
-// Task 8 接入导出时替换占位按钮；先暴露给测试/后续 task 的锚点。
-const exportBtn = ref<HTMLElement | null>(null)
+const toast = useToastStore()
+const exporting = ref(false)
+const exportCount = ref(0)
+let exportAbort: AbortController | null = null
+
+async function onExportClick() {
+  if (exporting.value) { exportAbort?.abort(); return }
+  exportAbort = new AbortController()
+  exporting.value = true
+  exportCount.value = 0
+  try {
+    const csv = await collectAuditCsv(
+      (cursor, signal) =>
+        apiGet<{ entries: AuditEntry[]; next_cursor: string | null }>(
+          `/api/admin/audit${buildQuery(cursor, 500)}`, signal,
+        ),
+      { signal: exportAbort.signal, onProgress: (n) => (exportCount.value = n) },
+    )
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = auditCsvFilename()
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    if (err instanceof AuditExportAborted) {
+      // 用户主动取消，静默
+    } else if (err instanceof AuditExportLimitError) {
+      toast.push("error", "最多导出 10,000 条，请收窄时间范围后重试")
+    } else {
+      toast.push("error", "导出失败")
+    }
+  } finally {
+    exporting.value = false
+  }
+}
 
 onMounted(async () => {
   await Promise.all([loadUsers(), reload()])
