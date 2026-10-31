@@ -287,7 +287,16 @@ def camera_display_name(make: str | None, model: str | None) -> str | None:
     if not cleaned:
         return None
     brand = normalize_make(make, cleaned)
-    rest = _prettify_model(_strip_vendor_prefix(cleaned))
+    rest = _strip_vendor_prefix(cleaned)
+    # 未登记厂商（vivo/Xiaomi 等）不在 _VENDOR_PREFIXES 里，用原始 Make 再剥一次，
+    # 否则 'vivo' + 'vivo X100 Ultra' 会拼成 'vivo vivo X100 Ultra'
+    if rest == cleaned and isinstance(make, str):
+        raw_make = make.strip().strip("\x00").strip()
+        if raw_make and cleaned.upper().startswith(raw_make.upper()):
+            tail = cleaned[len(raw_make):].lstrip(" -\t")
+            if tail:
+                rest = tail
+    rest = _prettify_model(rest)
     if brand:
         return f"{brand} {rest}" if rest else brand
     return rest or None
@@ -504,8 +513,8 @@ def test_aggregate_basic_counts_and_equiv_focal():
         _row("NIKON CORPORATION", "NIKON D7000", focal=24, fnumber=5.595),
         # 全幅：24mm -> 广角
         _row("NIKON CORPORATION", "NIKON D800", focal=24, fnumber=2.8),
-        # 手机无机型系数 -> 焦段未知
-        _row("vivo", "vivo X100 Ultra", focal=5.2, fnumber=1.8),
+        # 手机无机型系数 -> 焦段未知；不给 FNumber -> 光圈也未知
+        _row("vivo", "vivo X100 Ultra", focal=5.2),
     ]
     out = aggregate_rows(rows)
     assert out["total"] == 3
@@ -885,7 +894,8 @@ def test_analytics_endpoint_seeded_counts(app_client):
                     root_id=r.id, folder_id=f.id, relative_path=f"a{i}.jpg",
                     filename=f"a{i}.jpg", ext="jpg", size_bytes=1, sha1=f"x{i}",
                     mtime=100 + i, width=10, height=10,
-                    taken_at=1_736_942_400 + i * 86400, is_raw=0,
+                    # 间隔 31 天 → 2025-01-15 / 02-15 / 03-18，跨 3 个月
+                    taken_at=1_736_942_400 + i * 31 * 86400, is_raw=0,
                     indexed_at=1, exif_json=json.dumps(
                         {"Make": make, "Model": model, "FocalLength": focal,
                          "FNumber": 5.6}),
@@ -1124,8 +1134,8 @@ describe("DonutChart", () => {
     expect(arcs.length).toBe(4)
     const C = 2 * Math.PI * 40
     const drawn = arcs.map((c) => Number(c.attributes("stroke-dasharray")!.split(" ")[0]))
-    // 4 段各 25%，段间 2px 间隔 ×3
-    expect(drawn.reduce((a, b) => a + b, 0)).toBeCloseTo(C - 2 * 3, 0)
+    // 4 段各 25%，实现对每段扣 2px 间隔（首尾相邻，共 4 个间隔）→ C-8
+    expect(drawn.reduce((a, b) => a + b, 0)).toBeCloseTo(C - 2 * 4, 0)
   })
 
   it("skips zero-count segments but keeps them in the legend (dimmed)", () => {
