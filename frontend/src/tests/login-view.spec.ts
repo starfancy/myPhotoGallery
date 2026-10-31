@@ -63,7 +63,7 @@ describe("LoginView (P4 access_scope)", () => {
     expect(html).toMatch(/warning/)
   })
 
-  it("shows login_locked banner (yellow) on 423", async () => {
+  it("shows login_locked banner (danger red) on 423", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       mockFetchOnce(
         { error: { code: "login_locked", message: "too many" } },
@@ -80,7 +80,7 @@ describe("LoginView (P4 access_scope)", () => {
 
     const html = w.html()
     expect(html).toContain("登录尝试过多")
-    expect(html).toMatch(/warning/)
+    expect(html).toMatch(/danger/)
   })
 
   it("shows invalid_credentials banner (red) on 401", async () => {

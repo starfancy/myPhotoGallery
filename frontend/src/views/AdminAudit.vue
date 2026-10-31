@@ -110,7 +110,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiGet, errorMessage } from "../api"
 import { formatDateTime } from "../utils/datetime"
@@ -239,6 +239,11 @@ const toast = useToastStore()
 const exporting = ref(false)
 const exportCount = ref(0)
 let exportAbort: AbortController | null = null
+
+// 导航离开/组件卸载时中止在途导出：catch 对 abort 静默，Blob 与锚点下载均不会发生。
+onBeforeUnmount(() => {
+  if (exporting.value) exportAbort?.abort()
+})
 
 // 非导出态：loading / 错误 / 空数据时禁用；导出态恒可点（按钮即取消入口）。
 const exportDisabled = computed(() =>

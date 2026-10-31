@@ -39,7 +39,12 @@ export function toIsoLocal(unixSec: number): string {
 }
 
 function esc(v: unknown): string {
-  const s = v === null || v === undefined ? "" : String(v)
+  let s = v === null || v === undefined ? "" : String(v)
+  // OWASP CSV/电子表格公式注入：前导空格或 BOM（U+FEFF）之后以 = + - @ Tab CR
+  // 开头的单元格，即便做了 RFC4180 引号转义也会被 Excel/LibreOffice 当公式求值
+  // （fs_browse 的 target 是原始文件系统路径，可能以这些字符开头）。
+  // 统一前置单个直单引号——电子表格的文本标记，单元格内不显示；之后再走 RFC4180。
+  if (/^[ \uFEFF]*[=+\-@\t\r]/.test(s)) s = `'${s}`
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 

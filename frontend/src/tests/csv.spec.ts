@@ -19,6 +19,43 @@ describe("auditRowsToCsv", () => {
     expect(csv).toContain('"a,b"')
     expect(csv).toContain('"he said ""hi""\nx2"')
   })
+  it("neutralizes spreadsheet formula triggers with a leading apostrophe", () => {
+    // OWASP CSV 注入：= + - @ Tab CR 开头（含前导空格/BOM）的单元格会被
+    // Excel/LibreOffice 当公式求值；RFC4180 引号挡不住，必须加单引号文本前缀。
+    const formulaRows = [
+      { target: '=HYPERLINK("http://x","y")', detail: null },
+      { target: "+1+1", detail: null },
+      { target: "@SUM", detail: null },
+      { target: "-2+2", detail: null },
+      { target: "\tcmd", detail: null },
+      { target: "  =evil", detail: null },
+      { target: "﻿@sum", detail: null },
+    ].map((o) => row(o))
+    const csv = auditRowsToCsv(formulaRows)
+    // 单引号前缀 + 原有 RFC4180 引号组合（引号被双写、逗号被引号包住）
+    expect(csv).toContain(`"'=HYPERLINK(""http://x"",""y"")"`)
+    expect(csv).toContain(",'+1+1,")
+    expect(csv).toContain(",'@SUM,")
+    expect(csv).toContain(",'-2+2,")
+    expect(csv).toContain(",'\tcmd,")
+    expect(csv).toContain("'  =evil")
+    expect(csv).toContain("'﻿@sum")
+    // 普通文本列绝不能被加前缀
+    expect(csv).not.toContain("'image:9")
+  })
+
+  it("leaves normal free text unchanged and composes apostrophe with RFC4180 quoting", () => {
+    const csv = auditRowsToCsv([
+      row({ target: "image:9", detail: "path=a/b" }),
+      row({ target: "127.0.0.1", detail: "普通中文说明" }),
+      // 同时含公式触发符与逗号：先加单引号，再整体 RFC4180 引用
+      row({ target: "=1,2", detail: null }),
+    ])
+    expect(csv).toContain(",image_delete,image:9,path=a/b\r\n")
+    expect(csv).toContain(",image_delete,127.0.0.1,普通中文说明\r\n")
+    expect(csv).toContain(`"'=1,2"`)
+  })
+
   it("renders null actor as empty cell and fixed ISO local time with offset", () => {
     const csv = auditRowsToCsv([row({ actor_user_id: null })])
     expect(csv).toMatch(/,127\.0\.0\.1,/)  // actor 空单元格：",,127.0.0.1,"

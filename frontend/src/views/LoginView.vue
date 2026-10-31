@@ -47,7 +47,7 @@ const submitting = ref(false)
 
 const bannerClass = computed(() => {
   if (errorKind.value === "lan") return "bg-warning-soft/40 text-warning border border-warning-line/60"
-  if (errorKind.value === "locked") return "bg-warning-soft/40 text-warning border border-warning-line/60"
+  if (errorKind.value === "locked") return "bg-danger-soft text-danger-text border border-danger-line/60"
   return "bg-danger-soft/40 text-danger-text border border-danger-line/60"
 })
 
