@@ -10,7 +10,9 @@
                     cx="60" cy="60" :r="RADIUS" fill="none"
                     :stroke="seg.color" :stroke-width="STROKE"
                     :stroke-dasharray="seg.dash"
-                    :stroke-dashoffset="seg.offset" />
+                    :stroke-dashoffset="seg.offset">
+              <title>{{ seg.name }}：{{ seg.count.toLocaleString() }} 张 {{ pct(seg.count) }}%</title>
+            </circle>
           </svg>
           <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             <span class="text-xl font-medium leading-none tabular-nums">{{ total.toLocaleString() }}</span>
@@ -32,7 +34,7 @@
       <table class="sr-only">
         <caption>{{ title }}</caption>
         <thead>
-          <tr><th scope="col">分类</th><th scope="col">张数</th><th scope="col">占比</th></tr>
+          <tr><th scope="col">名称</th><th scope="col">张数</th><th scope="col">占比</th></tr>
         </thead>
         <tbody>
           <tr v-for="seg in segments" :key="seg.key">

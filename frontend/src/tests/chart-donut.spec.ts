@@ -24,6 +24,11 @@ describe("DonutChart", () => {
     const drawn = arcs.map((c) => Number(c.attributes("stroke-dasharray")!.split(" ")[0]))
     // 4 段各 25%，实现对每段扣 2px 间隔（首尾相邻，共 4 个间隔）→ C-8
     expect(drawn.reduce((a, b) => a + b, 0)).toBeCloseTo(C - 2 * 4, 0)
+    // spec §4.1：每段弧带原生 <title> 提示（名称 + 张数 + 占比），背景轨无 title
+    const titles = w.findAll("svg circle title")
+    expect(titles.length).toBe(4)
+    expect(titles[0].text()).toContain(SEGS[0].name)
+    expect(titles[0].text()).toContain("%")
   })
 
   it("skips zero-count segments but keeps them in the legend (dimmed)", () => {
