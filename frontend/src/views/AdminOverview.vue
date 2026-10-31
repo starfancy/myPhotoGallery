@@ -11,47 +11,47 @@
   -->
   <div>
     <AppHeader>
-      <template #title><span class="text-neutral-400">管理</span></template>
+      <template #title><span class="text-ink-2">管理</span></template>
     </AppHeader>
-    <main class="p-4 space-y-6">
-      <div v-if="loading" class="text-neutral-400">加载中...</div>
-      <div v-else-if="error" class="text-red-400">{{ error }}</div>
+    <main id="main-content" class="p-4 space-y-6">
+      <div v-if="loading" class="text-ink-2">加载中...</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <template v-else-if="data">
         <!-- Stats cards -->
         <section class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div class="rounded-lg bg-neutral-900 p-4">
-            <div class="text-xs text-neutral-500">图片</div>
+          <div class="rounded-lg bg-surface p-4">
+            <div class="text-xs text-ink-2">图片</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.images.toLocaleString() }}</div>
           </div>
-          <div class="rounded-lg bg-neutral-900 p-4">
-            <div class="text-xs text-neutral-500">图库</div>
+          <div class="rounded-lg bg-surface p-4">
+            <div class="text-xs text-ink-2">图库</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.galleries.toLocaleString() }}</div>
           </div>
-          <div class="rounded-lg bg-neutral-900 p-4">
-            <div class="text-xs text-neutral-500">根目录</div>
+          <div class="rounded-lg bg-surface p-4">
+            <div class="text-xs text-ink-2">根目录</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.roots.toLocaleString() }}</div>
           </div>
           <!-- P4: 用户卡片 → 链接到 /admin/users -->
           <router-link to="/admin/users"
-            class="rounded-lg bg-neutral-900 p-4 transition-colors hover:bg-neutral-800"
+            class="rounded-lg bg-surface p-4 transition-colors hover:bg-surface-2"
             data-testid="users-stat-card">
-            <div class="text-xs text-neutral-500">用户</div>
+            <div class="text-xs text-ink-2">用户</div>
             <div class="mt-1 text-2xl font-medium">{{ data.stats.users.toLocaleString() }}</div>
           </router-link>
         </section>
 
         <!-- Scan status list -->
         <section>
-          <h2 class="mb-2 text-sm font-medium text-neutral-400">扫描状态</h2>
-          <div v-if="data.scan_statuses.length === 0" class="text-sm text-neutral-500">
+          <h2 class="mb-2 text-sm font-medium text-ink-2">扫描状态</h2>
+          <div v-if="data.scan_statuses.length === 0" class="text-sm text-ink-2" role="status">
             暂无根目录
           </div>
-          <ul v-else class="divide-y divide-neutral-800 rounded-lg bg-neutral-900">
+          <ul v-else class="divide-y divide-line rounded-lg bg-surface">
             <li v-for="s in data.scan_statuses" :key="s.root_id"
                 class="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
               <div class="min-w-0 flex-1">
                 <div class="font-medium">{{ s.label }}</div>
-                <div class="truncate text-xs text-neutral-500" :title="s.absolute_path">
+                <div class="truncate text-xs text-ink-muted" :title="s.absolute_path">
                   {{ s.absolute_path }}
                 </div>
               </div>
@@ -59,24 +59,24 @@
                 <span :class="scanStatusClass(s.status)">
                   {{ scanStatusLabel(s.status) }}
                 </span>
-                <span v-if="s.last_scan_at" class="text-neutral-500">
+                <span v-if="s.last_scan_at" class="text-ink-muted">
                   {{ formatTs(s.last_scan_at) }}
                 </span>
-                <span v-if="s.last_scan_error" class="max-w-xs truncate text-red-400"
+                <span v-if="s.last_scan_error" class="max-w-xs truncate text-danger-text"
                       :title="s.last_scan_error">
                   {{ s.last_scan_error }}
                 </span>
               </div>
               <div v-if="isRunning(s)" class="mt-1 w-full">
-                <div class="h-1 w-full overflow-hidden rounded bg-neutral-800"
+                <div class="h-1 w-full overflow-hidden rounded bg-surface-2"
                      role="progressbar"
                      :aria-valuemin="0"
                      :aria-valuemax="100"
                      :aria-valuenow="scanPercent(s)">
-                  <div class="h-1 rounded bg-blue-500"
+                  <div class="h-1 rounded bg-primary"
                        :style="{ width: scanPercent(s) + '%' }"></div>
                 </div>
-                <div class="mt-1 text-xs text-neutral-500">
+                <div class="mt-1 text-xs text-ink-2">
                   {{ s.processed_files ?? 0 }} / {{ s.total_files ?? 0 }} ({{ scanPercent(s) }}%)
                   <span v-if="s.current_path" class="ml-2 truncate" :title="s.current_path">
                     {{ s.current_path }}
@@ -89,18 +89,23 @@
 
         <!-- Recent audit -->
         <section>
-          <h2 class="mb-2 text-sm font-medium text-neutral-400">最近审计 (20 条)</h2>
-          <div v-if="data.recent_audit.length === 0" class="text-sm text-neutral-500">
+          <h2 class="mb-2 flex items-center justify-between text-sm font-medium text-ink-2">
+            <span>最近审计 (20 条)</span>
+            <router-link to="/admin/audit" class="text-xs text-primary-text hover:underline">
+              查看全部 →
+            </router-link>
+          </h2>
+          <div v-if="data.recent_audit.length === 0" class="text-sm text-ink-2" role="status">
             暂无审计记录
           </div>
-          <ul v-else class="divide-y divide-neutral-800 rounded-lg bg-neutral-900">
+          <ul v-else class="divide-y divide-line rounded-lg bg-surface">
             <li v-for="a in data.recent_audit" :key="a.id"
                 class="flex flex-col gap-1 p-3 text-sm sm:flex-row sm:items-baseline sm:gap-4">
-              <span class="w-32 shrink-0 text-xs text-neutral-500">{{ formatTs(a.ts) }}</span>
-              <span class="w-24 shrink-0 font-medium">{{ actionLabel(a.action) }}</span>
-              <span class="w-36 shrink-0 truncate text-xs text-neutral-500"
+              <span class="w-32 shrink-0 text-xs text-ink-muted">{{ formatTs(a.ts) }}</span>
+              <span class="w-24 shrink-0 font-medium">{{ auditActionLabel(a.action) }}</span>
+              <span class="w-36 shrink-0 truncate text-xs text-ink-2"
                     :title="a.actor_ip">{{ a.actor_ip }}</span>
-              <span class="min-w-0 flex-1 truncate text-xs text-neutral-400"
+              <span class="min-w-0 flex-1 truncate text-xs text-ink-2"
                     :title="auditDetailText(a)">
                 {{ auditDetailText(a) }}
               </span>
@@ -111,25 +116,25 @@
         <!-- Manage galleries link (moved to end per plan wording) -->
         <section class="flex flex-wrap items-center gap-2">
           <router-link to="/admin/galleries"
-            class="inline-flex items-center rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500">
+            class="inline-flex items-center rounded bg-primary px-3 py-2 text-sm text-white hover:bg-primary-hover">
             管理图库
           </router-link>
           <router-link to="/admin/trash"
-            class="inline-flex items-center rounded bg-neutral-700 px-3 py-2 text-sm hover:bg-neutral-600">
+            class="inline-flex items-center rounded bg-surface-3 px-3 py-2 text-sm hover:bg-surface-4">
             回收站
           </router-link>
           <router-link to="/admin/users"
-            class="inline-flex items-center rounded bg-neutral-700 px-3 py-2 text-sm hover:bg-neutral-600">
+            class="inline-flex items-center rounded bg-surface-3 px-3 py-2 text-sm hover:bg-surface-4">
             用户管理
           </router-link>
           <button type="button"
-                  class="inline-flex items-center rounded bg-red-700 px-3 py-2 text-sm hover:bg-red-600 disabled:opacity-50"
+                  class="inline-flex items-center rounded bg-danger px-3 py-2 text-sm text-white hover:bg-danger-hover disabled:opacity-50"
                   :disabled="purging"
                   @click="purgeThumbCache">
             {{ purging ? "清理中..." : "清理缩略图缓存" }}
           </button>
-          <span v-if="purgeError" class="text-sm text-red-400">{{ purgeError }}</span>
-          <span v-else-if="purgeDone" class="text-sm text-green-400">
+          <span v-if="purgeError" class="text-sm text-danger-text">{{ purgeError }}</span>
+          <span v-else-if="purgeDone" class="text-sm text-success">
             已清理，缩略图将在下次浏览时自动重新生成
           </span>
         </section>
@@ -142,6 +147,7 @@
 import { onMounted, onUnmounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiGet, apiPost, HttpError } from "../api"
+import { auditActionLabel } from "../utils/audit"
 
 interface Stats {
   images: number
@@ -264,37 +270,6 @@ onUnmounted(() => {
 
 // ---- display helpers ----
 
-const ACTION_LABELS: Record<string, string> = {
-  login_success: "登录",
-  login_fail: "登录失败",
-  user_create: "创建用户",
-  user_delete: "删除用户",
-  user_disable: "禁用用户",
-  user_update: "更新用户",
-  password_reset: "重置密码",
-  gallery_create: "创建图库",
-  gallery_delete: "删除图库",
-  gallery_update: "更新图库",
-  root_add: "添加根目录",
-  root_remove: "移除根目录",
-  root_update: "更新根目录",
-  exclusion_add: "新增排除",
-  exclusion_remove: "解除排除",
-  image_delete: "删除图片",
-  image_restore: "恢复图片",
-  trash_purge: "清理回收站",
-  thumb_cache_purge: "清理缩略图缓存",
-  scan_start: "扫描开始",
-  scan_finish: "扫描完成",
-  scan_error: "扫描失败",
-  fs_browse: "浏览目录",
-  settings_update: "更新设置",
-}
-
-function actionLabel(action: string): string {
-  return ACTION_LABELS[action] ?? action
-}
-
 const SCAN_STATUS_LABELS: Record<string, string> = {
   idle: "空闲",
   queued: "排队中",
@@ -308,13 +283,13 @@ function scanStatusLabel(status: string): string {
 function scanStatusClass(status: string): string {
   switch (status) {
     case "running":
-      return "text-blue-400"
+      return "text-primary-text"
     case "queued":
-      return "text-yellow-400"
+      return "text-warning"
     case "idle":
-      return "text-green-400"
+      return "text-success"
     default:
-      return "text-neutral-400"
+      return "text-ink-2"
   }
 }
 

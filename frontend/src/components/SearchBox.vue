@@ -7,24 +7,24 @@
         :value="text"
         placeholder="搜索文件名或文件夹…"
         aria-label="搜索"
-        class="w-44 rounded bg-neutral-800 py-1 pl-2 pr-6 text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        class="w-44 rounded bg-surface-2 py-1 pl-2 pr-6 text-ink placeholder:text-ink-muted focus:outline-none focus:ring-1 focus:ring-primary"
         @input="onInput"
       >
       <button
         v-if="text"
         type="button"
         aria-label="清除搜索"
-        class="absolute right-1 top-1/2 -translate-y-1/2 px-0.5 leading-none text-neutral-400 hover:text-neutral-200"
+        class="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center leading-none text-ink-2 hover:text-ink"
         @click="clear"
       >×</button>
     </div>
     <label
       v-if="!isRoot"
-      class="flex shrink-0 select-none items-center gap-1 whitespace-nowrap text-neutral-400"
+      class="flex shrink-0 select-none items-center gap-1 whitespace-nowrap text-ink-2"
     >
       <input
         type="checkbox"
-        class="accent-blue-600"
+        class="accent-primary"
         :checked="scopeAll"
         @change="onScopeChange(($event.target as HTMLInputElement).checked)"
       >

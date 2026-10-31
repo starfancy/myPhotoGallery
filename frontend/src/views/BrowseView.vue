@@ -5,20 +5,20 @@
         <Breadcrumb v-if="crumbs.length" :crumbs="crumbs" :gid="gid" :rid="rid" />
       </template>
     </AppHeader>
-    <main class="p-3">
+    <main id="main-content" class="p-3">
       <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换 -->
       <div v-if="images.length || folders.length || searchQ"
-           class="mb-2 flex items-center gap-2 text-sm">
+           class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <button v-if="!selectionMode"
                 type="button"
-                class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
+                class="min-h-11 rounded bg-surface-2 px-2 py-1 text-ink hover:bg-surface-3"
                 @click="enterSelectionMode">
           选择
         </button>
         <template v-else>
-          <span class="text-neutral-400">已选 {{ selectedIds.size }} 项</span>
+          <span class="text-ink-2">已选 {{ selectedIds.size }} 项</span>
           <button type="button"
-                  class="rounded bg-neutral-800 px-2 py-1 text-neutral-300 hover:bg-neutral-700"
+                  class="min-h-11 rounded bg-surface-2 px-2 py-1 text-ink hover:bg-surface-3"
                   @click="selectAll">
             {{ isAllSelected ? "取消全选" : "全选" }}
           </button>
@@ -33,10 +33,10 @@
           />
           <GridLayoutSwitch v-model="gridLayout" />
           <button type="button"
-                  class="flex items-center rounded px-1.5 py-1"
+                  class="flex min-h-11 min-w-11 items-center justify-center rounded px-1.5 py-1"
                   :class="showFilenames
-                          ? 'bg-neutral-700 text-white'
-                          : 'text-neutral-400 hover:text-neutral-200'"
+                          ? 'bg-surface-3 text-ink'
+                          : 'text-ink-2 hover:text-ink'"
                   title="缩略图上显示文件名"
                   aria-label="缩略图上显示文件名"
                   :aria-pressed="showFilenames"
@@ -63,7 +63,8 @@
                        @open="onOpen"
                        @menu-action="onGridMenuAction"
                        @toggle-select="onToggleSelect" />
-        <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-neutral-500">
+        <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-ink-2"
+             role="status">
           此目录暂无图片
         </div>
         <PaginationBar v-if="totalPages > 1" :page="page" :total-pages="totalPages"
@@ -88,24 +89,24 @@
 
       <!-- 选择模式底部浮动工具条 -->
       <div v-if="selectionMode"
-           class="fixed inset-x-0 bottom-0 z-50 flex items-center justify-between gap-3 border-t border-neutral-800 bg-neutral-900/95 px-4 py-3 backdrop-blur">
-        <span class="text-sm text-neutral-300">已选 {{ selectedIds.size }} 项</span>
-        <div class="flex items-center gap-2">
+           class="fixed inset-x-0 bottom-0 z-50 flex flex-wrap items-center justify-between gap-3 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur">
+        <span class="text-sm text-ink">已选 {{ selectedIds.size }} 项</span>
+        <div class="flex flex-wrap items-center gap-2">
           <button type="button"
                   :disabled="selectedIds.size === 0 || downloading"
-                  class="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
                   @click="onBatchDownload">
             {{ downloading ? "准备中..." : `下载 ZIP（${selectedIds.size}）` }}
           </button>
           <button v-if="auth.isAdmin"
                   type="button"
                   :disabled="selectedIds.size === 0 || batchDeleting"
-                  class="rounded bg-red-700 px-3 py-1.5 text-sm hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  class="min-h-11 rounded bg-danger px-3 py-1.5 text-sm text-white hover:bg-danger-hover disabled:cursor-not-allowed disabled:opacity-40"
                   @click="onBatchDelete">
             {{ batchDeleting ? "移入中..." : "移入回收站" }}
           </button>
           <button type="button"
-                  class="rounded bg-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-600"
+                  class="min-h-11 rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4"
                   @click="exitSelectionMode">
             取消
           </button>

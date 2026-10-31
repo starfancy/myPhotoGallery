@@ -1,13 +1,13 @@
 <template>
-  <div class="flex items-center gap-0.5 rounded bg-neutral-800 p-0.5"
+  <div class="flex items-center gap-0.5 rounded bg-surface-2 p-0.5"
        role="group"
        aria-label="缩略图排版方式">
     <button v-for="opt in OPTIONS" :key="opt.value"
             type="button"
-            class="flex items-center rounded px-1.5 py-1"
+            class="flex min-h-11 min-w-11 items-center rounded px-1.5 py-1"
             :class="modelValue === opt.value
-                    ? 'bg-neutral-700 text-white'
-                    : 'text-neutral-400 hover:text-neutral-200'"
+                    ? 'bg-surface-3 text-ink'
+                    : 'text-ink-2 hover:text-ink'"
             :title="opt.label"
             :aria-label="opt.label"
             :aria-pressed="modelValue === opt.value"

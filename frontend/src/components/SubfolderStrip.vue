@@ -1,7 +1,7 @@
 <template>
   <div v-if="folders.length" class="lb-folder-grid py-2">
     <div v-for="f in folders" :key="f.relative_path"
-         class="lb-folder-card group relative flex w-full flex-col overflow-hidden rounded bg-neutral-800 text-sm hover:ring-2 hover:ring-blue-500"
+         class="lb-folder-card group relative flex w-full flex-col overflow-hidden rounded bg-surface-2 text-sm hover:ring-2 hover:ring-primary"
          @contextmenu="onContextMenu(f.relative_path, $event)"
          @touchstart="onTouchStart(f.relative_path, $event)"
          @touchend="onTouchEnd"
@@ -9,7 +9,7 @@
       <!-- 卡片整体可点进目录；省略号按钮作为链接的兄弟节点，避免 button 嵌套在 a 内 -->
       <router-link :to="linkFor(f.relative_path)"
                    class="flex w-full flex-1 flex-col">
-        <div class="relative h-24 w-full overflow-hidden bg-neutral-700">
+        <div class="relative h-24 w-full overflow-hidden bg-surface-3">
           <img v-if="f.cover_thumb_sha1"
                :src="`/api/thumb/${f.cover_thumb_sha1}?size=200`"
                class="h-full w-full"
@@ -26,7 +26,7 @@
         </div>
         <div class="truncate p-2">
           <div class="truncate font-medium">{{ f.name }}</div>
-          <div class="text-xs text-neutral-400">{{ f.descendant_count }} 张</div>
+          <div class="text-xs text-ink-2">{{ f.descendant_count }} 张</div>
         </div>
       </router-link>
       <!-- Admin-only 省略号：hover / 键盘 focus 才显示，点击弹快捷菜单 -->
@@ -135,14 +135,20 @@ function linkFor(rel: string) {
 
 <style scoped>
 /*
- * auto-fill + 1fr：卡片等比拉伸铺满整行，左右边缘与图片网格
- * （JustifiedGrid/MasonryGrid 均为内容区满宽）严格对齐；
- * 最小列宽 128（原 w-32），间距与图片网格同为 16px。
+ * <640px：固定两列紧凑排布（gap 8px），窄屏一屏看到更多文件夹；
+ * ≥640px：auto-fill + 1fr，卡片等比拉伸铺满整行，最小列宽 180px，
+ * 间距 16px 与图片网格（JustifiedGrid/MasonryGrid）对齐。
  */
 .lb-folder-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+@media (min-width: 640px) {
+  .lb-folder-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+  }
 }
 /* 借来的封面：图底黑色渐变，托住白色来源名 */
 .lb-folder-source {
@@ -151,8 +157,9 @@ function linkFor(rel: string) {
 /* 与 PhotoCell 的 .lb-cell-menu-btn 同款：右上角圆形半透明黑底 */
 .lb-folder-menu-btn {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  /* 8px 外边距配合 ::after 的 -8px：44px 热区刚好落在卡片 overflow:hidden 之内 */
+  top: 8px;
+  right: 8px;
   width: 28px;
   height: 28px;
   border-radius: 999px;
@@ -171,5 +178,11 @@ function linkFor(rel: string) {
 }
 .lb-folder-menu-btn:hover {
   background: rgba(0, 0, 0, 0.75);
+}
+/* 触屏热区扩到 44×44：可视圆钮仍是 28px */
+.lb-folder-menu-btn::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
 </style>

@@ -102,6 +102,15 @@ describe("AdminUsers (P4)", () => {
     expect(w.text()).toContain("3 个用户")
   })
 
+  it("wraps the users table in an overflow-x-auto container for small screens", async () => {
+    setupFetchMock({
+      "/api/admin/users": () => ({ data: SAMPLE_USERS }),
+      "/api/admin/galleries": () => ({ data: SAMPLE_GALLERIES }),
+    })
+    const w = await mountView()
+    expect(w.find(".overflow-x-auto").exists()).toBe(true)
+  })
+
   it("shows role and access_scope badges", async () => {
     setupFetchMock({
       "/api/admin/users": () => ({ data: SAMPLE_USERS }),
@@ -133,7 +142,13 @@ describe("AdminUsers (P4)", () => {
     })
     const w = await mountView()
     await w.find('[data-testid="new-user-btn"]').trigger("click")
-    expect(w.find('[data-testid="user-modal"]').exists()).toBe(true)
+    const modal = w.find('[data-testid="user-modal"]')
+    expect(modal.exists()).toBe(true)
+    const dialog = modal.find('[role="dialog"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.attributes("aria-modal")).toBe("true")
+    expect(dialog.attributes("aria-labelledby")).toBe("user-modal-title")
+    expect(w.find("#user-modal-title").text()).toContain("新建用户")
   })
 
   it("submits create with explicit password and gallery_ids (viewer)", async () => {
@@ -183,6 +198,11 @@ describe("AdminUsers (P4)", () => {
     await w.find('[data-testid="modal-submit"]').trigger("click")
     await flushPromises()
     expect(w.find('[data-testid="reveal-pw-modal"]').exists()).toBe(true)
+    const revealDialog = w.find('[data-testid="reveal-pw-modal"] [role="dialog"]')
+    expect(revealDialog.exists()).toBe(true)
+    expect(revealDialog.attributes("aria-modal")).toBe("true")
+    expect(revealDialog.attributes("aria-labelledby")).toBe("reveal-modal-title")
+    expect(w.find('[data-testid="reveal-pw-value"]').attributes("role")).toBe("alert")
     expect(w.find('[data-testid="reveal-pw-value"]').text()).toContain("AUTOgen12")
   })
 
@@ -237,6 +257,10 @@ describe("AdminUsers (P4)", () => {
     const w = await mountView()
     await w.find('[data-testid="resetpw-btn-alice"]').trigger("click")
     await flushPromises()
+    const resetDialog = w.find('[data-testid="reset-pw-modal"] [role="dialog"]')
+    expect(resetDialog.exists()).toBe(true)
+    expect(resetDialog.attributes("aria-modal")).toBe("true")
+    expect(resetDialog.attributes("aria-labelledby")).toBe("reset-modal-title")
     await w.find('[data-testid="reset-pw-submit"]').trigger("click")
     await flushPromises()
     await flushPromises()

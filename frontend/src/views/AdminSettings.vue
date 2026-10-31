@@ -2,113 +2,134 @@
   <div>
     <AppHeader>
       <template #title>
-        <span class="text-neutral-400">管理 · 设置</span>
+        <span class="text-ink-2">管理 · 设置</span>
       </template>
     </AppHeader>
-    <main class="mx-auto max-w-2xl space-y-6 p-4">
-      <div v-if="loading" class="text-neutral-400">加载中...</div>
+    <main id="main-content" class="mx-auto max-w-2xl space-y-6 p-4">
+      <div v-if="loading" class="text-ink-2">加载中...</div>
       <template v-else>
-        <div v-if="error"
-             class="rounded bg-red-900/30 px-3 py-2 text-sm text-red-300">
+        <div v-if="error" role="alert"
+             class="rounded bg-danger-soft/30 px-3 py-2 text-sm text-danger-text">
           {{ error }}
         </div>
 
         <!-- 回收站 -->
-        <section class="rounded-lg bg-neutral-900 p-4">
-          <h2 class="mb-3 text-sm font-medium text-neutral-400">回收站</h2>
-          <div class="mb-2 text-xs text-neutral-500">自动清理前的保留时长</div>
-          <div class="flex flex-wrap gap-4 text-sm">
+        <section class="rounded-lg bg-surface p-4">
+          <h2 class="mb-3 text-sm font-medium text-ink-2">回收站</h2>
+          <div id="retention-label" class="mb-2 text-xs text-ink-2">自动清理前的保留时长</div>
+          <div role="group" aria-labelledby="retention-label"
+               class="flex flex-wrap gap-4 text-sm">
             <!-- 故意用 :checked + @click 而非 v-model：jsdom 分离挂载（detached mount）的
                  spec 不会触发 radio 的 change 事件，而 click 绑定同时覆盖点 label 与键盘
                  （空格/回车）激活。在同步更新 admin-settings.spec.ts 之前，不要“简化”回 v-model。 -->
             <label v-for="opt in RETENTION_OPTIONS" :key="opt.value"
                    class="flex cursor-pointer items-center gap-1.5">
-              <input type="radio" name="retention" class="accent-blue-600"
+              <input type="radio" name="retention" class="accent-primary"
                      :value="opt.value"
                      :checked="form.trash_retention_days === opt.value"
                      @click="form.trash_retention_days = opt.value">
               {{ opt.label }}
             </label>
           </div>
-          <p class="mt-2 text-xs text-neutral-500">
+          <p class="mt-2 text-xs text-ink-2">
             对新删除的图片生效；已在回收站中的条目到期时间不变。
           </p>
         </section>
 
         <!-- 登录安全 -->
-        <section class="rounded-lg bg-neutral-900 p-4">
-          <h2 class="mb-3 text-sm font-medium text-neutral-400">登录安全</h2>
-          <label class="block text-xs text-neutral-500">
+        <section class="rounded-lg bg-surface p-4">
+          <h2 class="mb-3 text-sm font-medium text-ink-2">登录安全</h2>
+          <label class="block text-xs text-ink-2" for="settings-lockout">
             登录失败锁定阈值（1–100 次）
           </label>
-          <input v-model.number="form.login_lockout_threshold"
+          <input id="settings-lockout" v-model.number="form.login_lockout_threshold"
                  type="number" min="1" max="100"
-                 class="mt-1 w-28 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-blue-500">
-          <p class="mt-2 text-xs text-neutral-500">
+                 class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
+          <p class="mt-2 text-xs text-ink-2">
             连续登录失败达到此次数后将被临时锁定；锁定时长在 config.toml 中配置。
           </p>
 
-          <label class="mt-4 block text-xs text-neutral-500">会话时长（1–720 小时）</label>
-          <input v-model.number="form.session_hours"
+          <label class="mt-4 block text-xs text-ink-2" for="settings-session">会话时长（1–720 小时）</label>
+          <input id="settings-session" v-model.number="form.session_hours"
                  type="number" min="1" max="720"
-                 class="mt-1 w-28 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-blue-500">
-          <p class="mt-2 text-xs text-neutral-500">对新登录生效。</p>
+                 class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
+          <p class="mt-2 text-xs text-ink-2">对新登录生效。</p>
         </section>
 
         <!-- 可信代理 -->
-        <section class="rounded-lg bg-neutral-900 p-4">
-          <h2 class="mb-3 text-sm font-medium text-neutral-400">
+        <section class="rounded-lg bg-surface p-4">
+          <h2 class="mb-3 text-sm font-medium text-ink-2">
             可信代理（trusted_proxies）
           </h2>
           <div class="space-y-2">
             <div v-for="(_, i) in form.trusted_proxies" :key="i"
                  class="flex items-center gap-2">
               <input v-model="form.trusted_proxies[i]"
+                     aria-label="可信代理 IP 或 CIDR"
                      placeholder="如 127.0.0.1 或 10.0.0.0/8"
-                     class="min-w-0 flex-1 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                     class="min-w-0 flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
               <button type="button" @click="removeProxy(i)"
-                      class="shrink-0 rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                      class="shrink-0 rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
                 删除
               </button>
             </div>
           </div>
           <div class="mt-2 flex items-center gap-2">
             <button type="button" @click="addProxy"
-                    class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                    class="rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
               + 添加
             </button>
             <button type="button" @click="resetProxies"
                     title="一键填回本机反代的推荐值（IPv4/IPv6 回环），需再点保存生效"
-                    class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                    class="rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
               恢复默认
             </button>
           </div>
-          <p class="mt-2 text-xs text-neutral-500">
+          <p class="mt-2 text-xs text-ink-2">
             仅这些来源（IP 或 CIDR）转发的 X-Forwarded-For 会被采纳；留空表示不信任任何代理。
             本机 Caddy 反代的推荐默认值为 127.0.0.1 与 ::1。
           </p>
         </section>
 
         <!-- 批量下载 -->
-        <section class="rounded-lg bg-neutral-900 p-4">
-          <h2 class="mb-3 text-sm font-medium text-neutral-400">批量下载</h2>
-          <label class="block text-xs text-neutral-500">
+        <section class="rounded-lg bg-surface p-4">
+          <h2 class="mb-3 text-sm font-medium text-ink-2">批量下载</h2>
+          <label class="block text-xs text-ink-2" for="settings-download">
             单次批量下载 ZIP 的图片数量上限（10–200）
           </label>
-          <input v-model.number="form.download_batch_limit"
+          <input id="settings-download" v-model.number="form.download_batch_limit"
                  type="number" min="10" max="200"
-                 class="mt-1 w-28 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-blue-500">
-          <p class="mt-2 text-xs text-neutral-500">
+                 class="mt-1 w-28 rounded bg-surface-2 px-3 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
+          <p class="mt-2 text-xs text-ink-2">
             对所有用户生效；保存后立即生效。
           </p>
         </section>
 
-        <div class="flex items-center gap-3">
+        <!-- 审计日志 -->
+        <section class="rounded-lg bg-surface p-4">
+          <h2 class="mb-3 text-sm font-medium text-ink-2">审计日志</h2>
+          <label for="audit-retention" class="block text-xs text-ink-2">
+            审计日志保留天数
+          </label>
+          <select id="audit-retention" v-model.number="form.audit_retention_days"
+                  class="mt-1 rounded bg-surface-2 px-2 py-1.5 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary">
+            <option :value="30">30 天</option>
+            <option :value="90">90 天</option>
+            <option :value="180">180 天</option>
+            <option :value="365">365 天</option>
+            <option :value="0">永不清理</option>
+          </select>
+          <p class="mt-2 text-xs text-ink-2">
+            超期记录在服务启动时及每日定时清理；保存后立即生效。
+          </p>
+        </section>
+
+        <div class="flex flex-wrap items-center gap-3">
           <button @click="save" :disabled="!dirty || saving"
-                  class="rounded bg-blue-600 px-4 py-1.5 text-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
+                  class="min-h-11 w-full rounded bg-primary px-4 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
             {{ saving ? "保存中..." : "保存" }}
           </button>
-          <span v-if="savedOk" class="text-xs text-green-400">已保存</span>
+          <span v-if="savedOk" class="text-xs text-success">已保存</span>
         </div>
       </template>
     </main>
@@ -126,6 +147,7 @@ interface SettingsForm {
   trusted_proxies: string[]
   session_hours: number
   download_batch_limit: number
+  audit_retention_days: number
 }
 
 const RETENTION_OPTIONS = [
@@ -145,6 +167,7 @@ const form = ref<SettingsForm>({
   trusted_proxies: [],
   session_hours: 8,
   download_batch_limit: 100,
+  audit_retention_days: 180,
 })
 const loadedJson = ref("")
 
@@ -157,6 +180,7 @@ function normalized(): SettingsForm {
     trusted_proxies: form.value.trusted_proxies.map((s) => s.trim()).filter(Boolean),
     session_hours: form.value.session_hours,
     download_batch_limit: form.value.download_batch_limit,
+    audit_retention_days: form.value.audit_retention_days,
   }
 }
 
@@ -193,6 +217,7 @@ async function load() {
       trusted_proxies: [...data.trusted_proxies],
       session_hours: data.session_hours,
       download_batch_limit: data.download_batch_limit,
+      audit_retention_days: data.audit_retention_days,
     }
     loadedJson.value = JSON.stringify(normalized())
   } catch (err) {
@@ -227,6 +252,7 @@ async function save() {
       trusted_proxies: [...data.trusted_proxies],
       session_hours: data.session_hours,
       download_batch_limit: data.download_batch_limit,
+      audit_retention_days: data.audit_retention_days,
     }
     loadedJson.value = JSON.stringify(normalized())
     savedOk.value = true

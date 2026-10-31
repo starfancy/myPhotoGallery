@@ -1,10 +1,10 @@
 <template>
-  <nav class="flex items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-neutral-400" aria-label="面包屑">
+  <nav class="flex items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-ink-2" aria-label="面包屑">
     <template v-for="(c, i) in crumbs" :key="c.relative_path">
-      <router-link :to="linkFor(c.relative_path)" class="rounded px-2 py-1 hover:bg-neutral-800 hover:text-neutral-100">
+      <router-link :to="linkFor(c.relative_path)" class="rounded px-2 py-1 hover:bg-surface-2 hover:text-ink">
         {{ c.name }}
       </router-link>
-      <span v-if="i < crumbs.length - 1" class="text-neutral-600">›</span>
+      <span v-if="i < crumbs.length - 1" class="text-ink-muted" aria-hidden="true">›</span>
     </template>
   </nav>
 </template>

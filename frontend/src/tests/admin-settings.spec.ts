@@ -10,6 +10,7 @@ interface Settings {
   trusted_proxies: string[]
   session_hours: number
   download_batch_limit: number
+  audit_retention_days: number
 }
 
 const DEFAULTS: Settings = {
@@ -18,6 +19,7 @@ const DEFAULTS: Settings = {
   trusted_proxies: [],
   session_hours: 8,
   download_batch_limit: 100,
+  audit_retention_days: 180,
 }
 
 function json(body: unknown, status = 200) {
@@ -81,6 +83,7 @@ describe("AdminSettings", () => {
       trusted_proxies: [],
       session_hours: 8,
       download_batch_limit: 100,
+      audit_retention_days: 180,
     })
     expect(w.text()).toContain("已保存")
   })
@@ -251,5 +254,23 @@ describe("AdminSettings", () => {
     await flushPromises()
     // 只有 GET，没有 PATCH
     expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
+  it("loads and saves audit_retention_days", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(json({ ...DEFAULTS, audit_retention_days: 180 }))  // GET
+      .mockResolvedValueOnce(json({ ...DEFAULTS, audit_retention_days: 365 }))) // PATCH 回显
+    const w = await mountView()
+
+    const select = w.find("#audit-retention")
+    expect(select.exists()).toBe(true)
+    expect((select.element as HTMLSelectElement).value).toBe("180")
+    await select.setValue("365")
+    await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click")
+    await flushPromises()
+
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls as Array<[string, RequestInit?]>
+    const patch = calls.find((c) => c[0] === "/api/admin/settings" && c[1]?.method === "PATCH")!
+    expect(JSON.parse(patch[1]!.body as string).audit_retention_days).toBe(365)
   })
 })

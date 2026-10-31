@@ -1,7 +1,7 @@
 <template>
   <div>
     <section v-if="folders.length" class="pb-3">
-      <h2 class="mb-2 text-sm text-neutral-400">
+      <h2 class="mb-2 text-sm text-ink-2" aria-live="polite">
         匹配的文件夹（{{ folders.length }}<template v-if="foldersTruncated">，仅显示前 50 个，请细化关键词</template>）
       </h2>
       <div class="lb-search-folder-grid">
@@ -9,9 +9,9 @@
           v-for="f in folders"
           :key="f.relative_path"
           :to="folderLink(f.relative_path)"
-          class="flex flex-col overflow-hidden rounded bg-neutral-800 text-sm hover:ring-2 hover:ring-blue-500"
+          class="flex flex-col overflow-hidden rounded bg-surface-2 text-sm hover:ring-2 hover:ring-primary"
         >
-          <div class="h-20 w-full overflow-hidden bg-neutral-700">
+          <div class="h-20 w-full overflow-hidden bg-surface-3">
             <img
               v-if="f.cover_thumb_sha1"
               :src="`/api/thumb/${f.cover_thumb_sha1}?size=200`"
@@ -22,14 +22,14 @@
           </div>
           <div class="truncate p-2">
             <div class="truncate font-medium">{{ f.name }}</div>
-            <div class="text-xs text-neutral-400">{{ f.descendant_count }} 张</div>
+            <div class="text-xs text-ink-2">{{ f.descendant_count }} 张</div>
           </div>
         </router-link>
       </div>
     </section>
 
-    <div v-if="error"
-         class="mb-2 rounded bg-red-900/30 px-3 py-2 text-sm text-red-300">
+    <div v-if="error" role="alert"
+         class="mb-2 rounded bg-danger-soft/30 px-3 py-2 text-sm text-danger-text">
       {{ error }}
     </div>
 
@@ -47,14 +47,14 @@
     />
 
     <div v-else-if="!loading && !folders.length"
-         class="mt-8 text-center text-neutral-500">
+         class="mt-8 text-center text-ink-2" role="status">
       未找到匹配的图片或文件夹
     </div>
 
-    <div v-if="nextCursor || loading" class="py-4 text-center">
+    <div v-if="nextCursor || loading" class="py-4 text-center" aria-live="polite">
       <button
         type="button"
-        class="rounded bg-neutral-800 px-3 py-1.5 text-sm hover:bg-neutral-700 disabled:opacity-50"
+        class="rounded bg-surface-2 px-3 py-1.5 text-sm hover:bg-surface-3 disabled:opacity-50"
         :disabled="loading || loadingMore"
         @click="loadMore"
       >

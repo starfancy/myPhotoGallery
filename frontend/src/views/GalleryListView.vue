@@ -1,16 +1,16 @@
 <template>
   <div>
     <AppHeader>
-      <template #title><span class="text-neutral-400">图库</span></template>
+      <template #title><span class="text-ink-2">图库</span></template>
     </AppHeader>
-    <main class="p-4">
-      <div v-if="loading" class="text-neutral-400">加载中...</div>
-      <div v-else-if="error" class="text-red-400">{{ error }}</div>
+    <main id="main-content" class="p-4">
+      <div v-if="loading" class="text-ink-2">加载中...</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         <router-link v-for="g in items" :key="g.id" :to="`/galleries/${g.id}`"
-                     class="block rounded-lg bg-neutral-900 p-4 hover:ring-2 hover:ring-blue-500">
+                     class="block rounded-lg bg-surface p-4 hover:ring-2 hover:ring-primary">
           <div class="font-medium">{{ g.name }}</div>
-          <div class="mt-1 text-sm text-neutral-400">
+          <div class="mt-1 text-sm text-ink-2">
             {{ g.image_count }} 张 · {{ g.root_count }} 个根目录
           </div>
         </router-link>

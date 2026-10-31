@@ -1005,6 +1005,8 @@ watch(
   align-items: center;
   gap: 8px;
   width: 100%;
+  /* 触屏目标 ≥44px */
+  min-height: 44px;
   padding: 8px 12px;
   border: 0;
   border-radius: 4px;
@@ -1064,6 +1066,12 @@ watch(
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
+  /* 触屏目标 ≥44×44，× 字形居中 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0 4px;
 }
 .lb-side-close:hover { color: #fff; }
@@ -1084,6 +1092,12 @@ watch(
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
+  /* 触屏目标 ≥44×44，× 字形居中 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0 4px;
 }
 .lb-exif-close:hover { color: #fff; }

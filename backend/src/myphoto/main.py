@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
+from myphoto.audit import purge_expired as purge_audit_expired
 from myphoto.config import AppConfig, load_or_init, resolve_config_path
 from myphoto.db import make_engine, make_sessionmaker
 from myphoto.errors import AppError, install_error_handlers
@@ -66,6 +67,16 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
                     )
         except Exception:
             log.exception("startup purge_expired failed")
+
+        # 启动时顺带清理一次过期审计日志；与回收站清理互不影响。
+        try:
+            async with sm() as session:
+                removed = await purge_audit_expired(session, cfg.audit_retention_days)
+                await session.commit()
+            if removed:
+                log.info("startup audit purge removed=%s", removed)
+        except Exception:
+            log.exception("startup audit purge failed")
 
         app.state.engine = engine
         app.state.sessionmaker = sm

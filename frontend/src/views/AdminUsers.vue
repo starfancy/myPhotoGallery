@@ -1,27 +1,27 @@
 <template>
   <div>
     <AppHeader>
-      <template #title><span class="text-neutral-400">管理 · 用户</span></template>
+      <template #title><span class="text-ink-2">管理 · 用户</span></template>
     </AppHeader>
-    <main class="p-4 space-y-6">
-      <div v-if="loading" class="text-neutral-400">加载中...</div>
-      <div v-else-if="error" class="text-red-400">{{ error }}</div>
+    <main id="main-content" class="p-4 space-y-6">
+      <div v-if="loading" class="text-ink-2">加载中...</div>
+      <div v-else-if="error" role="alert" class="text-danger-text">{{ error }}</div>
       <template v-else>
         <section class="flex items-center gap-2">
           <button @click="openCreate" data-testid="new-user-btn"
-                  class="rounded bg-blue-600 px-3 py-2 text-sm hover:bg-blue-500">
+                  class="min-h-11 w-full rounded bg-primary px-3 py-2 text-sm text-white hover:bg-primary-hover sm:w-auto">
             新建用户
           </button>
         </section>
 
         <section>
-          <h2 v-if="users.length > 0" class="mb-2 text-sm font-medium text-neutral-400">
+          <h2 v-if="users.length > 0" class="mb-2 text-sm font-medium text-ink-2">
             {{ users.length }} 个用户
           </h2>
-          <div v-else class="text-sm text-neutral-500">暂无用户</div>
-          <div v-if="users.length > 0" class="overflow-hidden rounded-lg bg-neutral-900">
-            <table class="w-full text-sm">
-              <thead class="bg-neutral-800/60 text-left text-xs uppercase text-neutral-500">
+          <div v-else class="text-sm text-ink-2" role="status">暂无用户</div>
+          <div v-if="users.length > 0" class="overflow-x-auto rounded-lg bg-surface">
+            <table class="w-full min-w-[720px] text-sm">
+              <thead class="bg-surface-2/60 text-left text-xs uppercase text-ink-2">
                 <tr>
                   <th class="px-3 py-2">用户名</th>
                   <th class="px-3 py-2">角色</th>
@@ -32,57 +32,57 @@
                   <th class="px-3 py-2 text-right">操作</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-neutral-800">
+              <tbody class="divide-y divide-line">
                 <tr v-for="u in users" :key="u.id" :data-testid="`user-row-${u.username}`">
                   <td class="px-3 py-2 font-medium">{{ u.username }}</td>
                   <td class="px-3 py-2">
-                    <span :class="u.role === 'admin' ? 'bg-purple-900/60 text-purple-200' : 'bg-neutral-700 text-neutral-200'"
+                    <span :class="u.role === 'admin' ? 'bg-primary-soft/60 text-primary-text' : 'bg-surface-3 text-ink'"
                           class="rounded px-2 py-0.5 text-xs">
                       {{ u.role === "admin" ? "管理员" : "访客" }}
                     </span>
                   </td>
                   <td class="px-3 py-2">
                     <span :class="u.access_scope === 'lan_only'
-                                   ? 'bg-neutral-700 text-neutral-200'
-                                   : 'bg-orange-900/60 text-orange-200'"
+                                   ? 'bg-surface-3 text-ink'
+                                   : 'bg-warning-soft/60 text-warning'"
                           class="rounded px-2 py-0.5 text-xs">
                       {{ u.access_scope === "lan_only" ? "LAN" : "远程" }}
                     </span>
                   </td>
                   <td class="px-3 py-2">
-                    <span :class="u.enabled ? 'text-green-400' : 'text-neutral-500'">
+                    <span :class="u.enabled ? 'text-success' : 'text-ink-2'">
                       {{ u.enabled ? "是" : "否" }}
                     </span>
                   </td>
-                  <td class="px-3 py-2 text-neutral-400">{{ u.gallery_count }}</td>
-                  <td class="px-3 py-2 text-xs text-neutral-500">
+                  <td class="px-3 py-2 text-ink-2">{{ u.gallery_count }}</td>
+                  <td class="px-3 py-2 text-xs text-ink-muted">
                     {{ u.last_login_at ? formatTs(u.last_login_at) : "—" }}
                   </td>
                   <td class="px-3 py-2 text-right">
-                    <div class="flex justify-end gap-2">
+                    <div class="flex min-w-max justify-end gap-1">
                       <button @click="openEdit(u)"
                               :data-testid="`edit-btn-${u.username}`"
-                              class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                              class="min-h-11 rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 md:min-h-0">
                         编辑
                       </button>
                       <button @click="openResetPw(u)"
                               :data-testid="`resetpw-btn-${u.username}`"
-                              class="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600">
+                              class="min-h-11 rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 md:min-h-0">
                         重置密码
                       </button>
                       <button @click="toggleEnabled(u)"
                               :data-testid="`toggle-btn-${u.username}`"
                               :disabled="u.id === currentUserId"
                               :class="u.enabled
-                                       ? 'bg-yellow-800 hover:bg-yellow-700'
-                                       : 'bg-green-800 hover:bg-green-700'"
-                              class="rounded px-2 py-1 text-xs disabled:opacity-40">
+                                       ? 'bg-warning-btn hover:bg-warning-btn-hover'
+                                       : 'bg-success-btn hover:bg-success-btn-hover'"
+                              class="min-h-11 rounded px-2 py-1 text-xs text-white disabled:opacity-40 md:min-h-0">
                         {{ u.enabled ? "禁用" : "启用" }}
                       </button>
                       <button @click="confirmDelete(u)"
                               :data-testid="`delete-btn-${u.username}`"
                               :disabled="u.id === currentUserId"
-                              class="rounded bg-red-800 px-2 py-1 text-xs hover:bg-red-700 disabled:opacity-40">
+                              class="min-h-11 rounded bg-danger px-2 py-1 text-xs text-white hover:bg-danger-hover disabled:opacity-40 md:min-h-0">
                         删除
                       </button>
                     </div>
@@ -98,28 +98,34 @@
     <!-- Create / Edit modal -->
     <div v-if="modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
          @click.self="closeModal" data-testid="user-modal">
-      <div class="w-full max-w-md rounded-lg bg-neutral-900 p-6">
-        <h3 class="mb-4 text-lg font-medium">
+      <div class="w-full max-w-md rounded-lg bg-surface p-6"
+           ref="userPanelEl" tabindex="-1"
+           role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+        <h3 class="mb-4 text-lg font-medium" id="user-modal-title">
           {{ modal.mode === "create" ? "新建用户" : "编辑用户" }}
         </h3>
         <div class="space-y-3">
           <label class="block">
-            <span class="text-xs text-neutral-500">用户名 (3-32 字符)</span>
+            <span class="text-xs text-ink-2">用户名 (3-32 字符)</span>
             <input v-model="modal.username" :disabled="modal.mode === 'edit'"
                    data-testid="modal-username"
-                   class="mt-1 w-full rounded bg-neutral-800 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50" />
+                   :aria-invalid="!!modal.error || undefined"
+                   :aria-describedby="modal.error ? 'user-modal-error' : undefined"
+                   class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50" />
           </label>
 
           <div v-if="modal.mode === 'create'">
             <label class="block">
-              <span class="text-xs text-neutral-500">密码 (留空 → 自动生成)</span>
+              <span class="text-xs text-ink-2">密码 (留空 → 自动生成)</span>
               <input v-model="modal.password" type="password" data-testid="modal-password"
-                     class="mt-1 w-full rounded bg-neutral-800 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                     :aria-invalid="!!modal.error || undefined"
+                     :aria-describedby="modal.error ? 'user-modal-error' : undefined"
+                     class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </label>
           </div>
 
           <fieldset>
-            <legend class="text-xs text-neutral-500">角色</legend>
+            <legend class="text-xs text-ink-2">角色</legend>
             <div class="mt-1 flex gap-4 text-sm">
               <label class="flex items-center gap-1.5">
                 <input v-model="modal.role" type="radio" value="admin" data-testid="modal-role-admin" />
@@ -133,7 +139,7 @@
           </fieldset>
 
           <fieldset>
-            <legend class="text-xs text-neutral-500">访问域</legend>
+            <legend class="text-xs text-ink-2">访问域</legend>
             <div class="mt-1 flex gap-4 text-sm">
               <label class="flex items-center gap-1.5">
                 <input v-model="modal.access_scope" type="radio" value="lan_only" />
@@ -147,11 +153,12 @@
           </fieldset>
 
           <div v-if="modal.role === 'viewer'">
-            <span class="text-xs text-neutral-500">授权图库 (多选)</span>
-            <div v-if="allGalleries.length === 0" class="mt-1 text-xs text-neutral-500">
+            <span class="text-xs text-ink-2" id="gallery-group-label">授权图库 (多选)</span>
+            <div v-if="allGalleries.length === 0" class="mt-1 text-xs text-ink-2">
               尚无图库可选
             </div>
-            <div v-else class="mt-1 max-h-40 space-y-1 overflow-y-auto rounded bg-neutral-800 p-2">
+            <div v-else role="group" aria-labelledby="gallery-group-label"
+                 class="mt-1 max-h-40 space-y-1 overflow-y-auto rounded bg-surface-2 p-2">
               <label v-for="g in allGalleries" :key="g.id"
                      class="flex items-center gap-2 text-sm">
                 <input type="checkbox" :value="g.id" v-model="modal.gallery_ids"
@@ -160,21 +167,22 @@
               </label>
             </div>
           </div>
-          <div v-else class="text-xs text-neutral-500">
+          <div v-else class="text-xs text-ink-2">
             管理员自动可见所有图库，无需授权
           </div>
 
-          <div v-if="modal.error" class="text-sm text-red-400" data-testid="modal-error">
+          <div v-if="modal.error" class="text-sm text-danger-text" data-testid="modal-error"
+               id="user-modal-error" role="alert">
             {{ modal.error }}
           </div>
         </div>
         <div class="mt-5 flex justify-end gap-2">
-          <button @click="closeModal" class="rounded bg-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-600">
+          <button @click="closeModal" class="min-h-11 rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4">
             取消
           </button>
           <button @click="submitModal" :disabled="modal.submitting"
                   data-testid="modal-submit"
-                  class="rounded bg-blue-600 px-3 py-1.5 text-sm hover:bg-blue-500 disabled:opacity-50">
+                  class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:opacity-50">
             {{ modal.submitting ? "提交中..." : (modal.mode === "create" ? "创建" : "保存") }}
           </button>
         </div>
@@ -184,21 +192,26 @@
     <!-- Reset password modal -->
     <div v-if="resetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
          @click.self="closeResetModal" data-testid="reset-pw-modal">
-      <div class="w-full max-w-md rounded-lg bg-neutral-900 p-6">
-        <h3 class="mb-4 text-lg font-medium">重置密码 — {{ resetModal.username }}</h3>
+      <div class="w-full max-w-md rounded-lg bg-surface p-6"
+           ref="resetPanelEl" tabindex="-1"
+           role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+        <h3 class="mb-4 text-lg font-medium" id="reset-modal-title">重置密码 — {{ resetModal.username }}</h3>
         <label class="block">
-          <span class="text-xs text-neutral-500">新密码 (留空 → 自动生成)</span>
+          <span class="text-xs text-ink-2">新密码 (留空 → 自动生成)</span>
           <input v-model="resetModal.password" type="password" data-testid="reset-pw-input"
-                 class="mt-1 w-full rounded bg-neutral-800 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                 :aria-invalid="!!resetModal.error || undefined"
+                 :aria-describedby="resetModal.error ? 'reset-modal-error' : undefined"
+                 class="mt-1 w-full rounded bg-surface-2 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
         </label>
-        <div v-if="resetModal.error" class="mt-2 text-sm text-red-400">{{ resetModal.error }}</div>
+        <div v-if="resetModal.error" class="mt-2 text-sm text-danger-text"
+             id="reset-modal-error" role="alert">{{ resetModal.error }}</div>
         <div class="mt-5 flex justify-end gap-2">
-          <button @click="closeResetModal" class="rounded bg-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-600">
+          <button @click="closeResetModal" class="min-h-11 rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4">
             取消
           </button>
           <button @click="submitReset" :disabled="resetModal.submitting"
                   data-testid="reset-pw-submit"
-                  class="rounded bg-blue-600 px-3 py-1.5 text-sm hover:bg-blue-500 disabled:opacity-50">
+                  class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:opacity-50">
             {{ resetModal.submitting ? "重置中..." : "重置" }}
           </button>
         </div>
@@ -208,18 +221,20 @@
     <!-- Initial password / reset result modal (one-time display) -->
     <div v-if="revealModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
          @click.self="closeReveal" data-testid="reveal-pw-modal">
-      <div class="w-full max-w-md rounded-lg bg-neutral-900 p-6">
-        <h3 class="mb-2 text-lg font-medium">{{ revealModal.title }}</h3>
-        <p class="mb-3 text-sm text-amber-300">
+      <div class="w-full max-w-md rounded-lg bg-surface p-6"
+           ref="revealPanelEl" tabindex="-1"
+           role="dialog" aria-modal="true" aria-labelledby="reveal-modal-title">
+        <h3 class="mb-2 text-lg font-medium" id="reveal-modal-title">{{ revealModal.title }}</h3>
+        <p class="mb-3 text-sm text-warning">
           {{ revealModal.subtitle }}
         </p>
-        <div class="rounded bg-neutral-800 px-3 py-2 font-mono text-lg text-neutral-100"
-             data-testid="reveal-pw-value">
+        <div class="rounded bg-surface-2 px-3 py-2 font-mono text-lg text-ink"
+             data-testid="reveal-pw-value" role="alert">
           {{ revealModal.password }}
         </div>
         <div class="mt-5 flex justify-end">
           <button @click="closeReveal" data-testid="reveal-pw-close"
-                  class="rounded bg-blue-600 px-3 py-1.5 text-sm hover:bg-blue-500">
+                  class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover">
             我已保存
           </button>
         </div>
@@ -233,6 +248,7 @@ import { onMounted, ref, computed } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiDelete, apiGet, apiPatch, apiPost, HttpError } from "../api"
 import { useAuthStore } from "../stores/auth"
+import { useDialogFocus } from "../composables/useDialogFocus"
 
 interface UserRow {
   id: number
@@ -293,6 +309,14 @@ const error = ref("")
 const modal = ref<UserModal | null>(null)
 const resetModal = ref<ResetPwModal | null>(null)
 const revealModal = ref<RevealModal | null>(null)
+
+// ---- 模态焦点管理：进入聚焦、Esc 关闭、Tab 循环、关闭归还触发器 ----
+const userPanelEl = ref<HTMLElement | null>(null)
+const resetPanelEl = ref<HTMLElement | null>(null)
+const revealPanelEl = ref<HTMLElement | null>(null)
+useDialogFocus(computed(() => modal.value !== null), userPanelEl, closeModal)
+useDialogFocus(computed(() => resetModal.value !== null), resetPanelEl, closeResetModal)
+useDialogFocus(computed(() => revealModal.value !== null), revealPanelEl, closeReveal)
 
 async function loadUsers() {
   loading.value = true

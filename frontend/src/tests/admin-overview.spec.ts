@@ -122,7 +122,7 @@ describe("AdminOverview", () => {
 
     // Recent audit: Chinese action labels rendered.
     expect(w.text()).toContain("创建图库")
-    expect(w.text()).toContain("扫描开始")
+    expect(w.text()).toContain("开始扫描")
     expect(w.text()).toContain("gallery:1")
     expect(w.text()).toContain("name=Home")
   })
@@ -214,9 +214,9 @@ describe("AdminOverview", () => {
     await flushPromises()
     const html = w.html()
     // Every color class must appear somewhere in the rendered scan-list.
-    expect(html).toContain("text-green-400")
-    expect(html).toContain("text-yellow-400")
-    expect(html).toContain("text-blue-400")
+    expect(html).toContain("text-success")
+    expect(html).toContain("text-warning")
+    expect(html).toContain("text-primary-text")
   })
 
   it("formats timestamps as YYYY-MM-DD HH:mm:ss", async () => {

@@ -1,29 +1,34 @@
 <template>
-  <div class="min-h-screen flex items-center justify-center px-4">
-    <form class="w-full max-w-sm space-y-4 bg-neutral-900 rounded-lg p-6" @submit.prevent="onSubmit">
+  <main id="main-content" class="min-h-screen flex items-center justify-center px-4">
+    <form class="w-full max-w-sm space-y-4 bg-surface rounded-lg p-6" @submit.prevent="onSubmit">
       <h1 class="text-xl font-semibold text-center">myPhotoGallery</h1>
       <label class="block">
-        <span class="text-sm text-neutral-400">用户名</span>
+        <span class="text-sm text-ink-2">用户名</span>
         <input v-model="username" type="text" autocomplete="username" required
-               class="mt-1 w-full rounded bg-neutral-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+               :aria-invalid="errorMsg ? true : undefined"
+               :aria-describedby="errorMsg ? 'login-error' : undefined"
+               class="mt-1 w-full rounded bg-surface-2 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary" />
       </label>
       <label class="block">
-        <span class="text-sm text-neutral-400">密码</span>
+        <span class="text-sm text-ink-2">密码</span>
         <input v-model="password" type="password" autocomplete="current-password" required
-               class="mt-1 w-full rounded bg-neutral-800 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+               :aria-invalid="errorMsg ? true : undefined"
+               :aria-describedby="errorMsg ? 'login-error' : undefined"
+               class="mt-1 w-full rounded bg-surface-2 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary" />
       </label>
       <!-- P4: 按错误码渲染不同 banner 颜色 -->
       <div v-if="errorMsg"
+           id="login-error"
            :class="['rounded px-3 py-2 text-sm', bannerClass]"
            role="alert">
         {{ errorMsg }}
       </div>
       <button type="submit" :disabled="submitting"
-              class="w-full rounded bg-blue-600 py-2 font-medium hover:bg-blue-500 disabled:opacity-50">
+              class="min-h-11 w-full rounded bg-primary py-2 font-medium text-white hover:bg-primary-hover disabled:opacity-50 sm:w-auto sm:px-6">
         {{ submitting ? "登录中..." : "登录" }}
       </button>
     </form>
-  </div>
+  </main>
 </template>
 
 <script setup lang="ts">
@@ -41,9 +46,9 @@ const errorKind = ref<"default" | "lan" | "locked">("default")
 const submitting = ref(false)
 
 const bannerClass = computed(() => {
-  if (errorKind.value === "lan") return "bg-amber-950/40 text-amber-200 border border-amber-800/60"
-  if (errorKind.value === "locked") return "bg-yellow-950/40 text-yellow-200 border border-yellow-800/60"
-  return "bg-red-950/40 text-red-300 border border-red-800/60"
+  if (errorKind.value === "lan") return "bg-warning-soft/40 text-warning border border-warning-line/60"
+  if (errorKind.value === "locked") return "bg-danger-soft text-danger-text border border-danger-line/60"
+  return "bg-danger-soft/40 text-danger-text border border-danger-line/60"
 })
 
 async function onSubmit() {

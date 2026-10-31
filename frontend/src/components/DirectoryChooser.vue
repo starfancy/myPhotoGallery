@@ -2,72 +2,73 @@
   <div v-if="modelValue"
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
        @click.self="cancel">
-    <div class="w-full max-w-2xl overflow-hidden rounded-lg bg-neutral-900 shadow-xl"
-         role="dialog" aria-modal="true" @keydown.esc="cancel" tabindex="-1" ref="dialogEl">
+    <div class="m-2 w-[calc(100vw-1rem)] max-w-2xl overflow-hidden rounded-lg bg-surface shadow-xl"
+         role="dialog" aria-modal="true" aria-labelledby="dir-chooser-title"
+         tabindex="-1" ref="dialogEl">
       <!-- Header -->
-      <div class="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-        <div class="font-medium">选择目录</div>
-        <button class="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+      <div class="flex items-center justify-between border-b border-line px-4 py-3">
+        <div class="font-medium" id="dir-chooser-title">选择目录</div>
+        <button class="min-h-11 min-w-11 rounded px-2 py-1 text-sm text-ink-2 hover:bg-surface-2 hover:text-ink"
                 @click="cancel" aria-label="关闭">✕</button>
       </div>
 
       <!-- Breadcrumbs -->
-      <div class="flex flex-wrap items-center gap-1 border-b border-neutral-800 px-4 py-2 text-xs">
-        <button class="rounded px-1.5 py-0.5 hover:bg-neutral-800"
+      <div class="flex flex-wrap items-center gap-1 border-b border-line px-4 py-2 text-xs">
+        <button class="min-h-11 rounded px-1.5 py-0.5 hover:bg-surface-2 md:min-h-0"
                 @click="navigateTo('')">根</button>
         <template v-for="(bc, i) in breadcrumbs" :key="i">
-          <span class="text-neutral-600">/</span>
-          <button class="rounded px-1.5 py-0.5 hover:bg-neutral-800"
+          <span class="text-ink-muted" aria-hidden="true">/</span>
+          <button class="min-h-11 rounded px-1.5 py-0.5 hover:bg-surface-2 md:min-h-0"
                   @click="navigateTo(bc.path)">{{ bc.name }}</button>
         </template>
       </div>
 
       <!-- Manual path input -->
-      <div class="border-b border-neutral-800 px-4 py-2">
+      <div class="border-b border-line px-4 py-2">
         <input v-model="manualPath" @keydown.enter.prevent="navigateTo(manualPath)"
                placeholder="输入路径后按 Enter"
-               class="w-full rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+               class="w-full rounded bg-surface-2 px-3 py-1.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-1 focus:ring-primary" />
       </div>
 
       <!-- Directory list -->
       <div class="max-h-96 overflow-y-auto">
-        <div v-if="loading" class="p-4 text-sm text-neutral-400">加载中...</div>
-        <div v-else-if="error" class="p-4 text-sm text-red-400">{{ error }}</div>
+        <div v-if="loading" class="p-4 text-sm text-ink-2">加载中...</div>
+        <div v-else-if="error" class="p-4 text-sm text-danger-text" role="alert">{{ error }}</div>
         <template v-else>
           <div v-if="truncated"
-               class="border-b border-yellow-900/40 bg-yellow-900/20 px-4 py-2 text-xs text-yellow-300">
+               class="border-b border-warning-line/40 bg-warning-soft/20 px-4 py-2 text-xs text-warning">
             该目录条目过多，仅显示前 5000 项
           </div>
-          <ul v-if="entries.length > 0" class="divide-y divide-neutral-800">
+          <ul v-if="entries.length > 0" class="divide-y divide-line">
             <li v-for="e in entries" :key="e.path">
-              <button class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-neutral-800"
+              <button class="flex min-h-11 w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-surface-2"
                       @dblclick="navigateTo(e.path)"
                       @click="selectEntry(e)"
-                      :class="{ 'bg-neutral-800': selected === e.path }">
+                      :class="{ 'bg-surface-2': selected === e.path }">
                 <span aria-hidden="true">{{ e.is_root ? "💽" : "📁" }}</span>
                 <span class="flex min-w-0 items-baseline">
                   <span class="truncate min-w-0">{{ e.name }}</span>
                   <span v-if="e.is_root && e.label"
-                        class="min-w-0 truncate text-neutral-500">（{{ e.label }}）</span>
+                        class="min-w-0 truncate text-ink-2">（{{ e.label }}）</span>
                 </span>
               </button>
             </li>
           </ul>
-          <div v-else class="p-4 text-sm text-neutral-500">
+          <div v-else class="p-4 text-sm text-ink-2" role="status">
             {{ currentPath ? "此目录下没有子目录" : "无可用位置" }}
           </div>
         </template>
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3">
-        <div class="min-w-0 flex-1 truncate text-xs text-neutral-500" :title="confirmTarget || '未选择'">
-          将选择: <span class="text-neutral-300">{{ confirmTarget || "未选择" }}</span>
+      <div class="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
+        <div class="min-w-0 flex-1 truncate text-xs text-ink-2" :title="confirmTarget || '未选择'">
+          将选择: <span class="text-ink">{{ confirmTarget || "未选择" }}</span>
         </div>
         <div class="flex gap-2">
-          <button class="rounded px-3 py-1.5 text-sm text-neutral-400 hover:bg-neutral-800"
+          <button class="min-h-11 rounded px-3 py-1.5 text-sm text-ink-2 hover:bg-surface-2"
                   @click="cancel">取消</button>
-          <button class="rounded bg-blue-600 px-3 py-1.5 text-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          <button class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
                   :disabled="!confirmTarget"
                   @click="confirmSelection">确认</button>
         </div>
@@ -77,8 +78,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue"
+import { computed, ref, watch } from "vue"
 import { apiPost, HttpError } from "../api"
+import { useDialogFocus } from "../composables/useDialogFocus"
 
 interface Props {
   modelValue: boolean
@@ -117,6 +119,13 @@ const error = ref("")
 const selected = ref<string>("")
 const manualPath = ref<string>("")
 const dialogEl = ref<HTMLElement | null>(null)
+
+// 焦点统一管理：打开聚焦首项、Esc 关闭、Tab 循环、关闭归还触发器焦点。
+useDialogFocus(
+  computed(() => props.modelValue),
+  dialogEl,
+  cancel,
+)
 
 // The path the user actually confirms: prefer an explicit selection from the
 // entry list; if nothing is selected but the user is inside a real directory,
@@ -213,9 +222,6 @@ watch(
       selected.value = ""
       error.value = ""
       await browse(props.startPath ?? "")
-      // Move focus into the dialog so Esc-to-close works immediately.
-      await nextTick()
-      dialogEl.value?.focus()
     }
   },
   { immediate: true },
