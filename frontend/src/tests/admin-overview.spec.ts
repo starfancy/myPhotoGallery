@@ -122,7 +122,7 @@ describe("AdminOverview", () => {
 
     // Recent audit: Chinese action labels rendered.
     expect(w.text()).toContain("创建图库")
-    expect(w.text()).toContain("扫描开始")
+    expect(w.text()).toContain("开始扫描")
     expect(w.text()).toContain("gallery:1")
     expect(w.text()).toContain("name=Home")
   })

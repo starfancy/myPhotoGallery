@@ -97,7 +97,7 @@
             <li v-for="a in data.recent_audit" :key="a.id"
                 class="flex flex-col gap-1 p-3 text-sm sm:flex-row sm:items-baseline sm:gap-4">
               <span class="w-32 shrink-0 text-xs text-ink-muted">{{ formatTs(a.ts) }}</span>
-              <span class="w-24 shrink-0 font-medium">{{ actionLabel(a.action) }}</span>
+              <span class="w-24 shrink-0 font-medium">{{ auditActionLabel(a.action) }}</span>
               <span class="w-36 shrink-0 truncate text-xs text-ink-muted"
                     :title="a.actor_ip">{{ a.actor_ip }}</span>
               <span class="min-w-0 flex-1 truncate text-xs text-ink-2"
@@ -142,6 +142,7 @@
 import { onMounted, onUnmounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiGet, apiPost, HttpError } from "../api"
+import { auditActionLabel } from "../utils/audit"
 
 interface Stats {
   images: number
@@ -263,37 +264,6 @@ onUnmounted(() => {
 })
 
 // ---- display helpers ----
-
-const ACTION_LABELS: Record<string, string> = {
-  login_success: "登录",
-  login_fail: "登录失败",
-  user_create: "创建用户",
-  user_delete: "删除用户",
-  user_disable: "禁用用户",
-  user_update: "更新用户",
-  password_reset: "重置密码",
-  gallery_create: "创建图库",
-  gallery_delete: "删除图库",
-  gallery_update: "更新图库",
-  root_add: "添加根目录",
-  root_remove: "移除根目录",
-  root_update: "更新根目录",
-  exclusion_add: "新增排除",
-  exclusion_remove: "解除排除",
-  image_delete: "删除图片",
-  image_restore: "恢复图片",
-  trash_purge: "清理回收站",
-  thumb_cache_purge: "清理缩略图缓存",
-  scan_start: "扫描开始",
-  scan_finish: "扫描完成",
-  scan_error: "扫描失败",
-  fs_browse: "浏览目录",
-  settings_update: "更新设置",
-}
-
-function actionLabel(action: string): string {
-  return ACTION_LABELS[action] ?? action
-}
 
 const SCAN_STATUS_LABELS: Record<string, string> = {
   idle: "空闲",
