@@ -1,6 +1,9 @@
+import json
+
 import pytest
 
 from myphoto.analytics import (
+    aggregate_rows,
     aperture_bucket,
     camera_display_name,
     crop_factor,
@@ -151,3 +154,128 @@ def test_focal_bucket(mm, expected):
 ])
 def test_aperture_bucket(f, expected):
     assert aperture_bucket(f) == expected
+
+
+# ---------- aggregate_rows ----------
+
+
+def _row(make=None, model=None, focal=None, fnumber=None, taken_at=1_700_000_000,
+         blob="__use_exif__"):
+    """构造 (taken_at, exif_json) 合成行。blob=None 表示无 EXIF 列。"""
+    exif = {}
+    if make is not None:
+        exif["Make"] = make
+    if model is not None:
+        exif["Model"] = model
+    if focal is not None:
+        exif["FocalLength"] = focal
+    if fnumber is not None:
+        exif["FNumber"] = fnumber
+    if blob == "__bad__":
+        return taken_at, "{not json"
+    if blob is None:
+        return taken_at, None
+    return taken_at, json.dumps(exif)
+
+
+def test_aggregate_empty():
+    out = aggregate_rows([])
+    assert out["total"] == 0
+    assert out["with_exif"] == 0
+    assert out["without_taken_at"] == 0
+    assert out["makes"] == []
+    assert out["cameras"] == []
+    assert out["months"] == []
+    assert [s["count"] for s in out["focal_ranges"]] == [0, 0, 0, 0]
+    assert [s["key"] for s in out["focal_ranges"]] == ["wide", "standard", "tele", "unknown"]
+    assert [s["key"] for s in out["apertures"]] == ["f28", "f4", "f56", "f8", "f11plus", "unknown"]
+
+
+def test_aggregate_basic_counts_and_equiv_focal():
+    rows = [
+        # DX 机身：24mm 实际 -> 36mm 等效 -> 中焦
+        _row("NIKON CORPORATION", "NIKON D7000", focal=24, fnumber=5.595),
+        # 全幅：24mm -> 广角
+        _row("NIKON CORPORATION", "NIKON D800", focal=24, fnumber=2.8),
+        # 手机无机型系数 -> 焦段未知；不给 FNumber -> 光圈也未知
+        _row("vivo", "vivo X100 Ultra", focal=5.2),
+    ]
+    out = aggregate_rows(rows)
+    assert out["total"] == 3
+    assert out["with_exif"] == 3
+    focal = {s["key"]: s["count"] for s in out["focal_ranges"]}
+    assert focal == {"wide": 1, "standard": 1, "tele": 0, "unknown": 1}
+    ap = {s["key"]: s["count"] for s in out["apertures"]}
+    assert ap["f28"] == 1
+    assert ap["f56"] == 1
+    assert ap["f28"] + ap["f56"] == 2
+    assert ap["unknown"] == 1
+    makes = {m["name"]: m["count"] for m in out["makes"]}
+    assert makes["Nikon"] == 2
+    assert makes["vivo"] == 1
+    cameras = {m["name"]: m["count"] for m in out["cameras"]}
+    assert cameras["Nikon D7000"] == 1
+
+
+def test_aggregate_make_and_camera_unknown_buckets():
+    rows = [
+        _row(None, None),                       # 无 Make/Model
+        _row("Canon", "Canon EOS 5D Mark III"),
+        _row(blob=None),                        # 整行无 EXIF
+    ]
+    out = aggregate_rows(rows)
+    assert out["makes"][-1] == {"name": "未知", "count": 2}
+    assert out["cameras"][-1] == {"name": "未知", "count": 2}
+    # 所有照片都在四个焦段桶 / 六个光圈桶里（全集划分，合计 = total）
+    assert sum(s["count"] for s in out["focal_ranges"]) == 3
+    assert sum(s["count"] for s in out["apertures"]) == 3
+    assert sum(m["count"] for m in out["makes"]) == 3
+
+
+def test_aggregate_top8_plus_other():
+    rows = [_row(f"Brand{i}", f"Model{i}") for i in range(10)]
+    out = aggregate_rows(rows)
+    # 10 个不同厂商：Top 8 + 其他(2)，无机型未知桶
+    names = [m["name"] for m in out["makes"]]
+    assert len(names) == 9
+    assert names[-1] == "其他"
+    assert out["makes"][-1]["count"] == 2
+
+
+def test_aggregate_month_zero_fill_and_missing_taken_at():
+    # 取 UTC 正午的时间戳：UTC-12 ~ UTC+14 任意时区都落在同一天，断言不依赖运行机器时区。
+    # 2025-01-15 / 2025-02-15 / 2025-03-15 各一张，中间无缺月；另有 1 张无拍摄日期
+    rows = [
+        _row("Canon", "Canon EOS R5", taken_at=1_736_942_400),  # 2025-01-15 12:00 UTC
+        _row("Canon", "Canon EOS R5", taken_at=1_739_620_800),  # 2025-02-15 12:00 UTC
+        _row("Canon", "Canon EOS R5", taken_at=1_742_040_000),  # 2025-03-15 12:00 UTC
+        _row("Canon", "Canon EOS R5", taken_at=None),
+    ]
+    out = aggregate_rows(rows)
+    assert out["without_taken_at"] == 1
+    months = out["months"]
+    assert [m["month"] for m in months] == ["2025-01", "2025-02", "2025-03"]
+    assert months[0]["count"] == 1
+    assert months[2]["count"] == 1
+    assert sum(m["count"] for m in months) == 3
+
+
+def test_aggregate_bad_json_does_not_raise():
+    out = aggregate_rows([
+        (1_700_000_000, "{bad json"),
+        (1_700_000_000, None),
+    ])
+    assert out["total"] == 2
+    assert out["with_exif"] == 0
+    # 坏行仍计入月图（taken_at 在 JSON 外）
+    assert sum(m["count"] for m in out["months"]) == 2
+    # 坏行归未知，不影响其他照片
+    assert {s["key"]: s["count"] for s in out["focal_ranges"]}["unknown"] == 2
+
+
+def test_aggregate_string_numeric_exif_values():
+    # 扫描器对个别 rational 可能序列化成字符串；可解析为 float 的照常归类
+    out = aggregate_rows([_row("Canon", "Canon EOS R5", focal="50", fnumber="2.8")])
+    focal = {s["key"]: s["count"] for s in out["focal_ranges"]}
+    assert focal["standard"] == 1
+    assert {s["key"]: s["count"] for s in out["apertures"]}["f28"] == 1

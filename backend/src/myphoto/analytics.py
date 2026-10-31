@@ -8,7 +8,11 @@ docs/superpowers/specs/2026-10-31-exif-analytics-overview-design.md §2。
 """
 from __future__ import annotations
 
+import json
 import re
+import time
+from collections import Counter
+from typing import Iterable
 
 # ---- 厂商归一 -------------------------------------------------------------
 
@@ -215,3 +219,149 @@ def aperture_bucket(f_number: float | None) -> str:
     if f_number <= 9.5:
         return "f8"
     return "f11plus"
+
+
+# ---- 行聚合 ---------------------------------------------------------------
+
+TOP_N = 8
+
+FOCAL_SEGMENTS: list[tuple[str, str]] = [
+    ("wide", "广角 (<35mm)"),
+    ("standard", "中焦 (35–70mm)"),
+    ("tele", "长焦 (>70mm)"),
+    ("unknown", "未知"),
+]
+
+APERTURE_SEGMENTS: list[tuple[str, str]] = [
+    ("f28", "≤ f/2.8"),
+    ("f4", "f/4"),
+    ("f56", "f/5.6"),
+    ("f8", "f/8"),
+    ("f11plus", "f/11+"),
+    ("unknown", "未知"),
+]
+
+_UNKNOWN_BUCKET = "未知"
+_OTHER_BUCKET = "其他"
+
+
+def _as_float(value: object) -> float | None:
+    """EXIF 数值容错：bool 拒绝、数字直取、可解析字符串转 float，其余 None。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _top_items(counter: Counter) -> list[dict[str, object]]:
+    """Top N + 「其他」；「未知」始终独立放在最后（count>0 时）。"""
+    unknown = counter.pop(_UNKNOWN_BUCKET, 0)
+    top = counter.most_common(TOP_N)
+    other_count = sum(counter.values()) - sum(cnt for _, cnt in top)
+    items: list[dict[str, object]] = [
+        {"name": name, "count": cnt} for name, cnt in top
+    ]
+    if other_count > 0:
+        items.append({"name": _OTHER_BUCKET, "count": other_count})
+    if unknown > 0:
+        items.append({"name": _UNKNOWN_BUCKET, "count": unknown})
+    return items
+
+
+def _zero_fill_months(counter: Counter[str]) -> list[dict[str, object]]:
+    """从最早月到最近月逐月补零。键格式 'YYYY-MM'（零填充，字符串序=时间序）。"""
+    if not counter:
+        return []
+    start_y, start_m = (int(x) for x in min(counter).split("-"))
+    end_y, end_m = (int(x) for x in max(counter).split("-"))
+    out: list[dict[str, object]] = []
+    year, month = start_y, start_m
+    while (year, month) <= (end_y, end_m):
+        key = f"{year:04d}-{month:02d}"
+        out.append({"month": key, "count": counter.get(key, 0)})
+        month += 1
+        if month == 13:
+            month, year = 1, year + 1
+    return out
+
+
+def aggregate_rows(
+    rows: Iterable[tuple[int | None, str | None]],
+) -> dict[str, object]:
+    """把 (taken_at, exif_json) 行聚合成图表 payload。
+
+    单行 JSON 损坏 / 字段类型异常一律吞掉按未知处理，绝不抛异常；
+    该照片仍计入 total 与月图（taken_at 不在 JSON 内）。
+    """
+    makes_c: Counter[str] = Counter()
+    cameras_c: Counter[str] = Counter()
+    focal_c: Counter[str] = Counter()
+    aperture_c: Counter[str] = Counter()
+    months_c: Counter[str] = Counter()
+    total = 0
+    with_exif = 0
+    without_taken_at = 0
+
+    for taken_at, blob in rows:
+        total += 1
+        if taken_at is None:
+            without_taken_at += 1
+        else:
+            months_c[time.strftime("%Y-%m", time.localtime(taken_at))] += 1
+
+        exif: dict[str, object] = {}
+        if blob:
+            try:
+                parsed = json.loads(blob)
+            except (ValueError, TypeError):
+                parsed = None
+            if isinstance(parsed, dict):
+                exif = parsed
+                with_exif += 1
+
+        make_raw = exif.get("Make") if isinstance(exif.get("Make"), str) else None
+        model_raw = exif.get("Model") if isinstance(exif.get("Model"), str) else None
+
+        make = normalize_make(make_raw, model_raw)
+        if make:
+            makes_c[make] += 1
+        else:
+            makes_c[_UNKNOWN_BUCKET] += 1
+
+        camera = camera_display_name(make_raw, model_raw)
+        if camera:
+            cameras_c[camera] += 1
+        else:
+            cameras_c[_UNKNOWN_BUCKET] += 1
+
+        focal = _as_float(exif.get("FocalLength"))
+        factor = crop_factor(make_raw, model_raw)
+        if focal is not None and focal > 0 and factor is not None:
+            focal_c[focal_bucket(focal * factor)] += 1
+        else:
+            focal_c["unknown"] += 1
+
+        aperture_c[aperture_bucket(_as_float(exif.get("FNumber")))] += 1
+
+    return {
+        "total": total,
+        "with_exif": with_exif,
+        "without_taken_at": without_taken_at,
+        "makes": _top_items(makes_c),
+        "cameras": _top_items(cameras_c),
+        "focal_ranges": [
+            {"key": key, "name": label, "count": focal_c.get(key, 0)}
+            for key, label in FOCAL_SEGMENTS
+        ],
+        "apertures": [
+            {"key": key, "name": label, "count": aperture_c.get(key, 0)}
+            for key, label in APERTURE_SEGMENTS
+        ],
+        "months": _zero_fill_months(months_c),
+    }
