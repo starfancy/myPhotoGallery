@@ -26,7 +26,7 @@
         <div v-if="error" class="text-xs text-danger-text">{{ error }}</div>
         <div v-if="success" class="text-xs text-success">密码已修改</div>
         <button type="submit" :disabled="submitting || !valid"
-                class="w-full rounded bg-primary px-3 py-2 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
+                class="min-h-11 w-full rounded bg-primary px-3 py-2 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
           {{ submitting ? "修改中..." : "修改密码" }}
         </button>
       </form>

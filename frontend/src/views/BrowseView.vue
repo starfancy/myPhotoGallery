@@ -11,14 +11,14 @@
            class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <button v-if="!selectionMode"
                 type="button"
-                class="rounded bg-surface-2 px-2 py-1 text-ink hover:bg-surface-3"
+                class="min-h-11 rounded bg-surface-2 px-2 py-1 text-ink hover:bg-surface-3"
                 @click="enterSelectionMode">
           选择
         </button>
         <template v-else>
           <span class="text-ink-2">已选 {{ selectedIds.size }} 项</span>
           <button type="button"
-                  class="rounded bg-surface-2 px-2 py-1 text-ink hover:bg-surface-3"
+                  class="min-h-11 rounded bg-surface-2 px-2 py-1 text-ink hover:bg-surface-3"
                   @click="selectAll">
             {{ isAllSelected ? "取消全选" : "全选" }}
           </button>

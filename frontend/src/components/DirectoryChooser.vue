@@ -65,9 +65,9 @@
           将选择: <span class="text-ink">{{ confirmTarget || "未选择" }}</span>
         </div>
         <div class="flex gap-2">
-          <button class="rounded px-3 py-1.5 text-sm text-ink-2 hover:bg-surface-2"
+          <button class="min-h-11 rounded px-3 py-1.5 text-sm text-ink-2 hover:bg-surface-2"
                   @click="cancel">取消</button>
-          <button class="rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+          <button class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
                   :disabled="!confirmTarget"
                   @click="confirmSelection">确认</button>
         </div>

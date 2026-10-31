@@ -7,7 +7,7 @@
     <div v-if="auth.user" class="flex items-center gap-2 text-sm">
       <div v-if="auth.isAdmin" ref="adminMenuRef" class="relative">
         <button type="button"
-          class="min-h-11 min-w-11 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink"
+          class="min-h-11 min-w-11 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink md:min-h-0 md:min-w-0"
           :class="{ 'bg-surface-2 text-ink': adminOpen }"
           :aria-expanded="adminOpen"
           aria-haspopup="menu"
@@ -17,32 +17,32 @@
         <div v-if="adminOpen" role="menu"
              class="absolute right-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-md border border-line bg-surface shadow-lg">
           <router-link to="/admin" role="menuitem"
-            class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="adminOpen = false">
             概览
           </router-link>
           <router-link to="/admin/galleries" role="menuitem"
-            class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="adminOpen = false">
             图库
           </router-link>
           <router-link to="/admin/trash" role="menuitem"
-            class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="adminOpen = false">
             回收站
           </router-link>
           <router-link to="/admin/users" role="menuitem"
-            class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="adminOpen = false">
             用户
           </router-link>
           <router-link to="/admin/audit" role="menuitem"
-            class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="adminOpen = false">
             审计日志
           </router-link>
           <router-link to="/admin/settings" role="menuitem"
-            class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="adminOpen = false">
             设置
           </router-link>
@@ -50,7 +50,7 @@
       </div>
       <div ref="menuRef" class="relative">
         <button type="button"
-          class="flex min-h-11 min-w-11 items-center gap-1 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink"
+          class="flex min-h-11 min-w-11 items-center gap-1 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink md:min-h-0 md:min-w-0"
           :class="{ 'bg-surface-2 text-ink': open }"
           :aria-expanded="open"
           aria-haspopup="menu"
@@ -78,12 +78,12 @@
         <div v-if="open" role="menu"
              class="absolute right-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-md border border-line bg-surface shadow-lg">
           <router-link to="/settings/password" role="menuitem"
-            class="block px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="open = false">
             修改密码
           </router-link>
           <button type="button" role="menuitem"
-            class="block w-full px-3 py-2 text-left text-ink-2 hover:bg-surface-2 hover:text-ink"
+            class="flex min-h-11 w-full items-center px-3 py-2 text-left text-ink-2 hover:bg-surface-2 hover:text-ink"
             @click="onLogout">
             登出
           </button>

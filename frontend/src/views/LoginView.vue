@@ -19,7 +19,7 @@
         {{ errorMsg }}
       </div>
       <button type="submit" :disabled="submitting"
-              class="w-full rounded bg-primary py-2 font-medium text-white hover:bg-primary-hover disabled:opacity-50 sm:w-auto sm:px-6">
+              class="min-h-11 w-full rounded bg-primary py-2 font-medium text-white hover:bg-primary-hover disabled:opacity-50 sm:w-auto sm:px-6">
         {{ submitting ? "登录中..." : "登录" }}
       </button>
     </form>

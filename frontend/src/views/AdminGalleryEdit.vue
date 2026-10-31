@@ -33,7 +33,7 @@
             </div>
             <button @click="saveGallery"
                     :disabled="saving"
-                    class="shrink-0 w-full rounded bg-primary px-4 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
+                    class="min-h-11 shrink-0 w-full rounded bg-primary px-4 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
               {{ saving ? "保存中..." : "保存" }}
             </button>
           </div>

@@ -9,7 +9,7 @@
       <template v-else>
         <section class="flex items-center gap-2">
           <button @click="openCreate" data-testid="new-user-btn"
-                  class="rounded bg-primary px-3 py-2 text-sm text-white hover:bg-primary-hover">
+                  class="min-h-11 w-full rounded bg-primary px-3 py-2 text-sm text-white hover:bg-primary-hover sm:w-auto">
             新建用户
           </button>
         </section>
@@ -169,12 +169,12 @@
           </div>
         </div>
         <div class="mt-5 flex justify-end gap-2">
-          <button @click="closeModal" class="rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4">
+          <button @click="closeModal" class="min-h-11 rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4">
             取消
           </button>
           <button @click="submitModal" :disabled="modal.submitting"
                   data-testid="modal-submit"
-                  class="rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:opacity-50">
+                  class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:opacity-50">
             {{ modal.submitting ? "提交中..." : (modal.mode === "create" ? "创建" : "保存") }}
           </button>
         </div>
@@ -193,12 +193,12 @@
         </label>
         <div v-if="resetModal.error" class="mt-2 text-sm text-danger-text">{{ resetModal.error }}</div>
         <div class="mt-5 flex justify-end gap-2">
-          <button @click="closeResetModal" class="rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4">
+          <button @click="closeResetModal" class="min-h-11 rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4">
             取消
           </button>
           <button @click="submitReset" :disabled="resetModal.submitting"
                   data-testid="reset-pw-submit"
-                  class="rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:opacity-50">
+                  class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:opacity-50">
             {{ resetModal.submitting ? "重置中..." : "重置" }}
           </button>
         </div>
@@ -219,7 +219,7 @@
         </div>
         <div class="mt-5 flex justify-end">
           <button @click="closeReveal" data-testid="reveal-pw-close"
-                  class="rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover">
+                  class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover">
             我已保存
           </button>
         </div>
