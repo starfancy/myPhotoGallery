@@ -89,6 +89,20 @@
           </p>
         </section>
 
+        <!-- 批量下载 -->
+        <section class="rounded-lg bg-neutral-900 p-4">
+          <h2 class="mb-3 text-sm font-medium text-neutral-400">批量下载</h2>
+          <label class="block text-xs text-neutral-500">
+            单次批量下载 ZIP 的图片数量上限（10–200）
+          </label>
+          <input v-model.number="form.download_batch_limit"
+                 type="number" min="10" max="200"
+                 class="mt-1 w-28 rounded bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <p class="mt-2 text-xs text-neutral-500">
+            对所有用户生效；保存后立即生效。
+          </p>
+        </section>
+
         <div class="flex items-center gap-3">
           <button @click="save" :disabled="!dirty || saving"
                   class="rounded bg-blue-600 px-4 py-1.5 text-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
@@ -111,6 +125,7 @@ interface SettingsForm {
   login_lockout_threshold: number
   trusted_proxies: string[]
   session_hours: number
+  download_batch_limit: number
 }
 
 const RETENTION_OPTIONS = [
@@ -129,6 +144,7 @@ const form = ref<SettingsForm>({
   login_lockout_threshold: 5,
   trusted_proxies: [],
   session_hours: 8,
+  download_batch_limit: 100,
 })
 const loadedJson = ref("")
 
@@ -140,6 +156,7 @@ function normalized(): SettingsForm {
     login_lockout_threshold: form.value.login_lockout_threshold,
     trusted_proxies: form.value.trusted_proxies.map((s) => s.trim()).filter(Boolean),
     session_hours: form.value.session_hours,
+    download_batch_limit: form.value.download_batch_limit,
   }
 }
 
@@ -175,6 +192,7 @@ async function load() {
       login_lockout_threshold: data.login_lockout_threshold,
       trusted_proxies: [...data.trusted_proxies],
       session_hours: data.session_hours,
+      download_batch_limit: data.download_batch_limit,
     }
     loadedJson.value = JSON.stringify(normalized())
   } catch (err) {
@@ -191,9 +209,10 @@ async function save() {
   // 让后端 400 的校验信息透传给用户，这里不做 min/max 预检。
   if (
     !isFiniteInput(form.value.login_lockout_threshold) ||
-    !isFiniteInput(form.value.session_hours)
+    !isFiniteInput(form.value.session_hours) ||
+    !isFiniteInput(form.value.download_batch_limit)
   ) {
-    error.value = "请填写有效的数字：锁定阈值和会话时长不能为空。"
+    error.value = "请填写有效的数字：锁定阈值、会话时长和批量下载上限不能为空。"
     return
   }
   saving.value = true
@@ -207,6 +226,7 @@ async function save() {
       login_lockout_threshold: data.login_lockout_threshold,
       trusted_proxies: [...data.trusted_proxies],
       session_hours: data.session_hours,
+      download_batch_limit: data.download_batch_limit,
     }
     loadedJson.value = JSON.stringify(normalized())
     savedOk.value = true

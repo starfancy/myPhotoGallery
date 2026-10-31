@@ -9,6 +9,7 @@ interface Settings {
   login_lockout_threshold: number
   trusted_proxies: string[]
   session_hours: number
+  download_batch_limit: number
 }
 
 const DEFAULTS: Settings = {
@@ -16,6 +17,7 @@ const DEFAULTS: Settings = {
   login_lockout_threshold: 5,
   trusted_proxies: [],
   session_hours: 8,
+  download_batch_limit: 100,
 }
 
 function json(body: unknown, status = 200) {
@@ -78,6 +80,7 @@ describe("AdminSettings", () => {
       login_lockout_threshold: 3,
       trusted_proxies: [],
       session_hours: 8,
+      download_batch_limit: 100,
     })
     expect(w.text()).toContain("已保存")
   })
@@ -138,7 +141,7 @@ describe("AdminSettings", () => {
     // only the initial GET — no PATCH
     expect(fetchFn).toHaveBeenCalledTimes(1)
     expect(fetchFn.mock.calls[0][1]?.method ?? "GET").not.toBe("PATCH")
-    expect(w.text()).toContain("请填写有效的数字：锁定阈值和会话时长不能为空。")
+    expect(w.text()).toContain("请填写有效的数字：锁定阈值、会话时长和批量下载上限不能为空。")
   })
 
   it("resets form to the PATCH response so deduped proxies leave a clean form", async () => {
@@ -216,5 +219,37 @@ describe("AdminSettings", () => {
     await flushPromises()
 
     expect(w.text()).toContain("session_hours must be between 1 and 720")
+  })
+
+  it("加载批量下载上限并可 PATCH", async () => {
+    const fetchFn = vi.fn()
+    fetchFn
+      .mockResolvedValueOnce(json(DEFAULTS))
+      .mockResolvedValueOnce(json({ ...DEFAULTS, download_batch_limit: 80 }))
+    vi.stubGlobal("fetch", fetchFn)
+    const w = await mountView()
+
+    const numbers = w.findAll('input[type="number"]')
+    // 顺序：登录锁定阈值、会话时长、批量下载上限
+    expect((numbers[2].element as HTMLInputElement).value).toBe("100")
+    await numbers[2].setValue(80)
+    await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click")
+    await flushPromises()
+
+    const [, init] = fetchFn.mock.calls[1]
+    expect(JSON.parse(init.body).download_batch_limit).toBe(80)
+  })
+
+  it("批量下载上限为空时阻止保存", async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(json(DEFAULTS))
+    vi.stubGlobal("fetch", fetchFn)
+    const w = await mountView()
+    const numbers = w.findAll('input[type="number"]')
+    await numbers[2].setValue("")
+    vi.stubGlobal("alert", vi.fn())
+    await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click")
+    await flushPromises()
+    // 只有 GET，没有 PATCH
+    expect(fetchFn).toHaveBeenCalledTimes(1)
   })
 })
