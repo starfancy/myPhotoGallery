@@ -19,8 +19,8 @@
             {{ users.length }} 个用户
           </h2>
           <div v-else class="text-sm text-ink-muted">暂无用户</div>
-          <div v-if="users.length > 0" class="overflow-hidden rounded-lg bg-surface">
-            <table class="w-full text-sm">
+          <div v-if="users.length > 0" class="overflow-x-auto rounded-lg bg-surface">
+            <table class="w-full min-w-[720px] text-sm">
               <thead class="bg-surface-2/60 text-left text-xs uppercase text-ink-muted">
                 <tr>
                   <th class="px-3 py-2">用户名</th>
@@ -59,15 +59,15 @@
                     {{ u.last_login_at ? formatTs(u.last_login_at) : "—" }}
                   </td>
                   <td class="px-3 py-2 text-right">
-                    <div class="flex justify-end gap-2">
+                    <div class="flex min-w-max justify-end gap-1">
                       <button @click="openEdit(u)"
                               :data-testid="`edit-btn-${u.username}`"
-                              class="rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
+                              class="min-h-11 rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 md:min-h-0">
                         编辑
                       </button>
                       <button @click="openResetPw(u)"
                               :data-testid="`resetpw-btn-${u.username}`"
-                              class="rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4">
+                              class="min-h-11 rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 md:min-h-0">
                         重置密码
                       </button>
                       <button @click="toggleEnabled(u)"
@@ -76,13 +76,13 @@
                               :class="u.enabled
                                        ? 'bg-warning-btn hover:bg-warning-btn-hover'
                                        : 'bg-success-btn hover:bg-success-btn-hover'"
-                              class="rounded px-2 py-1 text-xs text-white disabled:opacity-40">
+                              class="min-h-11 rounded px-2 py-1 text-xs text-white disabled:opacity-40 md:min-h-0">
                         {{ u.enabled ? "禁用" : "启用" }}
                       </button>
                       <button @click="confirmDelete(u)"
                               :data-testid="`delete-btn-${u.username}`"
                               :disabled="u.id === currentUserId"
-                              class="rounded bg-danger px-2 py-1 text-xs text-white hover:bg-danger-hover disabled:opacity-40">
+                              class="min-h-11 rounded bg-danger px-2 py-1 text-xs text-white hover:bg-danger-hover disabled:opacity-40 md:min-h-0">
                         删除
                       </button>
                     </div>

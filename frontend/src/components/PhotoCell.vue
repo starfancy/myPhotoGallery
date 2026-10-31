@@ -143,8 +143,9 @@ function onTouchEnd() {
 }
 .lb-cell-menu-btn {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  /* 8px 外边距配合 ::after 的 -8px：44px 热区刚好落在卡片 overflow:hidden 之内 */
+  top: 8px;
+  right: 8px;
   width: 28px;
   height: 28px;
   border-radius: 999px;
@@ -164,10 +165,17 @@ function onTouchEnd() {
 .lb-cell-menu-btn:hover {
   background: rgba(0, 0, 0, 0.75);
 }
+/* 触屏热区扩到 44×44：可视圆钮仍是 28px，四周 8px 透明区也归按钮 */
+.lb-cell-menu-btn::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
 .lb-cell-check {
   position: absolute;
-  top: 6px;
-  left: 6px;
+  /* 10px 外边距配合 ::after 的 -10px：44px 热区不被卡片 overflow:hidden 裁掉 */
+  top: 10px;
+  left: 10px;
   width: 24px;
   height: 24px;
   border-radius: 999px;
@@ -183,5 +191,11 @@ function onTouchEnd() {
 .lb-cell-check--on {
   background: rgb(var(--color-primary-hover));
   border-color: rgb(var(--color-primary-hover));
+}
+/* 选择圈可视 24px，热区同样扩到 44×44（四周 10px 透明边） */
+.lb-cell-check::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
 }
 </style>

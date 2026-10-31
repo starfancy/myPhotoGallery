@@ -135,14 +135,20 @@ function linkFor(rel: string) {
 
 <style scoped>
 /*
- * auto-fill + 1fr：卡片等比拉伸铺满整行，左右边缘与图片网格
- * （JustifiedGrid/MasonryGrid 均为内容区满宽）严格对齐；
- * 最小列宽 128（原 w-32），间距与图片网格同为 16px。
+ * <640px：固定两列紧凑排布（gap 8px），窄屏一屏看到更多文件夹；
+ * ≥640px：auto-fill + 1fr，卡片等比拉伸铺满整行，最小列宽 180px，
+ * 间距 16px 与图片网格（JustifiedGrid/MasonryGrid）对齐。
  */
 .lb-folder-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+@media (min-width: 640px) {
+  .lb-folder-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+  }
 }
 /* 借来的封面：图底黑色渐变，托住白色来源名 */
 .lb-folder-source {
@@ -151,8 +157,9 @@ function linkFor(rel: string) {
 /* 与 PhotoCell 的 .lb-cell-menu-btn 同款：右上角圆形半透明黑底 */
 .lb-folder-menu-btn {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  /* 8px 外边距配合 ::after 的 -8px：44px 热区刚好落在卡片 overflow:hidden 之内 */
+  top: 8px;
+  right: 8px;
   width: 28px;
   height: 28px;
   border-radius: 999px;
@@ -171,5 +178,11 @@ function linkFor(rel: string) {
 }
 .lb-folder-menu-btn:hover {
   background: rgba(0, 0, 0, 0.75);
+}
+/* 触屏热区扩到 44×44：可视圆钮仍是 28px */
+.lb-folder-menu-btn::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
 </style>

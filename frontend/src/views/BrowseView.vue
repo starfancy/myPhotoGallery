@@ -8,7 +8,7 @@
     <main class="p-3">
       <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换 -->
       <div v-if="images.length || folders.length || searchQ"
-           class="mb-2 flex items-center gap-2 text-sm">
+           class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <button v-if="!selectionMode"
                 type="button"
                 class="rounded bg-surface-2 px-2 py-1 text-ink hover:bg-surface-3"
@@ -33,7 +33,7 @@
           />
           <GridLayoutSwitch v-model="gridLayout" />
           <button type="button"
-                  class="flex items-center rounded px-1.5 py-1"
+                  class="flex min-h-11 min-w-11 items-center justify-center rounded px-1.5 py-1"
                   :class="showFilenames
                           ? 'bg-surface-3 text-ink'
                           : 'text-ink-2 hover:text-ink'"
@@ -88,24 +88,24 @@
 
       <!-- 选择模式底部浮动工具条 -->
       <div v-if="selectionMode"
-           class="fixed inset-x-0 bottom-0 z-50 flex items-center justify-between gap-3 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur">
+           class="fixed inset-x-0 bottom-0 z-50 flex flex-wrap items-center justify-between gap-3 border-t border-line bg-surface/95 px-4 py-3 backdrop-blur">
         <span class="text-sm text-ink">已选 {{ selectedIds.size }} 项</span>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <button type="button"
                   :disabled="selectedIds.size === 0 || downloading"
-                  class="rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  class="min-h-11 rounded bg-primary px-3 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
                   @click="onBatchDownload">
             {{ downloading ? "准备中..." : `下载 ZIP（${selectedIds.size}）` }}
           </button>
           <button v-if="auth.isAdmin"
                   type="button"
                   :disabled="selectedIds.size === 0 || batchDeleting"
-                  class="rounded bg-danger px-3 py-1.5 text-sm text-white hover:bg-danger-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  class="min-h-11 rounded bg-danger px-3 py-1.5 text-sm text-white hover:bg-danger-hover disabled:cursor-not-allowed disabled:opacity-40"
                   @click="onBatchDelete">
             {{ batchDeleting ? "移入中..." : "移入回收站" }}
           </button>
           <button type="button"
-                  class="rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4"
+                  class="min-h-11 rounded bg-surface-3 px-3 py-1.5 text-sm hover:bg-surface-4"
                   @click="exitSelectionMode">
             取消
           </button>

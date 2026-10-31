@@ -14,7 +14,7 @@
         v-if="text"
         type="button"
         aria-label="清除搜索"
-        class="absolute right-1 top-1/2 -translate-y-1/2 px-0.5 leading-none text-ink-2 hover:text-ink"
+        class="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center leading-none text-ink-2 hover:text-ink"
         @click="clear"
       >×</button>
     </div>

@@ -2,13 +2,13 @@
   <nav class="mx-auto my-4 flex flex-wrap items-center justify-center gap-1 text-sm"
        aria-label="分页">
     <button type="button"
-            class="rounded bg-surface-2 px-3 py-1 text-ink hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-40"
+            class="min-h-11 min-w-11 rounded bg-surface-2 px-3 py-1 text-ink hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-40"
             :disabled="page <= 1"
             @click="emit('change', page - 1)">上一页</button>
     <template v-for="(p, i) in pageItems" :key="i">
       <span v-if="p === ELLIPSIS" class="px-2 text-ink-muted" aria-hidden="true">…</span>
       <button v-else type="button"
-              class="min-w-[34px] rounded px-2 py-1"
+              class="min-h-11 min-w-11 rounded px-2 py-1"
               :class="p === page
                 ? 'bg-primary-hover text-white'
                 : 'bg-surface-2 text-ink hover:bg-surface-3'"
@@ -16,7 +16,7 @@
               @click="emit('change', p)">{{ p }}</button>
     </template>
     <button type="button"
-            class="rounded bg-surface-2 px-3 py-1 text-ink hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-40"
+            class="min-h-11 min-w-11 rounded bg-surface-2 px-3 py-1 text-ink hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-40"
             :disabled="page >= totalPages"
             @click="emit('change', page + 1)">下一页</button>
   </nav>

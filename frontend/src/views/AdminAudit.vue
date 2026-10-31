@@ -4,8 +4,8 @@
       <template #title><span class="text-ink-2">管理 · 审计日志</span></template>
     </AppHeader>
     <main class="space-y-4 p-4">
-      <!-- 过滤工具条（sticky 贴在 53px 高的 AppHeader 之下；Task 8 接入导出按钮） -->
-      <div class="sticky top-[53px] z-30 -mx-4 flex flex-wrap items-center gap-3 bg-surface px-4 py-2">
+      <!-- 过滤工具条（sticky 贴在 69px 高的 AppHeader 之下——Task 9 后头部触发器为 44px 高） -->
+      <div class="sticky top-[69px] z-30 -mx-4 flex flex-wrap items-center gap-3 bg-surface px-4 py-2">
         <label for="audit-action" class="text-sm text-ink-2">事件</label>
         <select id="audit-action" v-model="filterAction"
                 class="rounded bg-surface-2 px-2 py-1 text-sm text-ink"

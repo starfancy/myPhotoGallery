@@ -4,7 +4,7 @@
        aria-label="缩略图排版方式">
     <button v-for="opt in OPTIONS" :key="opt.value"
             type="button"
-            class="flex items-center rounded px-1.5 py-1"
+            class="flex min-h-11 min-w-11 items-center rounded px-1.5 py-1"
             :class="modelValue === opt.value
                     ? 'bg-surface-3 text-ink'
                     : 'text-ink-2 hover:text-ink'"

@@ -102,6 +102,15 @@ describe("AdminUsers (P4)", () => {
     expect(w.text()).toContain("3 个用户")
   })
 
+  it("wraps the users table in an overflow-x-auto container for small screens", async () => {
+    setupFetchMock({
+      "/api/admin/users": () => ({ data: SAMPLE_USERS }),
+      "/api/admin/galleries": () => ({ data: SAMPLE_GALLERIES }),
+    })
+    const w = await mountView()
+    expect(w.find(".overflow-x-auto").exists()).toBe(true)
+  })
+
   it("shows role and access_scope badges", async () => {
     setupFetchMock({
       "/api/admin/users": () => ({ data: SAMPLE_USERS }),

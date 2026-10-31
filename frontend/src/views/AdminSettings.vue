@@ -122,9 +122,9 @@
           </p>
         </section>
 
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           <button @click="save" :disabled="!dirty || saving"
-                  class="rounded bg-primary px-4 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50">
+                  class="w-full rounded bg-primary px-4 py-1.5 text-sm text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">
             {{ saving ? "保存中..." : "保存" }}
           </button>
           <span v-if="savedOk" class="text-xs text-success">已保存</span>

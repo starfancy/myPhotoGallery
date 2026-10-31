@@ -7,7 +7,7 @@
     <div v-if="auth.user" class="flex items-center gap-2 text-sm">
       <div v-if="auth.isAdmin" ref="adminMenuRef" class="relative">
         <button type="button"
-          class="rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink"
+          class="min-h-11 min-w-11 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink"
           :class="{ 'bg-surface-2 text-ink': adminOpen }"
           :aria-expanded="adminOpen"
           aria-haspopup="menu"
@@ -50,7 +50,7 @@
       </div>
       <div ref="menuRef" class="relative">
         <button type="button"
-          class="flex items-center gap-1 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink"
+          class="flex min-h-11 min-w-11 items-center gap-1 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink"
           :class="{ 'bg-surface-2 text-ink': open }"
           :aria-expanded="open"
           aria-haspopup="menu"

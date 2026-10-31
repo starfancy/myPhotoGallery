@@ -2,22 +2,22 @@
   <div v-if="modelValue"
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
        @click.self="cancel">
-    <div class="w-full max-w-2xl overflow-hidden rounded-lg bg-surface shadow-xl"
+    <div class="m-2 w-[calc(100vw-1rem)] max-w-2xl overflow-hidden rounded-lg bg-surface shadow-xl"
          role="dialog" aria-modal="true" @keydown.esc="cancel" tabindex="-1" ref="dialogEl">
       <!-- Header -->
       <div class="flex items-center justify-between border-b border-line px-4 py-3">
         <div class="font-medium">选择目录</div>
-        <button class="rounded px-2 py-1 text-sm text-ink-2 hover:bg-surface-2 hover:text-ink"
+        <button class="min-h-11 min-w-11 rounded px-2 py-1 text-sm text-ink-2 hover:bg-surface-2 hover:text-ink"
                 @click="cancel" aria-label="关闭">✕</button>
       </div>
 
       <!-- Breadcrumbs -->
       <div class="flex flex-wrap items-center gap-1 border-b border-line px-4 py-2 text-xs">
-        <button class="rounded px-1.5 py-0.5 hover:bg-surface-2"
+        <button class="min-h-11 rounded px-1.5 py-0.5 hover:bg-surface-2 md:min-h-0"
                 @click="navigateTo('')">根</button>
         <template v-for="(bc, i) in breadcrumbs" :key="i">
           <span class="text-ink-muted">/</span>
-          <button class="rounded px-1.5 py-0.5 hover:bg-surface-2"
+          <button class="min-h-11 rounded px-1.5 py-0.5 hover:bg-surface-2 md:min-h-0"
                   @click="navigateTo(bc.path)">{{ bc.name }}</button>
         </template>
       </div>
@@ -40,7 +40,7 @@
           </div>
           <ul v-if="entries.length > 0" class="divide-y divide-line">
             <li v-for="e in entries" :key="e.path">
-              <button class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-surface-2"
+              <button class="flex min-h-11 w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-surface-2"
                       @dblclick="navigateTo(e.path)"
                       @click="selectEntry(e)"
                       :class="{ 'bg-surface-2': selected === e.path }">
