@@ -107,8 +107,8 @@ def camera_display_name(make: str | None, model: str | None) -> str | None:
 
 _CROP_RULES: dict[str, tuple[tuple[re.Pattern[str], float], ...]] = {
     "Nikon": (
-        # —— DX 微单必须排在 FX 'Z5' 前面（去空格后 Z50 不匹配 ^Z5$，双保险）——
-        (re.compile(r"^Z(50|30)$"), 1.5),
+        # —— DX 微单必须排在 FX 'Z5' 前面（Z50/Z50II 均不匹配 ^Z5(II)?$，双保险）——
+        (re.compile(r"^Z(50|30)(II)?$"), 1.5),  # Z 50/Z 30（含 II 代）
         (re.compile(r"^ZFC$"), 1.5),          # Z fc；必须先于 FX 的 Zf
         # —— FX ——
         (re.compile(r"^Z[6789](II|III)?$"), 1.0),
@@ -117,11 +117,16 @@ _CROP_RULES: dict[str, tuple[tuple[re.Pattern[str], float], ...]] = {
         (re.compile(r"^D[3-6](S|X)?$"), 1.0),  # D3/D3s/D3x/D4/D4s/D5/D6
         (re.compile(r"^D700$"), 1.0),
         (re.compile(r"^D8[015]0$"), 1.0),      # D800/D810/D850
+        (re.compile(r"^D(6[01]0|7[58]0)$"), 1.0),  # D600/D610/D750/D780
         (re.compile(r"^DF$"), 1.0),
         # —— DX 单反 ——
         (re.compile(r"^D500$"), 1.5),
-        (re.compile(r"^D(100|200|300|400)$"), 1.5),
+        (re.compile(r"^D(100|200|300S?|400)$"), 1.5),  # D100..D400，含 D300s
+        # D1/D1H/D1X、D2H/D2X/D2Xs（无裸 D2）；锚定尾界，不吞 D200
+        (re.compile(r"^D(1(H|X)?|2(H|X|XS))$"), 1.5),
         (re.compile(r"^D90$"), 1.5),
+        # D40/D50/D60/D70/D70s/D80；锚定尾界，D700（FX）与 D500（上面的 DX）不匹配
+        (re.compile(r"^D(40|50|60|70S?|80)$"), 1.5),
         (re.compile(r"^D[357]\d{3}$"), 1.5),   # D3xxx/D5xxx/D7xxx
     ),
     "Canon": (
@@ -133,6 +138,8 @@ _CROP_RULES: dict[str, tuple[tuple[re.Pattern[str], float], ...]] = {
         # —— 全画幅 ——
         (re.compile(r"^EOSR$"), 1.0),          # 初代 EOS R，精确匹配
         (re.compile(r"^EOSRP$"), 1.0),
+        # EOS R1 必须排在上面的 APS-C R 系规则之后：EOSR10 先被 1.6 组抓走
+        (re.compile(r"^EOSR1$"), 1.0),
         (re.compile(r"^EOSR3$"), 1.0),
         (re.compile(r"^EOSR5(MARK2|MARKII)?$"), 1.0),
         (re.compile(r"^EOSR6(MARK2|MARKII)?$"), 1.0),
@@ -140,12 +147,16 @@ _CROP_RULES: dict[str, tuple[tuple[re.Pattern[str], float], ...]] = {
         (re.compile(r"^EOS5D.*$"), 1.0),
         (re.compile(r"^EOS6D.*$"), 1.0),
         (re.compile(r"^EOS1D.*$"), 1.0),       # 1Ds/1D X
-        # —— APS-C 单反：3 位编号（7D/77D）与 4 位编号（550D/1000D）——
-        (re.compile(r"^EOS\d{1,4}D$"), 1.6),
+        # —— APS-C 单反：编号机身（7D/77D/550D/1000D），允许 II/III/IV 代后缀（200D II）——
+        (re.compile(r"^EOS\d{1,4}D(II|III|IV)?$"), 1.6),
     ),
     "Pentax": (
         (re.compile(r"^K-1(II|MARKII|MARK2)?$"), 1.0),  # K-1 必须先于通用 K- 前缀
         (re.compile(r"^K-.*$"), 1.5),                   # K-3/K-5/K-r/K-70…
+        # —— 无连字符单反时代（K-1 规则仍排在最前并先赢）——
+        (re.compile(r"^K[FP]$"), 1.5),                  # KF/KP
+        (re.compile(r"^K[12]0D$"), 1.5),                # K10D/K20D
+        (re.compile(r"^K[12]\d0D$"), 1.5),              # K100D/K110D/K200D
     ),
     "Panasonic": (
         (re.compile(r"^DC-S.*$"), 1.0),     # L 口全幅 S1/S5…，必须先于 G 系
@@ -173,8 +184,9 @@ _CROP_RULES: dict[str, tuple[tuple[re.Pattern[str], float], ...]] = {
         (re.compile(r"^NEX-"), 1.5),
     ),
     "Fujifilm": (
-        (re.compile(r"^GFX.*$"), 0.8),       # 44×33 中画幅
-        (re.compile(r"^X-.*$"), 1.5),
+        (re.compile(r"^GFX.*$"), 0.8),       # 44×33 中画幅，必须最先
+        # X- 全系 + X100 系列（X100/X100S…X100V/X100VI）；不吞小底 X10/XF1
+        (re.compile(r"^(X-|X100).*$"), 1.5),
     ),
     "Sigma": (
         (re.compile(r"^FP(L)?$"), 1.0),
@@ -296,13 +308,26 @@ def _zero_fill_months(counter: Counter[str]) -> list[dict[str, object]]:
     return out
 
 
+def _month_key(ts: int) -> str | None:
+    """时间戳 -> 本地时区 'YYYY-MM'；越界/非法时间戳返回 None，绝不抛异常。
+
+    库内 taken_at 来自历史 EXIF，个别值可能超出平台 localtime 范围
+    （Linux 抛 OverflowError/OSError，Windows 抛 OSError）。
+    """
+    try:
+        return time.strftime("%Y-%m", time.localtime(ts))
+    except (OverflowError, OSError, ValueError, TypeError):
+        return None
+
+
 def aggregate_rows(
     rows: Iterable[tuple[int | None, str | None]],
 ) -> dict[str, object]:
     """把 (taken_at, exif_json) 行聚合成图表 payload。
 
-    单行 JSON 损坏 / 字段类型异常一律吞掉按未知处理，绝不抛异常；
-    该照片仍计入 total 与月图（taken_at 不在 JSON 内）。
+    单行 JSON 损坏 / 字段类型异常 / taken_at 越界一律吞掉（坏时间戳视同
+    无拍摄日期），绝不抛异常；JSON 损坏但 taken_at 有效的照片仍计入月图
+    （taken_at 不在 JSON 内）。
     """
     makes_c: Counter[str] = Counter()
     cameras_c: Counter[str] = Counter()
@@ -318,7 +343,13 @@ def aggregate_rows(
         if taken_at is None:
             without_taken_at += 1
         else:
-            months_c[time.strftime("%Y-%m", time.localtime(taken_at))] += 1
+            month = _month_key(taken_at)
+            if month is None:
+                # 越界时间戳不丢行：计入 without_taken_at，保持
+                # sum(月计数) = total - without_taken_at 的全集划分
+                without_taken_at += 1
+            else:
+                months_c[month] += 1
 
         exif: dict[str, object] = {}
         if blob:

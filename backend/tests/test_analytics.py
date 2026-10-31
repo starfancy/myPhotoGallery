@@ -10,6 +10,7 @@ from myphoto.models import Folder, Gallery, GalleryRoot, Image, User
 from myphoto.security import hash_password
 
 from myphoto.analytics import (
+    _month_key,
     aggregate_rows,
     aperture_bucket,
     camera_display_name,
@@ -115,6 +116,54 @@ def test_camera_display_name_missing_model():
     ("FUJIFILM", "GFX 50S", 0.8),
     ("SIGMA", "SIGMA SD14", 1.7),
     ("SIGMA", "fp L", 1.0),
+    # —— Final-review 补全：spec §2.3 显式枚举机身 + 顺序陷阱 ——
+    # Nikon D1/D2 两位数家族（DX）
+    ("NIKON CORPORATION", "NIKON D1", 1.5),
+    ("NIKON CORPORATION", "NIKON D1H", 1.5),
+    ("NIKON CORPORATION", "NIKON D1X", 1.5),
+    ("NIKON CORPORATION", "NIKON D2H", 1.5),
+    ("NIKON CORPORATION", "NIKON D2X", 1.5),
+    ("NIKON CORPORATION", "NIKON D2Xs", 1.5),
+    # Nikon 两位数入门 DX（D90 既有覆盖）与 D300s
+    ("NIKON CORPORATION", "NIKON D40", 1.5),
+    ("NIKON CORPORATION", "NIKON D50", 1.5),
+    ("NIKON CORPORATION", "NIKON D60", 1.5),
+    ("NIKON CORPORATION", "NIKON D70", 1.5),
+    ("NIKON CORPORATION", "NIKON D70s", 1.5),
+    ("NIKON CORPORATION", "NIKON D80", 1.5),
+    ("NIKON CORPORATION", "NIKON D300s", 1.5),
+    # Nikon Z DX II 代
+    ("NIKON CORPORATION", "NIKON Z 50 II", 1.5),
+    ("NIKON CORPORATION", "NIKON Z 30 II", 1.5),
+    # Nikon FX 补全
+    ("NIKON CORPORATION", "NIKON D600", 1.0),
+    ("NIKON CORPORATION", "NIKON D610", 1.0),
+    ("NIKON CORPORATION", "NIKON D750", 1.0),
+    ("NIKON CORPORATION", "NIKON D780", 1.0),
+    # 陷阱：D500 DX vs D850 FX；D700 FX 不得被两位数 DX 规则吞；Z50II DX vs Z5/Zf FX
+    ("NIKON CORPORATION", "NIKON D850", 1.0),
+    ("NIKON CORPORATION", "NIKON D700", 1.0),
+    ("NIKON CORPORATION", "NIKON Z 50II", 1.5),
+    ("NIKON CORPORATION", "NIKON Z 5", 1.0),
+    # Canon：EOS R1 全幅（排在 APS-C R 系之后，R10 仍 1.6）；编号机身 II 后缀
+    ("Canon", "Canon EOS R1", 1.0),
+    ("Canon", "Canon EOS R10", 1.6),
+    ("Canon", "Canon EOS 200D II", 1.6),
+    # Fujifilm X100 全系 1.5，但小底 X10/XF1 必须落空
+    ("FUJIFILM", "X100", 1.5),
+    ("FUJIFILM", "X100V", 1.5),
+    ("FUJIFILM", "X100VI", 1.5),
+    ("FUJIFILM", "X10", None),
+    ("FUJIFILM", "XF1", None),
+    # Pentax KF/KP 与无连字符单反时代；K-1 II 全幅规则仍必须先赢
+    ("PENTAX", "PENTAX KF", 1.5),
+    ("PENTAX", "PENTAX KP", 1.5),
+    ("PENTAX", "PENTAX K10D", 1.5),
+    ("PENTAX", "PENTAX K20D", 1.5),
+    ("PENTAX", "PENTAX K100D", 1.5),
+    ("PENTAX", "PENTAX K110D", 1.5),
+    ("PENTAX", "PENTAX K200D", 1.5),
+    ("PENTAX", "PENTAX K-1 II", 1.0),
     # 手机 / 小底便携 → None
     ("vivo", "vivo X100 Ultra", None),
     ("Xiaomi", "M2011K2C", None),
@@ -286,6 +335,31 @@ def test_aggregate_string_numeric_exif_values():
     focal = {s["key"]: s["count"] for s in out["focal_ranges"]}
     assert focal["standard"] == 1
     assert {s["key"]: s["count"] for s in out["apertures"]}["f28"] == 1
+
+
+# ---------- _month_key：越界时间戳的永不抛异常契约 ----------
+
+def test_month_key_guards_out_of_range_timestamps():
+    # 10**15（约公元 3300 万年）在 Linux/Windows 都会让 localtime 失败
+    assert _month_key(10**15) is None
+    key = _month_key(1_700_000_000)
+    assert isinstance(key, str)
+    assert re.fullmatch(r"\d{4}-\d{2}", key)
+
+
+def test_aggregate_out_of_range_taken_at_never_raises():
+    # 越界行不丢（计 total）、视同无拍摄日期、不产生任何月份桶
+    out = aggregate_rows([
+        (10**15, None),
+        (1_700_000_000, None),
+    ])
+    assert out["total"] == 2
+    assert out["without_taken_at"] == 1
+    months = out["months"]
+    assert len(months) == 1
+    assert months[0]["count"] == 1
+    # 划分恒等式：sum(月计数) = total - without_taken_at
+    assert sum(m["count"] for m in months) == 1
 
 # ---------- 路由与缓存 ----------
 
