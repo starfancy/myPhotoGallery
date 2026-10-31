@@ -1503,8 +1503,6 @@ const ariaLabel = computed(() =>
 </script>
 ```
 
-注意：模板里有一个空的占位 `<table v-else-if>` 是多余的——**实现时删掉第 13–14 行那个空 table**，只保留后面的完整 `sr-only` 表（本计划在 Step 4 的测试通过后顺手清理，并确认测试仍绿）。
-
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `pnpm -C frontend exec vitest run src/tests/chart-hbar.spec.ts`
