@@ -104,6 +104,18 @@
 /* 全局样式补丁 */
 
 /*
+ * UnoCSS 的 .sr-only 以 `position:absolute; width:1px; height:1px` 隐藏元素，
+ * 但 HTML <table> 是表格布局盒：声明的 width/height 小于内容最小尺寸时会被
+ * 浏览器按内容尺寸覆盖。结果：sr-only 表格以真实尺寸（分析面板月表约 77 行
+ * = 2000+px 高）绝对定位溢出，且 overflow:visible 的祖先会计入滚动区域，
+ * 在页面底部形成一大片空白。改为块级盒后 1×1px 尺寸生效，子内容仍被
+ * overflow:hidden + clip 裁剪，屏幕阅读器语义不变（ARIA 基于 DOM）。
+ */
+table.sr-only {
+  display: block;
+}
+
+/*
  * @unocss/reset/tailwind-compat.css 出于对第三方组件库的兼容，把
  *   button, [type='button'], [type='reset'], [type='submit']
  *     { background-color: transparent; }
