@@ -97,7 +97,7 @@
                class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-surface p-4 text-xs text-ink-2">
             <button v-if="!usage" type="button"
                     data-testid="thumb-usage-trigger"
-                    class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
+                    class="inline-flex items-center rounded border border-line-strong bg-surface px-2 py-1 text-xs text-ink-2 hover:bg-surface-2 disabled:opacity-50"
                     :disabled="usageLoading"
                     @click="loadUsage">
               {{ usageLoading ? "正在统计..." : "统计缓存占用空间" }}
