@@ -90,20 +90,37 @@
           </ul>
         </section>
 
-        <!-- P8: 缩略图缓存占用（统计与清理在同一行；导航入口已在头部菜单中） -->
-        <section v-if="data.thumb_cache"
-                 data-testid="thumb-cache-row"
+        <!-- P8: 缩略图缓存占用——按需统计（遍历可能涉及数万文件），导航入口已在头部菜单中 -->
+        <section data-testid="thumb-cache-row"
                  class="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-ink-2">
-          <span>
-            缩略图缓存：{{ formatBytes(data.thumb_cache.bytes) }} ·
-            {{ data.thumb_cache.files.toLocaleString() }} 个文件
-          </span>
-          <button type="button"
+          <button v-if="!usage" type="button"
+                  data-testid="thumb-usage-trigger"
                   class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
-                  :disabled="purging"
+                  :disabled="usageLoading"
+                  @click="loadUsage">
+            {{ usageLoading ? "正在统计..." : "统计缓存占用空间" }}
+          </button>
+          <template v-else>
+            <span>
+              缩略图缓存：{{ formatBytes(usage.bytes) }} ·
+              {{ usage.files.toLocaleString() }} 个文件
+            </span>
+            <button type="button"
+                    data-testid="thumb-usage-rerun"
+                    class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
+                    :disabled="usageLoading"
+                    @click="loadUsage">
+              {{ usageLoading ? "正在统计..." : "重新统计" }}
+            </button>
+          </template>
+          <button type="button"
+                  data-testid="thumb-purge"
+                  class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
+                  :disabled="purging || usageLoading"
                   @click="purgeThumbCache">
             {{ purging ? "清理中..." : "清理缩略图缓存" }}
           </button>
+          <span v-if="usageError" class="text-danger-text">{{ usageError }}</span>
           <span v-if="purgeError" class="text-danger-text">{{ purgeError }}</span>
           <span v-else-if="purgeDone" class="text-success">
             已清理，缩略图将在下次浏览时自动重新生成
@@ -191,7 +208,6 @@ interface StatusResponse {
   stats: Stats
   scan_statuses: ScanStatus[]
   recent_audit: AuditEntry[]
-  thumb_cache: ThumbCache
 }
 
 const data = ref<StatusResponse | null>(null)
@@ -210,12 +226,27 @@ async function loadStatus(silent = false) {
   schedulePoll()
 }
 
-// ---- 清理缩略图缓存 ----
+// ---- 缩略图缓存：按需统计 + 清理 ----
 // 只删服务端 .cache/thumbnails，不碰原图；下次浏览时按新代码懒重新生成。
 // 注意：浏览器对缩略图是 immutable 长缓存，清理后用户仍需硬刷新一次。
+const usage = ref<ThumbCache | null>(null)
+const usageLoading = ref(false)
+const usageError = ref("")
 const purging = ref(false)
 const purgeError = ref("")
 const purgeDone = ref(false)
+
+async function loadUsage() {
+  usageLoading.value = true
+  usageError.value = ""
+  try {
+    usage.value = await apiGet<ThumbCache>("/api/admin/thumb-cache/usage")
+  } catch (err) {
+    usageError.value = (err as HttpError).message || "统计失败"
+  } finally {
+    usageLoading.value = false
+  }
+}
 
 async function purgeThumbCache() {
   if (!window.confirm(
@@ -226,6 +257,8 @@ async function purgeThumbCache() {
   purgeDone.value = false
   try {
     await apiPost("/api/admin/thumb-cache/purge")
+    // 服务端 purge 后把统计直接记零；前端同步显示，无需再遍历一次
+    usage.value = { bytes: 0, files: 0 }
     purgeDone.value = true
     // 静默刷新，让审计列表出现本次 thumb_cache_purge 记录
     await loadStatus(true)

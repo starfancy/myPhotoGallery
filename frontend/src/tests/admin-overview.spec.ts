@@ -41,15 +41,22 @@ function jsonResponse(payload: unknown, status = 200) {
 }
 
 // 签名保持与旧 mockStatus 兼容：现有错误用例以 mockStatus(payload, 403) 调用。
-function mockStatus(payload: unknown, status = 200, analytics: unknown = EMPTY_ANALYTICS) {
+// thumbUsage 仅在点击「统计缓存占用空间」按钮时才会被请求。
+function mockStatus(
+  payload: unknown,
+  status = 200,
+  analytics: unknown = EMPTY_ANALYTICS,
+  thumbUsage: unknown = { bytes: 0, files: 0 },
+) {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((url: string) =>
       Promise.resolve(jsonResponse(
-        // 正常状态下 analytics 请求给空库 payload；错误状态下两个 URL 都回错误信封
         String(url).includes("/api/admin/analytics") && status === 200
           ? analytics
-          : payload,
+          : String(url).includes("/api/admin/thumb-cache/usage")
+            ? thumbUsage
+            : payload,
         status,
       )),
     ),
@@ -195,30 +202,66 @@ describe("AdminOverview", () => {
     expect(userCard.attributes("href")).toBe("/admin/users")
   })
 
-  it("shows thumbnail cache usage below scan status with a purge button", async () => {
-    mockStatus({
-      ...FULL_PAYLOAD,
-      thumb_cache: { bytes: 166 * 1024 * 1024, files: 1826 },
-    })
+  it("offers a usage button but does not fetch usage on mount", async () => {
+    const fetchFn = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(jsonResponse(
+        String(url).includes("/api/admin/analytics") ? EMPTY_ANALYTICS : FULL_PAYLOAD,
+      )))
+    vi.stubGlobal("fetch", fetchFn)
     const w = mountView()
     await flushPromises()
-    const row = w.find('[data-testid="thumb-cache-row"]')
-    expect(row.exists()).toBe(true)
-    const t = row.text()
-    expect(t).toContain("缩略图缓存")
-    expect(t).toContain("166 MB")
-    expect(t).toContain("1,826")
-    const btn = row.find("button")
-    expect(btn.text()).toContain("清理缩略图缓存")
+    const usageCalls = fetchFn.mock.calls.filter(([url]) =>
+      String(url).includes("/api/admin/thumb-cache/usage"))
+    expect(usageCalls).toHaveLength(0)
+    const btn = w.find('[data-testid="thumb-usage-trigger"]')
+    expect(btn.exists()).toBe(true)
+    expect(btn.text()).toContain("统计缓存占用空间")
+    expect(w.text()).not.toContain("缩略图缓存：")
   })
 
-  it("renders zero cache usage for a fresh install", async () => {
-    mockStatus({ ...FULL_PAYLOAD, thumb_cache: { bytes: 0, files: 0 } })
+  it("shows a counting indicator then usage info after the button is clicked", async () => {
+    let resolveUsage: (v: Response) => void = () => {}
+    const fetchFn = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes("/api/admin/thumb-cache/usage")) {
+        return new Promise<Response>((resolve) => { resolveUsage = resolve })
+      }
+      return Promise.resolve(jsonResponse(
+        String(url).includes("/api/admin/analytics") ? EMPTY_ANALYTICS : FULL_PAYLOAD,
+      ))
+    })
+    vi.stubGlobal("fetch", fetchFn)
     const w = mountView()
     await flushPromises()
-    const t = w.find('[data-testid="thumb-cache-row"]').text()
-    expect(t).toContain("0 B")
-    expect(t).toContain("0")
+
+    await w.find('[data-testid="thumb-usage-trigger"]').trigger("click")
+    await w.vm.$nextTick()
+    expect(w.find('[data-testid="thumb-cache-row"]').text()).toContain("正在统计")
+
+    resolveUsage(jsonResponse({ bytes: 166 * 1024 * 1024, files: 1826 }))
+    await flushPromises()
+    const row = w.find('[data-testid="thumb-cache-row"]')
+    // 166 MiB（1024 进制）；formatBytes 一位小数取整后显示 166 MB
+    expect(row.text()).toContain("166 MB")
+    expect(row.text()).toContain("1,826")
+    expect(w.find('[data-testid="thumb-usage-rerun"]').text()).toContain("重新统计")
+  })
+
+  it("shows zero usage after purging without a re-walk", async () => {
+    const fetchFn = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).includes("/api/admin/thumb-cache/purge")) {
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
+      return Promise.resolve(jsonResponse(
+        String(url).includes("/api/admin/analytics") ? EMPTY_ANALYTICS : FULL_PAYLOAD,
+      ))
+    })
+    vi.stubGlobal("fetch", fetchFn)
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    const w = mountView()
+    await flushPromises()
+    await w.find('[data-testid="thumb-purge"]').trigger("click")
+    await flushPromises()
+    expect(w.find('[data-testid="thumb-cache-row"]').text()).toContain("0 B")
   })
 
   it("no longer renders the bottom quick links (gallery/trash/users)", async () => {

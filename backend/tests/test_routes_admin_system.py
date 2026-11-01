@@ -39,7 +39,7 @@ def test_status_shape_empty(client_as_admin):
     assert r.status_code == 200
     assert r.headers["cache-control"] == "no-store"
     data = r.json()
-    assert set(data.keys()) == {"stats", "scan_statuses", "recent_audit", "thumb_cache"}
+    assert set(data.keys()) == {"stats", "scan_statuses", "recent_audit"}
     stats = data["stats"]
     assert stats["images"] == 0
     assert stats["galleries"] == 0
@@ -107,7 +107,10 @@ def test_status_recent_audit_limited_to_20(client_as_admin):
     assert r.json()["recent_audit"][0]["detail"] == "seed_29"
 
 
-def test_status_reports_thumb_cache_usage(client_as_admin):
+# ---- GET /api/admin/thumb-cache/usage (按需统计) ----
+
+
+def test_thumb_usage_counts_files(client_as_admin):
     c, _, _ = client_as_admin
     app = c.app
     cache_dir = Path(app.state.config.data_dir) / ".cache" / "thumbnails"
@@ -117,16 +120,22 @@ def test_status_reports_thumb_cache_usage(client_as_admin):
     sub.mkdir()
     (sub / "b.jpg").write_bytes(b"y" * 20)
 
-    r = c.get("/api/admin/status")
+    r = c.get("/api/admin/thumb-cache/usage")
     assert r.status_code == 200
-    assert r.json()["thumb_cache"] == {"bytes": 30, "files": 2}
+    assert r.headers["cache-control"] == "no-store"
+    assert r.json() == {"bytes": 30, "files": 2}
 
 
-def test_status_thumb_cache_missing_dir_is_zero(client_as_admin):
+def test_thumb_usage_missing_dir_is_zero(client_as_admin):
     c, _, _ = client_as_admin
-    r = c.get("/api/admin/status")
+    r = c.get("/api/admin/thumb-cache/usage")
     assert r.status_code == 200
-    assert r.json()["thumb_cache"] == {"bytes": 0, "files": 0}
+    assert r.json() == {"bytes": 0, "files": 0}
+
+
+def test_thumb_usage_requires_admin(client_unauthed):
+    r = client_unauthed.get("/api/admin/thumb-cache/usage")
+    assert r.status_code == 401
 
 
 # ---- POST /api/admin/thumb-cache/purge ----
@@ -144,6 +153,18 @@ def test_thumb_cache_purge_removes_files(client_as_admin):
     # cache dir is recreated empty, not the old contents
     assert cache_dir.exists()
     assert list(cache_dir.iterdir()) == []
+
+
+def test_thumb_usage_reports_zero_after_purge_without_rewalk(client_as_admin):
+    c, tmp_path, _ = client_as_admin
+    cache_dir = tmp_path / ".cache" / "thumbnails"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "a.jpg").write_bytes(b"x" * 10)
+
+    assert c.get("/api/admin/thumb-cache/usage").json()["bytes"] == 10
+    assert c.post("/api/admin/thumb-cache/purge").status_code == 204
+    # reset_empty：purge 后直接返回 0，不依赖再次遍历
+    assert c.get("/api/admin/thumb-cache/usage").json() == {"bytes": 0, "files": 0}
 
 
 def test_thumb_cache_purge_when_dir_missing(client_as_admin):

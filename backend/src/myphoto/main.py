@@ -20,6 +20,7 @@ from myphoto.errors import AppError, install_error_handlers
 from myphoto.models import GalleryRoot
 from myphoto.scanner import Scanner
 from myphoto.schema_init import ensure_schema_and_admin
+from myphoto.thumb_cache_stats import ThumbCacheUsage
 from myphoto.thumbnails import ThumbnailGenerator
 from myphoto.trash import daily_purge_loop, purge_expired
 
@@ -83,9 +84,9 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         app.state.sessionmaker = sm
         app.state.config = cfg
         app.state.scanner = scanner
-        app.state.thumbnails = ThumbnailGenerator(
-            Path(cfg.data_dir) / ".cache" / "thumbnails"
-        )
+        thumb_cache_dir = Path(cfg.data_dir) / ".cache" / "thumbnails"
+        app.state.thumbnails = ThumbnailGenerator(thumb_cache_dir)
+        app.state.thumb_usage = ThumbCacheUsage(thumb_cache_dir)
         app.state.analytics = AnalyticsCache()
         from myphoto.routes_download import TicketStore
         app.state.download_tickets = TicketStore()

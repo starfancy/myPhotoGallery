@@ -859,25 +859,18 @@ async def admin_browse_fs(
     return {"path": result_path, "entries": entries, "truncated": truncated}
 
 
-# ---- system status / thumb-cache purge / audit query ----
+# ---- system status / thumb-cache usage/purge / audit query ----
 
 
-def _thumb_cache_usage(cache_dir: Path) -> tuple[int, int]:
-    """统计缩略图缓存占用：(总字节, 文件数)。目录缺失 → (0, 0)。
-
-    os.walk 只跟随真实目录、跳过 symlink，与清理接口的安全口径一致；
-    单个文件 stat 失败不应影响状态接口，故逐文件容错。
-    """
-    total_bytes = 0
-    files = 0
-    for dirpath, _dirnames, filenames in os.walk(cache_dir, followlinks=False):
-        for filename in filenames:
-            try:
-                total_bytes += (Path(dirpath) / filename).stat().st_size
-                files += 1
-            except OSError:
-                continue
-    return total_bytes, files
+@router.get("/thumb-cache/usage")
+async def admin_thumb_cache_usage(
+    request: Request,
+    response: Response,
+    _admin: User = Depends(admin_required),
+):
+    """按需统计缩略图缓存占用；遍历结果按 TTL 缓存（见 ThumbCacheUsage）。"""
+    response.headers["Cache-Control"] = "no-store"
+    return await request.app.state.thumb_usage.get()
 
 
 @router.get("/analytics")
@@ -947,10 +940,6 @@ async def admin_status(
             for row in recent
         ]
 
-    # 磁盘遍历可能涉及成千上万文件，放到工作线程，不阻塞事件循环。
-    cache_dir = Path(request.app.state.config.data_dir) / ".cache" / "thumbnails"
-    thumb_bytes, thumb_files = await asyncio.to_thread(_thumb_cache_usage, cache_dir)
-
     return {
         "stats": {
             "images": image_count,
@@ -960,7 +949,6 @@ async def admin_status(
         },
         "scan_statuses": scan_statuses,
         "recent_audit": recent_audit,
-        "thumb_cache": {"bytes": thumb_bytes, "files": thumb_files},
     }
 
 
@@ -1007,6 +995,9 @@ async def admin_thumb_cache_purge(
             target="thumb_cache", detail=f"path={cache_dir} removed={int(removed)}",
         )
         await s.commit()
+
+    # 目录已清空：占用统计直接记零，下一次点击「统计」不必再遍历。
+    request.app.state.thumb_usage.reset_empty()
 
 
 @router.get("/audit")
