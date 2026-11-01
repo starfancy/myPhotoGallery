@@ -91,40 +91,45 @@
         </section>
 
         <!-- P8: 缩略图缓存占用——按需统计（遍历可能涉及数万文件），导航入口已在头部菜单中 -->
-        <section data-testid="thumb-cache-row"
-                 class="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-ink-2">
-          <button v-if="!usage" type="button"
-                  data-testid="thumb-usage-trigger"
-                  class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
-                  :disabled="usageLoading"
-                  @click="loadUsage">
-            {{ usageLoading ? "正在统计..." : "统计缓存占用空间" }}
-          </button>
-          <template v-else>
-            <span>
-              缩略图缓存：{{ formatBytes(usage.bytes) }} ·
-              {{ usage.files.toLocaleString() }} 个文件
-            </span>
-            <button type="button"
-                    data-testid="thumb-usage-rerun"
+        <section>
+          <h2 class="mb-2 text-sm font-medium text-ink-2">缩略图缓存</h2>
+          <div data-testid="thumb-cache-row"
+               class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-surface p-4 text-xs text-ink-2">
+            <button v-if="!usage" type="button"
+                    data-testid="thumb-usage-trigger"
                     class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
                     :disabled="usageLoading"
                     @click="loadUsage">
-              {{ usageLoading ? "正在统计..." : "重新统计" }}
+              {{ usageLoading ? "正在统计..." : "统计缓存占用空间" }}
             </button>
-          </template>
-          <button type="button"
-                  data-testid="thumb-purge"
-                  class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
-                  :disabled="purging || usageLoading"
-                  @click="purgeThumbCache">
-            {{ purging ? "清理中..." : "清理缩略图缓存" }}
-          </button>
-          <span v-if="usageError" class="text-danger-text">{{ usageError }}</span>
-          <span v-if="purgeError" class="text-danger-text">{{ purgeError }}</span>
-          <span v-else-if="purgeDone" class="text-success">
-            已清理，缩略图将在下次浏览时自动重新生成
-          </span>
+            <template v-else>
+              <span class="text-sm font-medium text-ink">
+                {{ formatBytes(usage.bytes) }}
+                <span class="ml-1 font-normal text-ink-2">
+                  · {{ usage.files.toLocaleString() }} 个文件
+                </span>
+              </span>
+              <button type="button"
+                      data-testid="thumb-usage-rerun"
+                      class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
+                      :disabled="usageLoading"
+                      @click="loadUsage">
+                {{ usageLoading ? "正在统计..." : "重新统计" }}
+              </button>
+            </template>
+            <button type="button"
+                    data-testid="thumb-purge"
+                    class="ml-auto inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
+                    :disabled="purging || usageLoading"
+                    @click="purgeThumbCache">
+              {{ purging ? "清理中..." : "清理缩略图缓存" }}
+            </button>
+            <span v-if="usageError" class="basis-full text-danger-text">{{ usageError }}</span>
+            <span v-if="purgeError" class="basis-full text-danger-text">{{ purgeError }}</span>
+            <span v-else-if="purgeDone" class="basis-full text-success">
+              已清理，缩略图将在下次浏览时自动重新生成
+            </span>
+          </div>
         </section>
 
         <!-- Recent audit -->
