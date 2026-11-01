@@ -40,6 +40,9 @@
           </router-link>
         </section>
 
+        <!-- P8: EXIF 数据分析面板（独立请求 /api/admin/analytics，不参与状态轮询） -->
+        <AnalyticsPanel v-if="data" />
+
         <!-- Scan status list -->
         <section>
           <h2 class="mb-2 text-sm font-medium text-ink-2">扫描状态</h2>
@@ -148,6 +151,7 @@ import { onMounted, onUnmounted, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { apiGet, apiPost, HttpError } from "../api"
 import { auditActionLabel } from "../utils/audit"
+import AnalyticsPanel from "../components/charts/AnalyticsPanel.vue"
 
 interface Stats {
   images: number

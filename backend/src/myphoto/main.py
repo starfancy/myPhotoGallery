@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
+from myphoto.analytics import AnalyticsCache
 from myphoto.audit import purge_expired as purge_audit_expired
 from myphoto.config import AppConfig, load_or_init, resolve_config_path
 from myphoto.db import make_engine, make_sessionmaker
@@ -85,6 +86,7 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         app.state.thumbnails = ThumbnailGenerator(
             Path(cfg.data_dir) / ".cache" / "thumbnails"
         )
+        app.state.analytics = AnalyticsCache()
         from myphoto.routes_download import TicketStore
         app.state.download_tickets = TicketStore()
         # 每日定时清理：所有 app.state 赋值完成后再挂后台循环（循环首轮即读

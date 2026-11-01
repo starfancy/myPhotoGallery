@@ -10,6 +10,7 @@ const tokenNames = [
   "success", "success-btn", "success-btn-hover",
   "warning", "warning-soft", "warning-line", "warning-btn", "warning-btn-hover",
   "focus-ring",
+  "chart-1", "chart-2", "chart-3", "chart-4", "chart-5", "chart-6",
 ] as const
 
 const channel = (name: string) => `rgb(var(--color-${name}) / <alpha-value>)`

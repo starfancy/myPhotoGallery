@@ -862,6 +862,17 @@ async def admin_browse_fs(
 # ---- system status / thumb-cache purge / audit query ----
 
 
+@router.get("/analytics")
+async def admin_analytics(
+    request: Request,
+    response: Response,
+    _admin: User = Depends(admin_required),
+):
+    """全局 EXIF 统计聚合（图表数据）。仅 admin；实时聚合 + 短缓存。"""
+    response.headers["Cache-Control"] = "no-store"
+    return await request.app.state.analytics.get(request.app.state.sessionmaker)
+
+
 @router.get("/status")
 async def admin_status(
     request: Request,

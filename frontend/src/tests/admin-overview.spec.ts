@@ -26,14 +26,32 @@ function mountView() {
   })
 }
 
-function mockStatus(payload: unknown, status = 200) {
+// 分析面板会独立请求 /api/admin/analytics；测试中给它一个空库 payload，
+// 让面板安静地渲染空态，不干扰对状态页的断言。
+const EMPTY_ANALYTICS = {
+  total: 0, with_exif: 0, without_taken_at: 0,
+  makes: [], cameras: [], focal_ranges: [], apertures: [], months: [],
+}
+
+function jsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  })
+}
+
+// 签名保持与旧 mockStatus 兼容：现有错误用例以 mockStatus(payload, 403) 调用。
+function mockStatus(payload: unknown, status = 200, analytics: unknown = EMPTY_ANALYTICS) {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(payload), {
+    vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(jsonResponse(
+        // 正常状态下 analytics 请求给空库 payload；错误状态下两个 URL 都回错误信封
+        String(url).includes("/api/admin/analytics") && status === 200
+          ? analytics
+          : payload,
         status,
-        headers: { "content-type": "application/json" },
-      }),
+      )),
     ),
   )
 }
@@ -284,33 +302,36 @@ describe("AdminOverview", () => {
       ],
       recent_audit: [],
     }
-    const fetchFn = vi.fn()
-    fetchFn
-      .mockResolvedValueOnce(new Response(JSON.stringify(running), { headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(running), { headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(idle), { headers: { "content-type": "application/json" } }))
+    const statusSeq = [running, running, idle]
+    let statusCalls = 0
+    const fetchFn = vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/api/admin/analytics")) {
+        return Promise.resolve(jsonResponse(EMPTY_ANALYTICS))
+      }
+      return Promise.resolve(jsonResponse(statusSeq[statusCalls++]))
+    })
     vi.stubGlobal("fetch", fetchFn)
 
     const w = mountView()
     await flushPromises()
-    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(statusCalls).toBe(1)
 
     vi.advanceTimersByTime(2000)
     await flushPromises()
-    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(statusCalls).toBe(2)
 
     vi.advanceTimersByTime(2000)
     await flushPromises()
-    expect(fetchFn).toHaveBeenCalledTimes(3)
+    expect(statusCalls).toBe(3)
 
     vi.advanceTimersByTime(5000)
     await flushPromises()
-    expect(fetchFn).toHaveBeenCalledTimes(3)
+    expect(statusCalls).toBe(3)
 
     w.unmount()
     // No fetch may fire after unmount even if timers advance.
     vi.advanceTimersByTime(5000)
     await flushPromises()
-    expect(fetchFn).toHaveBeenCalledTimes(3)
+    expect(statusCalls).toBe(3)
   })
 })
