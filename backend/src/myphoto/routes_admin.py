@@ -862,6 +862,24 @@ async def admin_browse_fs(
 # ---- system status / thumb-cache purge / audit query ----
 
 
+def _thumb_cache_usage(cache_dir: Path) -> tuple[int, int]:
+    """统计缩略图缓存占用：(总字节, 文件数)。目录缺失 → (0, 0)。
+
+    os.walk 只跟随真实目录、跳过 symlink，与清理接口的安全口径一致；
+    单个文件 stat 失败不应影响状态接口，故逐文件容错。
+    """
+    total_bytes = 0
+    files = 0
+    for dirpath, _dirnames, filenames in os.walk(cache_dir, followlinks=False):
+        for filename in filenames:
+            try:
+                total_bytes += (Path(dirpath) / filename).stat().st_size
+                files += 1
+            except OSError:
+                continue
+    return total_bytes, files
+
+
 @router.get("/analytics")
 async def admin_analytics(
     request: Request,
@@ -929,6 +947,10 @@ async def admin_status(
             for row in recent
         ]
 
+    # 磁盘遍历可能涉及成千上万文件，放到工作线程，不阻塞事件循环。
+    cache_dir = Path(request.app.state.config.data_dir) / ".cache" / "thumbnails"
+    thumb_bytes, thumb_files = await asyncio.to_thread(_thumb_cache_usage, cache_dir)
+
     return {
         "stats": {
             "images": image_count,
@@ -938,6 +960,7 @@ async def admin_status(
         },
         "scan_statuses": scan_statuses,
         "recent_audit": recent_audit,
+        "thumb_cache": {"bytes": thumb_bytes, "files": thumb_files},
     }
 
 

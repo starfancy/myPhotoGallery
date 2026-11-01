@@ -186,17 +186,6 @@ describe("AdminOverview", () => {
     expect(w.text()).toContain("some_future_action")
   })
 
-  it("renders the manage-galleries link pointing to /admin/galleries", async () => {
-    mockStatus(FULL_PAYLOAD)
-    const w = mountView()
-    await flushPromises()
-    // AppHeader also renders a router-link to /galleries (the brand); pick
-    // the one whose text is "管理图库" specifically.
-    const links = w.findAll('a[href="/admin/galleries"]')
-    const manage = links.find((a) => a.text().includes("管理图库"))
-    expect(manage).toBeDefined()
-  })
-
   it("用户 stat card links to /admin/users (P4)", async () => {
     mockStatus(FULL_PAYLOAD)
     const w = mountView()
@@ -206,13 +195,41 @@ describe("AdminOverview", () => {
     expect(userCard.attributes("href")).toBe("/admin/users")
   })
 
-  it("shows the user-management button next to trash", async () => {
-    mockStatus(FULL_PAYLOAD)
+  it("shows thumbnail cache usage below scan status with a purge button", async () => {
+    mockStatus({
+      ...FULL_PAYLOAD,
+      thumb_cache: { bytes: 166 * 1024 * 1024, files: 1826 },
+    })
     const w = mountView()
     await flushPromises()
-    const links = w.findAll('a[href="/admin/users"]')
-    const manage = links.find((a) => a.text().includes("用户管理"))
-    expect(manage).toBeDefined()
+    const row = w.find('[data-testid="thumb-cache-row"]')
+    expect(row.exists()).toBe(true)
+    const t = row.text()
+    expect(t).toContain("缩略图缓存")
+    expect(t).toContain("166 MB")
+    expect(t).toContain("1,826")
+    const btn = row.find("button")
+    expect(btn.text()).toContain("清理缩略图缓存")
+  })
+
+  it("renders zero cache usage for a fresh install", async () => {
+    mockStatus({ ...FULL_PAYLOAD, thumb_cache: { bytes: 0, files: 0 } })
+    const w = mountView()
+    await flushPromises()
+    const t = w.find('[data-testid="thumb-cache-row"]').text()
+    expect(t).toContain("0 B")
+    expect(t).toContain("0")
+  })
+
+  it("no longer renders the bottom quick links (gallery/trash/users)", async () => {
+    mockStatus({ ...FULL_PAYLOAD, thumb_cache: { bytes: 0, files: 0 } })
+    const w = mountView()
+    await flushPromises()
+    // AppHeader admin dropdown is closed (v-if), so its items aren't in DOM.
+    const t = w.text()
+    expect(t).not.toContain("管理图库")
+    expect(t).not.toContain("用户管理")
+    expect(t).not.toContain("回收站")
   })
 
   it("colors the scan status by state (idle/queued/running)", async () => {

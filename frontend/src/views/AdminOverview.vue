@@ -90,6 +90,26 @@
           </ul>
         </section>
 
+        <!-- P8: 缩略图缓存占用（统计与清理在同一行；导航入口已在头部菜单中） -->
+        <section v-if="data.thumb_cache"
+                 data-testid="thumb-cache-row"
+                 class="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-ink-2">
+          <span>
+            缩略图缓存：{{ formatBytes(data.thumb_cache.bytes) }} ·
+            {{ data.thumb_cache.files.toLocaleString() }} 个文件
+          </span>
+          <button type="button"
+                  class="inline-flex items-center rounded bg-surface-3 px-2 py-1 text-xs hover:bg-surface-4 disabled:opacity-50"
+                  :disabled="purging"
+                  @click="purgeThumbCache">
+            {{ purging ? "清理中..." : "清理缩略图缓存" }}
+          </button>
+          <span v-if="purgeError" class="text-danger-text">{{ purgeError }}</span>
+          <span v-else-if="purgeDone" class="text-success">
+            已清理，缩略图将在下次浏览时自动重新生成
+          </span>
+        </section>
+
         <!-- Recent audit -->
         <section>
           <h2 class="mb-2 flex items-center justify-between text-sm font-medium text-ink-2">
@@ -116,31 +136,6 @@
           </ul>
         </section>
 
-        <!-- Manage galleries link (moved to end per plan wording) -->
-        <section class="flex flex-wrap items-center gap-2">
-          <router-link to="/admin/galleries"
-            class="inline-flex items-center rounded bg-primary px-3 py-2 text-sm text-white hover:bg-primary-hover">
-            管理图库
-          </router-link>
-          <router-link to="/admin/trash"
-            class="inline-flex items-center rounded bg-surface-3 px-3 py-2 text-sm hover:bg-surface-4">
-            回收站
-          </router-link>
-          <router-link to="/admin/users"
-            class="inline-flex items-center rounded bg-surface-3 px-3 py-2 text-sm hover:bg-surface-4">
-            用户管理
-          </router-link>
-          <button type="button"
-                  class="inline-flex items-center rounded bg-danger px-3 py-2 text-sm text-white hover:bg-danger-hover disabled:opacity-50"
-                  :disabled="purging"
-                  @click="purgeThumbCache">
-            {{ purging ? "清理中..." : "清理缩略图缓存" }}
-          </button>
-          <span v-if="purgeError" class="text-sm text-danger-text">{{ purgeError }}</span>
-          <span v-else-if="purgeDone" class="text-sm text-success">
-            已清理，缩略图将在下次浏览时自动重新生成
-          </span>
-        </section>
       </template>
     </main>
   </div>
@@ -187,10 +182,16 @@ interface AuditEntry {
   detail: string | null
 }
 
+interface ThumbCache {
+  bytes: number
+  files: number
+}
+
 interface StatusResponse {
   stats: Stats
   scan_statuses: ScanStatus[]
   recent_audit: AuditEntry[]
+  thumb_cache: ThumbCache
 }
 
 const data = ref<StatusResponse | null>(null)
@@ -304,6 +305,18 @@ function auditDetailText(a: AuditEntry): string {
   if (a.target) parts.push(a.target)
   if (a.detail) parts.push(a.detail)
   return parts.join(" · ")
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ["KB", "MB", "GB", "TB"]
+  let value = bytes
+  let i = -1
+  do {
+    value /= 1024
+    i++
+  } while (value >= 1024 && i < units.length - 1)
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`
 }
 
 function formatTs(ts: number): string {

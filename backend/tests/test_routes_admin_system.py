@@ -39,7 +39,7 @@ def test_status_shape_empty(client_as_admin):
     assert r.status_code == 200
     assert r.headers["cache-control"] == "no-store"
     data = r.json()
-    assert set(data.keys()) == {"stats", "scan_statuses", "recent_audit"}
+    assert set(data.keys()) == {"stats", "scan_statuses", "recent_audit", "thumb_cache"}
     stats = data["stats"]
     assert stats["images"] == 0
     assert stats["galleries"] == 0
@@ -105,6 +105,28 @@ def test_status_recent_audit_limited_to_20(client_as_admin):
     assert len(r.json()["recent_audit"]) == 20
     # newest first: seed_29 should be at index 0
     assert r.json()["recent_audit"][0]["detail"] == "seed_29"
+
+
+def test_status_reports_thumb_cache_usage(client_as_admin):
+    c, _, _ = client_as_admin
+    app = c.app
+    cache_dir = Path(app.state.config.data_dir) / ".cache" / "thumbnails"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "a.jpg").write_bytes(b"x" * 10)
+    sub = cache_dir / "sha"
+    sub.mkdir()
+    (sub / "b.jpg").write_bytes(b"y" * 20)
+
+    r = c.get("/api/admin/status")
+    assert r.status_code == 200
+    assert r.json()["thumb_cache"] == {"bytes": 30, "files": 2}
+
+
+def test_status_thumb_cache_missing_dir_is_zero(client_as_admin):
+    c, _, _ = client_as_admin
+    r = c.get("/api/admin/status")
+    assert r.status_code == 200
+    assert r.json()["thumb_cache"] == {"bytes": 0, "files": 0}
 
 
 # ---- POST /api/admin/thumb-cache/purge ----
