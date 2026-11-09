@@ -84,6 +84,20 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         app.state.sessionmaker = sm
         app.state.config = cfg
         app.state.scanner = scanner
+
+        # LUT 库启动扫描：发现新 .cube（默认 disabled）、软删丢失文件
+        try:
+            from myphoto.lut_scanner import scan_luts
+            luts_dir = Path(cfg.data_dir) / "luts"
+            lut_result = await scan_luts(sm, luts_dir)
+            log.info(
+                "startup lut scan: discovered=%d skipped=%d soft_deleted=%d",
+                len(lut_result.discovered),
+                len(lut_result.skipped_existing),
+                len(lut_result.soft_deleted),
+            )
+        except Exception:
+            log.exception("startup lut scan failed")
         thumb_cache_dir = Path(cfg.data_dir) / ".cache" / "thumbnails"
         app.state.thumbnails = ThumbnailGenerator(thumb_cache_dir)
         app.state.thumb_usage = ThumbCacheUsage(thumb_cache_dir)
@@ -138,6 +152,10 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
     from myphoto.routes_trash import router as trash_router
 
     app.include_router(trash_router)
+
+    from myphoto.routes_lut import router as lut_router
+
+    app.include_router(lut_router)
 
     @app.get("/api/health")
     def health():
