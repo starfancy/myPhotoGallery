@@ -30,7 +30,11 @@ async def scan_luts(
     sessionmaker: async_sessionmaker[AsyncSession],
     luts_dir: Path,
 ) -> ScanResult:
-    luts_dir.mkdir(parents=True, exist_ok=True)
+    # 不创建目录：luts_dir 不存在 = 未安装 LUT 库，直接返回空。
+    # 避免污染测试 fixture 的目录计数（每个 test 的 tmp_path 都会被
+    # browse-fs 之类的端点枚举）。
+    if not luts_dir.exists():
+        return ScanResult()
     # 收集磁盘上所有 .cube 文件（一层子目录）
     disk_files: set[str] = set()
     for p in luts_dir.rglob("*.cube"):

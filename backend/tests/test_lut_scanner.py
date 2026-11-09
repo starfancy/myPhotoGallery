@@ -103,8 +103,8 @@ def test_scan_soft_deletes_missing_files(tmp_path, sm):
     asyncio.run(check())
 
 
-def test_scan_creates_dir_if_missing(tmp_path, sm):
+def test_scan_returns_empty_when_dir_missing(tmp_path, sm):
     luts_dir = tmp_path / "nonexistent"
     result = asyncio.run(scan_luts(sm, luts_dir))
     assert result.discovered == []
-    assert luts_dir.exists()
+    assert not luts_dir.exists()  # 不应创建
