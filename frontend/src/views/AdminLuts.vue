@@ -1,47 +1,78 @@
 <template>
-  <div class="al-page">
-    <header class="al-head">
-      <h2>滤镜 LUT 管理</h2>
-      <button data-test="rescan" @click="onRescan" :disabled="scanning">
-        {{ scanning ? "扫描中..." : "重新扫描磁盘" }}
-      </button>
-    </header>
-    <p class="al-hint">
-      新增 .cube 文件需放到 <code>backend/data/luts/&lt;group&gt;/</code> 后点"重新扫描"。
-    </p>
+  <div>
+    <AppHeader>
+      <template #title>
+        <span class="text-ink-2">管理 · 滤镜 LUT</span>
+      </template>
+    </AppHeader>
+    <main id="main-content" class="mx-auto max-w-4xl space-y-6 p-4">
+      <section class="rounded-lg bg-surface p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-sm font-medium text-ink-2">滤镜 LUT 管理</h2>
+          <button type="button"
+                  data-test="rescan"
+                  @click="onRescan"
+                  :disabled="scanning"
+                  class="rounded bg-surface-3 px-3 py-1.5 text-sm text-ink hover:bg-surface-4 disabled:cursor-not-allowed disabled:opacity-50">
+            {{ scanning ? "扫描中..." : "重新扫描磁盘" }}
+          </button>
+        </div>
+        <p class="mt-2 text-xs text-ink-2">
+          新增 .cube 文件需放到 <code>backend/data/luts/&lt;group&gt;/</code> 后点"重新扫描"。
+        </p>
+      </section>
 
-    <div v-for="g in grouped" :key="g.group" class="al-group">
-      <h3>{{ groupLabel(g.group) }}</h3>
-      <table>
-        <thead>
-          <tr><th>启用</th><th>名称</th><th>排序</th><th>文件</th><th>来源 / 许可</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in g.items" :key="row.slug" :class="{ disabled: !row.enabled }">
-            <td>
-              <button
-                aria-label="toggle-enabled"
-                @click="onToggle(row)"
-              >{{ row.enabled ? "✓" : "·" }}</button>
-            </td>
-            <td>
-              <div class="al-label">{{ row.label }}</div>
-              <input v-model="row.label" @change="onLabel(row)" aria-label="编辑名称" />
-            </td>
-            <td>
-              <input type="number" v-model.number="row.sort_order" @change="onSort(row)" style="width:70px" />
-            </td>
-            <td><code>{{ row.file_path }}</code></td>
-            <td class="al-meta">{{ row.source || "—" }} {{ row.license ? "· " + row.license : "" }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+      <section v-for="g in grouped" :key="g.group" class="rounded-lg bg-surface p-4">
+        <h3 class="mb-3 text-sm font-medium text-ink-2">{{ groupLabel(g.group) }}</h3>
+        <table class="w-full border-collapse text-sm">
+          <thead>
+            <tr class="text-left text-xs text-ink-2">
+              <th class="py-1 pr-2 font-medium">启用</th>
+              <th class="py-1 pr-2 font-medium">名称</th>
+              <th class="py-1 pr-2 font-medium">排序</th>
+              <th class="py-1 pr-2 font-medium">文件</th>
+              <th class="py-1 font-medium">来源 / 许可</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in g.items" :key="row.slug"
+                class="border-t border-line align-top"
+                :class="{ 'opacity-45': !row.enabled }">
+              <td class="py-1.5 pr-2">
+                <button type="button"
+                        aria-label="toggle-enabled"
+                        @click="onToggle(row)"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded bg-surface-2 text-ink hover:bg-surface-3">
+                  {{ row.enabled ? "✓" : "·" }}
+                </button>
+              </td>
+              <td class="py-1.5 pr-2">
+                <div class="text-ink">{{ row.label }}</div>
+                <input v-model="row.label" @change="onLabel(row)"
+                       aria-label="编辑名称"
+                       class="mt-1 w-full rounded bg-surface-2 px-2 py-1 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
+              </td>
+              <td class="py-1.5 pr-2">
+                <input type="number" v-model.number="row.sort_order" @change="onSort(row)"
+                       class="w-20 rounded bg-surface-2 px-2 py-1 text-sm text-ink focus:outline-none focus:ring-1 focus:ring-primary" />
+              </td>
+              <td class="py-1.5 pr-2">
+                <code class="text-xs text-ink-2">{{ row.file_path }}</code>
+              </td>
+              <td class="py-1.5 text-xs text-ink-2">
+                {{ row.source || "—" }} {{ row.license ? "· " + row.license : "" }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
+import AppHeader from "../components/AppHeader.vue"
 import { groupLabel } from "../lib/lutGroups"
 
 interface LutRow {
@@ -98,18 +129,3 @@ async function onRescan() {
 
 onMounted(load)
 </script>
-
-<style scoped>
-.al-page { padding: 20px; color: #eee; background: #111; min-height: 100vh; }
-.al-head { display: flex; justify-content: space-between; align-items: center; }
-.al-hint { color: #999; font-size: 13px; }
-.al-group { margin-top: 20px; }
-.al-group h3 { font-size: 14px; color: #ccc; }
-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-td, th { padding: 6px 8px; border-bottom: 1px solid #222; text-align: left; font-size: 13px; }
-tr.disabled { opacity: 0.45; }
-.al-meta { color: #888; font-size: 12px; }
-.al-label { font-size: 13px; color: #eee; margin-bottom: 2px; }
-td input { background: #1a1a1a; color: #eee; border: 1px solid #333; padding: 2px 4px; font-size: 13px; }
-button { cursor: pointer; }
-</style>
