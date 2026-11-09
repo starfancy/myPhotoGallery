@@ -1,5 +1,0 @@
-[
-  { "id": "warm", "label": "暖色调", "file": "warm.cube" },
-  { "id": "cool", "label": "冷色调", "file": "cool.cube" },
-  { "id": "mono", "label": "黑白", "file": "mono.cube" }
-]
