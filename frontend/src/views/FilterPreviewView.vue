@@ -24,6 +24,7 @@
         :disabled="!rendererReady"
         @pointerdown="holdStart"
         @pointerup="holdEnd"
+        @pointercancel="holdEnd"
         @pointerleave="holdEnd"
       >按住看原图</button>
       <button :disabled="!rendererReady" @click="onDownload">下载 JPEG</button>
@@ -33,6 +34,7 @@
       <button
         v-for="f in filters" :key="f.id"
         class="fp-thumb" :class="{ active: f.id === activeId }"
+        :disabled="!rendererReady"
         @click="pick(f)"
       >
         <img v-if="thumbs[f.id]" :src="thumbs[f.id]" :alt="f.label" />
@@ -43,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { onMounted, onUnmounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import { LutRenderer } from "../lib/lutRenderer"
 import { parseCube } from "../lib/lutParser"
@@ -67,6 +69,13 @@ let renderer: LutRenderer | null = null
 let currentMix = 0
 let heldMix: number | null = null
 const lutCache = new Map<string, LutData>()
+
+let cancelled = false
+onUnmounted(() => {
+  cancelled = true
+  renderer?.dispose()
+  renderer = null
+})
 
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -114,7 +123,7 @@ async function onDownload() {
   a.href = URL.createObjectURL(blob)
   a.download = `${base}-${activeId.value ?? "original"}.jpg`
   a.click()
-  URL.revokeObjectURL(a.href)
+  setTimeout(() => URL.revokeObjectURL(a.href), 0)
 }
 
 onMounted(async () => {
@@ -132,26 +141,32 @@ onMounted(async () => {
   // 2. 加载图片（1600 长边缩略图）
   try {
     const img = await loadImage(`/api/thumb/${sha1}?size=1600`)
-    renderer.setImage(img)
+    if (cancelled) return
+    renderer!.setImage(img)
     rendererReady.value = true
-    renderer.render(0)
+    renderer!.render(0)
   } catch {
-    fallbackMsg.value = "图片加载失败"
+    if (!cancelled) fallbackMsg.value = "图片加载失败"
     return
   }
   // 3. 加载滤镜清单与每支 LUT。manifest 整体失败才置空；单支 LUT 失败
   // 只跳过该支（小样位置无图，label 仍在），不影响其他滤镜。
   try {
     const res = await fetch("/filters/manifest.json")
+    if (cancelled) return
     filters.value = await res.json()
   } catch {
-    filters.value = []
+    if (!cancelled) filters.value = []
+    return
   }
   for (const f of filters.value) {
+    if (cancelled) return
     try {
       const cubeText = await (await fetch(`/filters/${f.file}`)).text()
+      if (cancelled) return
       lutCache.set(f.id, parseCube(cubeText))
     } catch {
+      if (cancelled) return
       // 该支 LUT 损坏：从清单剔除，避免 UI 点到空白
       filters.value = filters.value.filter((x) => x.id !== f.id)
     }
@@ -159,12 +174,14 @@ onMounted(async () => {
   // 4. 小样条：Task 5 会改为离屏小 canvas。这里先复用主 canvas 渲一遍
   // （1600px 渲 N 次成本可接受），渲完立刻 render(0) 回到原图。
   for (const f of filters.value) {
+    if (cancelled || !renderer) return
     const lut = lutCache.get(f.id)
     if (!lut) continue
     renderer.loadLut(f.id, lut)
     renderer.render(1)
     thumbs.value[f.id] = canvasEl.value!.toDataURL("image/jpeg", 0.6)
   }
+  if (cancelled || !renderer) return
   renderer.render(0)
 })
 </script>
