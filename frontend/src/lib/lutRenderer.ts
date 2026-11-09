@@ -19,6 +19,9 @@ void main() {
 
 const FRAG_SRC = `#version 300 es
 precision mediump float;
+// GLSL ES 3.00 规范：precision 声明按类型分别给出，sampler 不继承 float 的默认精度
+precision mediump sampler2D;
+precision mediump sampler3D;
 in vec2 v_uv;
 uniform sampler2D u_image;
 uniform sampler3D u_lut;

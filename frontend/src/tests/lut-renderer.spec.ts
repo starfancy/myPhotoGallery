@@ -129,4 +129,18 @@ describe("LutRenderer", () => {
     expect(canvas.height).toBe(128)
     expect(gl.viewport).toHaveBeenLastCalledWith(0, 0, 192, 128)
   })
+
+  it("fragment shader declares explicit precision for sampler types", () => {
+    // GLSL ES 3.00 规范：precision mediump float 只覆盖 float，sampler 必须单独声明，
+    // 否则真实浏览器编译报 "'sampler3D' : No precision specified"。
+    const gl = makeFakeGl()
+    getContextSpy = vi.spyOn(canvas, "getContext").mockReturnValue(gl as any)
+    new LutRenderer(canvas)
+    const fragSrcCalls = gl.shaderSource.mock.calls
+      .map((c) => c[1] as string)
+      .filter((src) => src.includes("sampler3D"))
+    expect(fragSrcCalls.length).toBe(1)
+    expect(fragSrcCalls[0]).toMatch(/precision\s+mediump\s+sampler3D;/)
+    expect(fragSrcCalls[0]).toMatch(/precision\s+mediump\s+sampler2D;/)
+  })
 })
