@@ -66,6 +66,7 @@ const activeId = ref<string | null>(null)
 const mixPct = ref(0)
 
 let renderer: LutRenderer | null = null
+let lastImg: HTMLImageElement | null = null
 let currentMix = 0
 let heldMix: number | null = null
 const lutCache = new Map<string, LutData>()
@@ -138,10 +139,11 @@ onMounted(async () => {
     fallbackMsg.value = err instanceof Error ? err.message : "WebGL 初始化失败"
     return
   }
-  // 2. 加载图片（1600 长边缩略图）
+  // 2. 加载图片（1600 长边缩略图）。存到 lastImg 供离屏小样渲染器复用。
   try {
     const img = await loadImage(`/api/thumb/${sha1}?size=1600`)
     if (cancelled) return
+    lastImg = img
     renderer!.setImage(img)
     rendererReady.value = true
     renderer!.render(0)
@@ -171,18 +173,31 @@ onMounted(async () => {
       filters.value = filters.value.filter((x) => x.id !== f.id)
     }
   }
-  // 4. 小样条：Task 5 会改为离屏小 canvas。这里先复用主 canvas 渲一遍
-  // （1600px 渲 N 次成本可接受），渲完立刻 render(0) 回到原图。
-  for (const f of filters.value) {
-    if (cancelled || !renderer) return
-    const lut = lutCache.get(f.id)
-    if (!lut) continue
-    renderer.loadLut(f.id, lut)
-    renderer.render(1)
-    thumbs.value[f.id] = canvasEl.value!.toDataURL("image/jpeg", 0.6)
+  // 4. 小样条：离屏 192×128 小 canvas + 独立第二个 LutRenderer（另一个 gl
+  // context），避免反复对主 1600px canvas toDataURL 堆全尺寸 dataURL。
+  // 缩到 192×128 由 GL LINEAR 采样完成。失败（如 context 耗尽）只跳过小样，
+  // 主预览不受影响。
+  if (cancelled || !renderer || !lastImg) return
+  const thumbCanvas = document.createElement("canvas")
+  thumbCanvas.width = 192
+  thumbCanvas.height = 128
+  let thumbRenderer: LutRenderer | null = null
+  try {
+    thumbRenderer = new LutRenderer(thumbCanvas)
+    thumbRenderer.setImage(lastImg)
+    for (const f of filters.value) {
+      if (cancelled) break
+      const lut = lutCache.get(f.id)
+      if (!lut) continue
+      thumbRenderer.loadLut(f.id, lut)
+      thumbRenderer.render(1)
+      thumbs.value[f.id] = thumbCanvas.toDataURL("image/jpeg", 0.7)
+    }
+  } catch {
+    // 小样渲染失败不阻塞主预览
+  } finally {
+    thumbRenderer?.dispose()
   }
-  if (cancelled || !renderer) return
-  renderer.render(0)
 })
 </script>
 

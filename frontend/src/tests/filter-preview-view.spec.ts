@@ -85,6 +85,21 @@ describe("FilterPreviewView", () => {
     expect(w.text()).toContain("IMG_0001.jpg")
   })
 
+  it("renders thumbnails on an offscreen small canvas, not the main canvas", async () => {
+    const w = mount(FilterPreviewView)
+    await flushPromises()
+    // 主 renderer 的最后一次 render 必须是 render(0)（回到原图），
+    // 而不是停留在小样循环的 render(1)。
+    const r = instances()[0] as unknown as { render: ReturnType<typeof vi.fn> }
+    expect(r.render).toHaveBeenLastCalledWith(0)
+    // 主 canvas 本身不被 toDataURL —— 点击任何小样触发 pick 后也不应碰
+    const mainCanvas = w.find("canvas").element as HTMLCanvasElement
+    const spy = vi.spyOn(mainCanvas, "toDataURL")
+    const btns = w.findAll("button.fp-thumb")
+    await btns[0]?.trigger("click")
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it("shows fallback when renderer constructor throws", async () => {
     vi.spyOn(lutMod, "LutRenderer").mockImplementationOnce(() => {
       throw new Error("WebGL2 not available")
