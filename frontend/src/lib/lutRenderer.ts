@@ -119,6 +119,8 @@ export class LutRenderer {
     // texImage2D 默认把图片顶行存在 t=0，而 uv 0 在屏幕底部，会倒置。
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img)
+    // 复位 FLIP_Y，避免污染后续 texImage3D（spec 说 3D 不受影响，但驱动实现各异）
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
     gl.uniform1i(this.uImage, 0)
   }
 
@@ -139,6 +141,10 @@ export class LutRenderer {
     if (lut.size > 65) throw new Error("LUT size exceeds 65")
     const hit = this.lutCache.get(id)
     if (hit) {
+      // cache-hit：必须重新把这张 LUT 绑到 TEXTURE1——前一次 loadLut 可能
+      // 已经把 TEXTURE1 换成别的 LUT 了，否则 sampler3D 采到的是上一张。
+      this.gl.activeTexture(this.gl.TEXTURE1)
+      this.gl.bindTexture(this.gl.TEXTURE_3D, hit)
       this.activeLut = hit
       return
     }
@@ -164,6 +170,14 @@ export class LutRenderer {
   render(mix: number): void {
     const gl = this.gl
     mix = Math.max(0, Math.min(1, mix))
+    // 每次绘制前重新断言两个纹理单元的绑定——setImage/setViewport 可能
+    // 改动过 canvas backing store，某些驱动会顺带重置 TEXTURE 绑定。
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, this.imgTex)
+    if (this.activeLut) {
+      gl.activeTexture(gl.TEXTURE1)
+      gl.bindTexture(gl.TEXTURE_3D, this.activeLut)
+    }
     // 未加载过 LUT 时退化为原图：仍画一次全屏三角形，但把 mix 钳成 0
     //（u_lut 未绑定时采样回黑色，权重 0 即完全保留原图）。
     gl.uniform1f(this.uMix, this.activeLut ? mix : 0)
