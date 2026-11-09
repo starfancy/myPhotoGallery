@@ -52,6 +52,10 @@ const routes: RouteRecordRaw[] = [
     path: "/settings/password",
     component: () => import("./views/ChangePasswordView.vue"),
   },
+  {
+    path: "/filter-preview",
+    component: () => import("./views/FilterPreviewView.vue"),
+  },
 ]
 
 /**

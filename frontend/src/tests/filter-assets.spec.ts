@@ -7,7 +7,7 @@ const FILTERS_DIR = join(__dirname, "../../public/filters")
 
 describe("filter assets", () => {
   const manifest = JSON.parse(
-    readFileSync(join(FILTERS_DIR, "manifest.json"), "utf8"),
+    readFileSync(join(FILTERS_DIR, "manifest.json"), "utf-8"),
   )
 
   it("manifest has at least 3 presets with unique ids", () => {
@@ -18,7 +18,7 @@ describe("filter assets", () => {
 
   it("every manifest entry points to a parseable .cube file", () => {
     for (const f of manifest) {
-      const text = readFileSync(join(FILTERS_DIR, f.file), "utf8")
+      const text = readFileSync(join(FILTERS_DIR, f.file), "utf-8")
       const lut = parseCube(text)
       expect(lut.size).toBe(33)
       expect(lut.data.length).toBe(33 ** 3 * 3)
@@ -26,7 +26,7 @@ describe("filter assets", () => {
   })
 
   it("LICENSE.md documents the synthetic-preset provenance", () => {
-    const lic = readFileSync(join(FILTERS_DIR, "LICENSE.md"), "utf8")
+    const lic = readFileSync(join(FILTERS_DIR, "LICENSE.md"), "utf-8")
     expect(lic).toMatch(/synthetic|built-in/i)
   })
 })
