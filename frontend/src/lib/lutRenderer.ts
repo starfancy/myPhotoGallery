@@ -119,6 +119,19 @@ export class LutRenderer {
     gl.uniform1i(this.uImage, 0)
   }
 
+  /**
+   * 把 backing store 与 GL viewport 显式钉到指定尺寸。
+   *
+   * setImage() 会把 canvas 重设为图片原生尺寸（主预览场景是对的）；
+   * 小样渲染器在 setImage 之后调用本方法，把 canvas 从 1600px 压回 192×128，
+   * 让缩略图在小 buffer 上渲染、再由 GL LINEAR 完成下采样。
+   */
+  setViewport(w: number, h: number): void {
+    this.canvas.width = w
+    this.canvas.height = h
+    this.gl.viewport(0, 0, w, h)
+  }
+
   loadLut(id: string, lut: LutData): void {
     if (lut.size > 65) throw new Error("LUT size exceeds 65")
     const hit = this.lutCache.get(id)

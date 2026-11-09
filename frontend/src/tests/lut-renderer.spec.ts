@@ -115,4 +115,18 @@ describe("LutRenderer", () => {
     ).toThrow(/65/)
     expect(gl.texImage3D).not.toHaveBeenCalled()
   })
+
+  it("setViewport pins canvas backing store and gl.viewport", () => {
+    const gl = makeFakeGl()
+    getContextSpy = vi.spyOn(canvas, "getContext").mockReturnValue(gl as any)
+    const r = new LutRenderer(canvas)
+    // 先模拟 setImage 把 canvas 拉到图片尺寸
+    r.setImage({ width: 1600, height: 1000 } as HTMLImageElement)
+    expect(canvas.width).toBe(1600)
+    // 再把小样 renderer 钉回 192×128
+    r.setViewport(192, 128)
+    expect(canvas.width).toBe(192)
+    expect(canvas.height).toBe(128)
+    expect(gl.viewport).toHaveBeenLastCalledWith(0, 0, 192, 128)
+  })
 })

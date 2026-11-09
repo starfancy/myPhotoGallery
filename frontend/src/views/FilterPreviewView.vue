@@ -117,14 +117,19 @@ function pick(f: FilterEntry) {
 
 async function onDownload() {
   if (!renderer) return
-  renderer.render(currentMix)
-  const blob = await renderer.exportJpeg()
-  const a = document.createElement("a")
-  const base = name.replace(/\.[^.]+$/, "") || "photo"
-  a.href = URL.createObjectURL(blob)
-  a.download = `${base}-${activeId.value ?? "original"}.jpg`
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(a.href), 0)
+  try {
+    renderer.render(currentMix)
+    const blob = await renderer.exportJpeg()
+    const a = document.createElement("a")
+    const base = name.replace(/\.[^.]+$/, "") || "photo"
+    a.href = URL.createObjectURL(blob)
+    a.download = `${base}-${activeId.value ?? "original"}.jpg`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 0)
+  } catch (err) {
+    console.warn("download failed", err)
+    window.alert("下载失败")
+  }
 }
 
 onMounted(async () => {
@@ -185,6 +190,9 @@ onMounted(async () => {
   try {
     thumbRenderer = new LutRenderer(thumbCanvas)
     thumbRenderer.setImage(lastImg)
+    // setImage 把 canvas 重设为图片原生尺寸（1600px）；钉回 192×128，
+    // 让缩略图在小 buffer 上渲染，下采样由 GL LINEAR 完成。
+    thumbRenderer.setViewport(192, 128)
     for (const f of filters.value) {
       if (cancelled) break
       const lut = lutCache.get(f.id)

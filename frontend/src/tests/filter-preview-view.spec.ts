@@ -13,6 +13,7 @@ vi.mock("../lib/lutRenderer", () => {
   class MockRenderer {
     static instances: MockRenderer[] = []
     setImage = vi.fn()
+    setViewport = vi.fn()
     loadLut = vi.fn()
     render = vi.fn()
     exportJpeg = vi.fn(async () => new Blob(["x"], { type: "image/jpeg" }))
