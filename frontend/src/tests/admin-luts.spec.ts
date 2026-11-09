@@ -29,6 +29,11 @@ describe("AdminLuts", () => {
   it("renders LUTs grouped, toggles PATCH on click", async () => {
     const w = mount(AdminLuts)
     await flushPromises()
+    // 默认折叠，先展开两个分组
+    const expands = w.findAll('button[aria-label="展开分组"]')
+    expect(expands.length).toBe(2)
+    for (const b of expands) await b.trigger("click")
+    await flushPromises()
     expect(w.text()).toContain("富士 Velvia")
     expect(w.text()).toContain("暖色调")
     // 找 warm 的 toggle，点它
@@ -41,6 +46,24 @@ describe("AdminLuts", () => {
       (c: any[]) => c[1]?.method === "PATCH" && c[0].includes("/warm"),
     )
     expect(patchCalls.length).toBe(1)
+  })
+
+  it("group select-all toggles every row in the group", async () => {
+    const w = mount(AdminLuts)
+    await flushPromises()
+    // 展开第一个分组（fujifilm，1 支 enabled=1）
+    await w.findAll('button[aria-label="展开分组"]')[0].trigger("click")
+    await flushPromises()
+    // 点全选 checkbox
+    const selectAll = w.find('input[data-test="group-select-all"]')
+    await selectAll.setValue(false)  // 取消全选
+    await flushPromises()
+    // 应有 PATCH 把 velvia 从 enabled=1 改成 0
+    const patchCalls = (fetch as any).mock.calls.filter(
+      (c: any[]) => c[1]?.method === "PATCH" && c[0].includes("/velvia"),
+    )
+    expect(patchCalls.length).toBe(1)
+    expect(JSON.parse((patchCalls[0][1] as any).body)).toEqual({ enabled: 0 })
   })
 
   it("rescan button triggers POST", async () => {
