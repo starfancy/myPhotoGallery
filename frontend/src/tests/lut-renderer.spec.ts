@@ -8,12 +8,16 @@ function makeFakeGl() {
     shaderSource: vi.fn(),
     compileShader: vi.fn(),
     getShaderParameter: vi.fn(() => true),
+    getShaderInfoLog: vi.fn(() => ""),
     createProgram: vi.fn(() => ({})),
     attachShader: vi.fn(),
     linkProgram: vi.fn(),
     getProgramParameter: vi.fn(() => true),
     getProgramInfoLog: vi.fn(() => ""),
     useProgram: vi.fn(),
+    pixelStorei: vi.fn(),
+    deleteBuffer: vi.fn(),
+    deleteShader: vi.fn(),
     createBuffer: vi.fn(() => ({})),
     bindBuffer: vi.fn(),
     bufferData: vi.fn(),
@@ -50,6 +54,14 @@ describe("LutRenderer", () => {
   it("throws when WebGL2 is unavailable", () => {
     getContextSpy = vi.spyOn(canvas, "getContext").mockReturnValue(null)
     expect(() => new LutRenderer(canvas)).toThrow(/WebGL2/)
+  })
+
+  it("throws when a shader fails to compile", () => {
+    const gl = makeFakeGl()
+    gl.getShaderParameter.mockReturnValue(false)
+    gl.getShaderInfoLog.mockReturnValue("syntax error on line 1")
+    getContextSpy = vi.spyOn(canvas, "getContext").mockReturnValue(gl as any)
+    expect(() => new LutRenderer(canvas)).toThrow(/Failed to compile.*syntax error/)
   })
 
   it("compiles a program and uploads the image texture on setImage", () => {

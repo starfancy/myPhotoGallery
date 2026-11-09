@@ -9,29 +9,33 @@
  */
 import type { LutData } from "./lutParser"
 
-const VERT_SRC = `
-attribute vec2 a_pos;
-varying vec2 v_uv;
+const VERT_SRC = `#version 300 es
+in vec2 a_pos;
+out vec2 v_uv;
 void main() {
   gl_Position = vec4(a_pos, 0.0, 1.0);
   v_uv = a_pos * 0.5 + 0.5;
 }`
 
-const FRAG_SRC = `
+const FRAG_SRC = `#version 300 es
 precision mediump float;
-varying vec2 v_uv;
+in vec2 v_uv;
 uniform sampler2D u_image;
 uniform sampler3D u_lut;
 uniform float u_mix;
+layout(location = 0) out vec4 fragColor;
 void main() {
-  vec4 c = texture2D(u_image, v_uv);
+  vec4 c = texture(u_image, v_uv);
   vec3 graded = texture(u_lut, clamp(c.rgb, 0.0, 1.0)).rgb;
-  gl_FragColor = vec4(mix(c.rgb, graded, u_mix), 1.0);
+  fragColor = vec4(mix(c.rgb, graded, u_mix), 1.0);
 }`
 
 export class LutRenderer {
   private gl: WebGL2RenderingContext
   private prog: WebGLProgram
+  private vbo: WebGLBuffer
+  private vertShader: WebGLShader
+  private fragShader: WebGLShader
   private imgTex: WebGLTexture | null = null
   private lutCache = new Map<string, WebGLTexture>()
   private activeLut: WebGLTexture | null = null
@@ -43,10 +47,14 @@ export class LutRenderer {
     const gl = canvas.getContext("webgl2")
     if (!gl) throw new Error("WebGL2 not available")
     this.gl = gl
-    this.prog = this.buildProgram()
+    const { prog, vertShader, fragShader } = this.buildProgram()
+    this.prog = prog
+    this.vertShader = vertShader
+    this.fragShader = fragShader
     // 单个全屏三角形（3 个顶点覆盖整个 clip space），uv 由 shader 内
     // a_pos*0.5+0.5 推算，不需要单独的 uv attribute / buffer。
-    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer())
+    this.vbo = gl.createBuffer()!
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo)
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
       -1, -1, 3, -1, -1, 3,
     ]), gl.STATIC_DRAW)
@@ -59,20 +67,36 @@ export class LutRenderer {
     this.uMix = gl.getUniformLocation(this.prog, "u_mix")
   }
 
-  private buildProgram(): WebGLProgram {
+  private buildProgram(): {
+    prog: WebGLProgram
+    vertShader: WebGLShader
+    fragShader: WebGLShader
+  } {
     const gl = this.gl
-    const compile = (type: number, src: string) => {
+    const compile = (type: number, src: string, label: string): WebGLShader => {
       const sh = gl.createShader(type)!
       gl.shaderSource(sh, src)
       gl.compileShader(sh)
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        const log = gl.getShaderInfoLog(sh) || "(no info log)"
+        gl.deleteShader(sh)
+        throw new Error(`Failed to compile ${label} shader: ${log}`)
+      }
       return sh
     }
+    const vertShader = compile(gl.VERTEX_SHADER, VERT_SRC, "vertex")
+    const fragShader = compile(gl.FRAGMENT_SHADER, FRAG_SRC, "fragment")
     const prog = gl.createProgram()!
-    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT_SRC))
-    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG_SRC))
+    gl.attachShader(prog, vertShader)
+    gl.attachShader(prog, fragShader)
     gl.linkProgram(prog)
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      const log = gl.getProgramInfoLog(prog) || "(no info log)"
+      gl.deleteProgram(prog)
+      throw new Error(`Failed to link shader program: ${log}`)
+    }
     gl.useProgram(prog)
-    return prog
+    return { prog, vertShader, fragShader }
   }
 
   setImage(img: HTMLImageElement): void {
@@ -89,6 +113,8 @@ export class LutRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    // texImage2D 默认把图片顶行存在 t=0，而 uv 0 在屏幕底部，会倒置。
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img)
     gl.uniform1i(this.uImage, 0)
   }
@@ -121,6 +147,7 @@ export class LutRenderer {
 
   render(mix: number): void {
     const gl = this.gl
+    mix = Math.max(0, Math.min(1, mix))
     // 未加载过 LUT 时退化为原图：仍画一次全屏三角形，但把 mix 钳成 0
     //（u_lut 未绑定时采样回黑色，权重 0 即完全保留原图）。
     gl.uniform1f(this.uMix, this.activeLut ? mix : 0)
@@ -142,6 +169,10 @@ export class LutRenderer {
     const gl = this.gl
     if (this.imgTex) gl.deleteTexture(this.imgTex)
     for (const t of this.lutCache.values()) gl.deleteTexture(t)
+    gl.deleteBuffer(this.vbo)
     gl.deleteProgram(this.prog)
+    // shader 可以在 program 删除后再删
+    gl.deleteShader(this.vertShader)
+    gl.deleteShader(this.fragShader)
   }
 }
