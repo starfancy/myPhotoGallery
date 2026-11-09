@@ -16,6 +16,11 @@
 - 回收站保留期可配置：到期前可还原，到期后由每日定时任务自动清理。
 - 网格浏览（等高流水 / 瀑布流布局），灯箱内置 EXIF 侧边面板与 RGB
   直方图面板。
+- 风格滤镜预览：灯箱顶栏按钮打开独立页面，用 WebGL 2 3D-LUT 套用胶片模拟
+  （富士 Classic Chrome / Velvia / Acros 等），支持强度滑块、长按对比原图、
+  按滤镜族分组的可折叠缩略条，并可一键导出 1600px 预览尺寸或原分辨率 JPEG。
+  LUT 文件放在 `<data_dir>/luts/<分组>/` 下；admin 在 `/admin/luts` 页面
+  按分组勾选启用、改名、排序，支持整组全选。
 - 文件名 / 文件夹名搜索，范围限定在单个图库 root 内（可锚定某个子目录
   子树）。
 - 多图批量打包 ZIP 下载：流式输出、支持 zip64 大文件，服务端限制单次
@@ -119,8 +124,9 @@ myphoto --config /path/to/config.toml list
 目录布局，可自行在 `[app]` 中设置 `data_dir = "db"`（本项目自己的开发
 检出就是这样配置的）：
 
-- `<data_dir>/app.db` —— 用户、图库、元数据、审计日志（需要备份）。
+- `<data_dir>/app.db` —— 用户、图库、元数据、审计日志、LUT 启用状态与显示名（需要备份）。
 - `<data_dir>/.cache/thumbnails/` —— 磁盘缩略图缓存，可完全重建。
+- `<data_dir>/luts/<分组>/*.cube` —— 可选的滤镜 LUT 文件；启用状态与显示名存于 `app.db`，把新 `.cube` 放进对应分组目录后在 admin 页面点"重新扫描"。
 - `config.toml` —— 含 `jwt_secret`（需要备份）。
 
 备份只需复制 `<data_dir>/app.db`（默认为项目根目录下的 `app.db`）与
