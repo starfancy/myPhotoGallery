@@ -37,22 +37,28 @@ vi.stubGlobal("Image", class {
   }
 })
 
-// mock fetch：manifest + 1 个 cube
+// mock fetch：/api/luts 分组清单 + 每支 /api/luts/{slug}/cube
 vi.stubGlobal(
   "fetch",
   vi.fn(async (url: string) => {
-    if (url.includes("manifest")) {
-      const list = [{ id: "warm", label: "暖色调", file: "warm.cube" }]
+    if (url === "/api/luts") {
       return {
         ok: true,
-        json: async (): Promise<unknown> => list,
-        text: async (): Promise<string> => JSON.stringify(list),
+        json: async (): Promise<unknown> => [
+          {
+            group: "synthetic",
+            items: [{ slug: "warm", label: "暖色调", sort_order: 0 }],
+          },
+        ],
       }
     }
-    return {
-      ok: true,
-      text: async (): Promise<string> => "LUT_3D_SIZE 1\n0.1 0.2 0.3",
+    if (url.includes("/cube")) {
+      return {
+        ok: true,
+        text: async (): Promise<string> => "LUT_3D_SIZE 1\n0.1 0.2 0.3",
+      }
     }
+    return { ok: false, status: 404, text: async (): Promise<string> => "", json: async (): Promise<unknown> => ({}) }
   }),
 )
 

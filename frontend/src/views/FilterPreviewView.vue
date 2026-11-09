@@ -31,15 +31,20 @@
     </section>
 
     <section class="fp-strip">
-      <button
-        v-for="f in filters" :key="f.id"
-        class="fp-thumb" :class="{ active: f.id === activeId }"
-        :disabled="!rendererReady"
-        @click="pick(f)"
-      >
-        <img v-if="thumbs[f.id]" :src="thumbs[f.id]" :alt="f.label" />
-        <span class="fp-thumb-label">{{ f.label }}</span>
-      </button>
+      <div v-for="g in groups" :key="g.group" class="fp-group">
+        <div class="fp-group-label">{{ groupLabel(g.group) }}</div>
+        <div class="fp-group-items">
+          <button
+            v-for="f in g.items" :key="f.slug"
+            class="fp-thumb" :class="{ active: f.slug === activeId }"
+            :disabled="!rendererReady"
+            @click="pick({ id: f.slug, label: f.label, slug: f.slug })"
+          >
+            <img v-if="thumbs[f.slug]" :src="thumbs[f.slug]" :alt="f.label" />
+            <span class="fp-thumb-label">{{ f.label }}</span>
+          </button>
+        </div>
+      </div>
     </section>
   </div>
 </template>
@@ -50,8 +55,11 @@ import { useRoute } from "vue-router"
 import { LutRenderer } from "../lib/lutRenderer"
 import { parseCube } from "../lib/lutParser"
 import type { LutData } from "../lib/lutParser"
+import { groupLabel } from "../lib/lutGroups"
 
-interface FilterEntry { id: string; label: string; file: string }
+interface FilterEntry { id: string; label: string; slug: string }
+interface LutEntry { slug: string; label: string; sort_order: number }
+interface LutGroup { group: string; items: LutEntry[] }
 
 const route = useRoute()
 const sha1 = String(route.query.sha1 ?? "")
@@ -61,6 +69,7 @@ const canvasEl = ref<HTMLCanvasElement | null>(null)
 const fallbackMsg = ref("")
 const rendererReady = ref(false)
 const filters = ref<FilterEntry[]>([])
+const groups = ref<LutGroup[]>([])
 const thumbs = ref<Record<string, string>>({})
 const activeId = ref<string | null>(null)
 const mixPct = ref(0)
@@ -156,26 +165,34 @@ onMounted(async () => {
     if (!cancelled) fallbackMsg.value = "图片加载失败"
     return
   }
-  // 3. 加载滤镜清单与每支 LUT。manifest 整体失败才置空；单支 LUT 失败
-  // 只跳过该支（小样位置无图，label 仍在），不影响其他滤镜。
+  // 3. 从后端 /api/luts 拿已启用列表（按 group 分组）。整体失败才置空；
+  // 单支 LUT 失败只跳过该支（小样位置无图，label 仍在），不影响其他滤镜。
   try {
-    const res = await fetch("/filters/manifest.json")
+    const res = await fetch("/api/luts")
     if (cancelled) return
-    filters.value = await res.json()
+    groups.value = (await res.json()) as LutGroup[]
   } catch {
-    if (!cancelled) filters.value = []
+    if (!cancelled) groups.value = []
     return
   }
+  // 拍平成 filters 列表（保持现有小样缓存数据结构兼容，id = slug）
+  filters.value = groups.value.flatMap((g) =>
+    g.items.map((it) => ({ id: it.slug, label: it.label, slug: it.slug })),
+  )
+  // 4. 对每支 LUT 拉 cube 文本
   for (const f of filters.value) {
     if (cancelled) return
     try {
-      const cubeText = await (await fetch(`/filters/${f.file}`)).text()
+      const cubeText = await (await fetch(`/api/luts/${f.id}/cube`)).text()
       if (cancelled) return
       lutCache.set(f.id, parseCube(cubeText))
     } catch {
       if (cancelled) return
       // 该支 LUT 损坏：从清单剔除，避免 UI 点到空白
       filters.value = filters.value.filter((x) => x.id !== f.id)
+      groups.value = groups.value
+        .map((g) => ({ group: g.group, items: g.items.filter((it) => it.slug !== f.id) }))
+        .filter((g) => g.items.length > 0)
     }
   }
   // 4. 小样条：离屏 192×128 小 canvas + 独立第二个 LutRenderer（另一个 gl
@@ -245,9 +262,16 @@ onMounted(async () => {
 }
 .fp-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
 .fp-strip {
-  display: flex; gap: 8px; padding: 10px 16px;
-  overflow-x: auto; border-top: 1px solid #222;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid #222;
+  max-height: 240px; overflow-y: auto;
 }
+.fp-group { display: flex; gap: 12px; align-items: flex-start; }
+.fp-group-label {
+  font-size: 12px; color: #999; min-width: 64px;
+  padding-top: 22px; flex-shrink: 0;
+}
+.fp-group-items { display: flex; gap: 8px; overflow-x: auto; }
 .fp-thumb {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   background: transparent; border: 2px solid transparent;
