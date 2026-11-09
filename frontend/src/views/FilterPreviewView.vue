@@ -29,6 +29,10 @@
       >按住看原图</button>
       <button :disabled="!rendererReady" @click="onDownload">下载 JPEG</button>
       <button
+        :disabled="!rendererReady || !imageId || downloadingOriginal"
+        @click="onDownloadOriginal"
+      >{{ downloadingOriginal ? "处理中..." : "下载原尺寸 JPEG" }}</button>
+      <button
         class="fp-strip-toggle"
         :title="stripOpen ? '收起滤镜列表' : '展开滤镜列表'"
         data-test="strip-toggle"
@@ -70,6 +74,7 @@ interface LutGroup { group: string; items: LutEntry[] }
 const route = useRoute()
 const sha1 = String(route.query.sha1 ?? "")
 const name = String(route.query.name ?? "")
+const imageId = route.query.image_id ? Number(route.query.image_id) : null
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const fallbackMsg = ref("")
@@ -80,6 +85,7 @@ const thumbs = ref<Record<string, string>>({})
 const activeId = ref<string | null>(null)
 const mixPct = ref(0)
 const stripOpen = ref(true)
+const downloadingOriginal = ref(false)
 
 let renderer: LutRenderer | null = null
 let lastImg: HTMLImageElement | null = null
@@ -136,15 +142,51 @@ async function onDownload() {
   try {
     renderer.render(currentMix)
     const blob = await renderer.exportJpeg()
-    const a = document.createElement("a")
-    const base = name.replace(/\.[^.]+$/, "") || "photo"
-    a.href = URL.createObjectURL(blob)
-    a.download = `${base}-${activeId.value ?? "original"}.jpg`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(a.href), 0)
+    triggerDownload(blob, `${activeId.value ?? "original"}`)
   } catch (err) {
     console.warn("download failed", err)
     window.alert("下载失败")
+  }
+}
+
+function triggerDownload(blob: Blob, suffix: string) {
+  const a = document.createElement("a")
+  const base = name.replace(/\.[^.]+$/, "") || "photo"
+  a.href = URL.createObjectURL(blob)
+  a.download = `${base}-${suffix}.jpg`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 0)
+}
+
+async function onDownloadOriginal() {
+  if (!renderer || !imageId || !lastImg) return
+  downloadingOriginal.value = true
+  try {
+    // 1. 拉原图
+    const res = await fetch(`/api/image/${imageId}`)
+    if (!res.ok) throw new Error(`fetch original failed: ${res.status}`)
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    try {
+      const origImg = await loadImage(objectUrl)
+      // 2. 临时把主 canvas 切到原图尺寸，套用当前 LUT + mix
+      renderer.setImage(origImg)
+      renderer.render(currentMix)
+      const outBlob = await renderer.exportJpeg(0.95)
+      triggerDownload(outBlob, `${activeId.value ?? "original"}-full`)
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+      // 3. 恢复预览：切回 1600 缩略图
+      if (!cancelled && renderer && lastImg) {
+        renderer.setImage(lastImg)
+        renderer.render(currentMix)
+      }
+    }
+  } catch (err) {
+    console.warn("original download failed", err)
+    window.alert("原尺寸下载失败")
+  } finally {
+    downloadingOriginal.value = false
   }
 }
 

@@ -876,7 +876,11 @@ function open() {
       onClick: () => {
         const it = pswp ? props.items[pswp.currIndex] : undefined
         if (!it) return
-        const q = new URLSearchParams({ sha1: it.sha1, name: it.filename })
+        const q = new URLSearchParams({
+          sha1: it.sha1,
+          name: it.filename,
+          image_id: String(it.id),
+        })
         window.open(`/filter-preview?${q}`, "_blank", "noopener")
       },
     })

@@ -107,6 +107,15 @@ describe("FilterPreviewView", () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
+  it("original-size download button rendered only when image_id present", () => {
+    // 当前文件级 mock 的 useRoute 没有 image_id（见顶部 vi.mock），
+    // 所以"原尺寸下载"按钮应被禁用（:disabled="!imageId"）。
+    const w = mount(FilterPreviewView)
+    const origBtn = w.findAll("button").find((b) => b.text().includes("原尺寸"))
+    expect(origBtn).toBeTruthy()
+    expect(origBtn!.attributes("disabled")).toBeDefined()
+  })
+
   it("strip toggle hides thumbnail strip", async () => {
     const w = mount(FilterPreviewView)
     await flushPromises()
