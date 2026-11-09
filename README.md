@@ -17,8 +17,13 @@ they are.
   automatically on a daily schedule.
 - Grid browsing (justified / masonry layouts) with a lightbox that includes an
   EXIF side panel and an RGB histogram panel.
-- Filename and folder-name search, scoped within one gallery root (with folder
-  subtree anchoring).
+- Style-filter preview: a lightbox button opens a dedicated page that applies
+  WebGL 2 3D-LUT film emulation (Fujifilm Classic Chrome / Velvia / Acros, etc.)
+  to the current photo, with strength slider, hold-to-compare-original,
+  collapsible thumbnail strip grouped by filter family, and one-click JPEG
+  export at either 1600-px preview size or full original resolution. LUT files
+  live in `<data_dir>/luts/<group>/`; admins enable/disable, rename, and reorder
+  them on a `/admin/luts` page with per-group select-all.
 - Batch ZIP download of multiple originals — streamed, zip64-capable, with a
   server-side per-request cap.
 - Audit log of admin and security events, with configurable retention and CSV
@@ -124,8 +129,9 @@ first run omits this key, so by default it is the project root (the directory
 containing `config.toml`); set `data_dir = "db"` in `[app]` yourself to get a
 `db/` layout (this project's own development checkout does that):
 
-- `<data_dir>/app.db` — users, galleries, metadata, audit log (back this up).
+- `<data_dir>/app.db` — users, galleries, metadata, audit log, LUT enable/label/sort metadata (back this up).
 - `<data_dir>/.cache/thumbnails/` — on-disk thumbnail cache; fully rebuildable.
+- `<data_dir>/luts/<group>/*.cube` — optional filter LUT files; metadata (enabled, label, sort_order) lives in `app.db`, add new `.cube` files here and use the admin "rescan" button.
 - `config.toml` — includes `jwt_secret` (back this up).
 
 To back up an installation, copy `<data_dir>/app.db` (default: `app.db` in

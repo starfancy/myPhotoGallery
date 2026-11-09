@@ -366,3 +366,34 @@ async def test_exclusion_unique_path_per_root(session):
     from sqlalchemy.exc import IntegrityError
     with pytest.raises(IntegrityError):
         await session.commit()
+
+
+# ---- Backend LUT library: Lut model ----
+
+def test_lut_model_roundtrip(tmp_path):
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from myphoto.models import Base, Lut
+
+    async def go():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/t.db")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.ext.asyncio import AsyncSession
+        sm = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with sm() as s:
+            s.add(Lut(
+                slug="velvia", label="富士 Velvia", group="fujifilm",
+                file_path="fujifilm/velvia.cube", enabled=1, sort_order=1,
+                source="https://example.com", license="MIT", created_at=100,
+            ))
+            await s.commit()
+        async with sm() as s:
+            from sqlalchemy import select
+            row = (await s.execute(select(Lut).where(Lut.slug == "velvia"))).scalar_one()
+            assert row.label == "富士 Velvia"
+            assert row.enabled == 1
+        await engine.dispose()
+
+    asyncio.run(go())
