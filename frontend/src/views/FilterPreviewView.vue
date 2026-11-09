@@ -28,9 +28,15 @@
         @pointerleave="holdEnd"
       >按住看原图</button>
       <button :disabled="!rendererReady" @click="onDownload">下载 JPEG</button>
+      <button
+        class="fp-strip-toggle"
+        :title="stripOpen ? '收起滤镜列表' : '展开滤镜列表'"
+        data-test="strip-toggle"
+        @click="stripOpen = !stripOpen"
+      >{{ stripOpen ? "▲ 收起" : "▼ 滤镜" }}</button>
     </section>
 
-    <section class="fp-strip">
+    <section v-show="stripOpen" class="fp-strip">
       <div v-for="g in groups" :key="g.group" class="fp-group">
         <div class="fp-group-label">{{ groupLabel(g.group) }}</div>
         <div class="fp-group-items">
@@ -73,6 +79,7 @@ const groups = ref<LutGroup[]>([])
 const thumbs = ref<Record<string, string>>({})
 const activeId = ref<string | null>(null)
 const mixPct = ref(0)
+const stripOpen = ref(true)
 
 let renderer: LutRenderer | null = null
 let lastImg: HTMLImageElement | null = null
@@ -251,6 +258,7 @@ onMounted(async () => {
   display: flex; gap: 16px; align-items: center;
   padding: 10px 16px; border-top: 1px solid #222;
 }
+.fp-strip-toggle { margin-left: auto; }
 .fp-strength {
   display: flex; align-items: center; gap: 8px; font-size: 13px;
 }
@@ -262,25 +270,33 @@ onMounted(async () => {
 }
 .fp-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
 .fp-strip {
-  display: flex; flex-direction: column; gap: 8px;
-  padding: 10px 16px; border-top: 1px solid #222;
-  max-height: 240px; overflow-y: auto;
+  border-top: 1px solid #222;
+  padding: 8px 16px 12px;
+  /* 约两行缩略图高度（每行 ~100px），超出纵向滚动 */
+  max-height: 220px; overflow-y: auto;
 }
-.fp-group { display: flex; gap: 12px; align-items: flex-start; }
+.fp-group { margin-bottom: 10px; }
+.fp-group:last-child { margin-bottom: 0; }
 .fp-group-label {
-  font-size: 12px; color: #999; min-width: 64px;
-  padding-top: 22px; flex-shrink: 0;
+  font-size: 12px; color: #999; margin-bottom: 6px;
 }
-.fp-group-items { display: flex; gap: 8px; overflow-x: auto; }
+.fp-group-items {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
 .fp-thumb {
+  /* 固定列宽：缩略图与下方名称严格按列对齐 */
+  width: 96px;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   background: transparent; border: 2px solid transparent;
   padding: 4px; cursor: pointer; border-radius: 6px;
 }
 .fp-thumb.active { border-color: #3b82f6; }
 .fp-thumb img {
-  width: 96px; height: 64px; object-fit: cover; border-radius: 4px;
+  width: 88px; height: 58px; object-fit: cover; border-radius: 4px;
   background: #333; display: block;
 }
-.fp-thumb-label { font-size: 12px; color: #ccc; }
+.fp-thumb-label {
+  font-size: 11px; color: #ccc; text-align: center;
+  width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 </style>

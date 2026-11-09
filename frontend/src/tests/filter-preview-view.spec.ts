@@ -107,6 +107,20 @@ describe("FilterPreviewView", () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
+  it("strip toggle hides thumbnail strip", async () => {
+    const w = mount(FilterPreviewView)
+    await flushPromises()
+    const toggle = w.find('button[data-test="strip-toggle"]')
+    // 默认展开：按钮文案"收起"，section 无内联 display
+    expect(toggle.text()).toContain("收起")
+    expect(w.find("section.fp-strip").attributes("style")).toBeUndefined()
+    await toggle.trigger("click")
+    await flushPromises()
+    // v-show 折叠：内联 display:none，按钮文案切换
+    expect(toggle.text()).toContain("滤镜")
+    expect(w.find("section.fp-strip").attributes("style")).toBe("display: none;")
+  })
+
   it("shows fallback when renderer constructor throws", async () => {
     vi.spyOn(lutMod, "LutRenderer").mockImplementationOnce(() => {
       throw new Error("WebGL2 not available")
