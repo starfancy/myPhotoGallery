@@ -46,6 +46,11 @@
             @click="adminOpen = false">
             设置
           </router-link>
+          <router-link to="/admin/luts" role="menuitem"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            @click="adminOpen = false">
+            滤镜 LUT
+          </router-link>
         </div>
       </div>
       <div ref="menuRef" class="relative">
