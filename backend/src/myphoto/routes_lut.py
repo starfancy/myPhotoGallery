@@ -107,3 +107,18 @@ async def update_lut(
             "slug": row.slug, "label": row.label, "enabled": row.enabled,
             "sort_order": row.sort_order,
         }
+
+
+@router.post("/admin/luts/rescan")
+async def rescan_luts(
+    request: Request,
+    _admin: User = Depends(admin_required),
+):
+    from myphoto.lut_scanner import scan_luts
+    sm = request.app.state.sessionmaker
+    result = await scan_luts(sm, _luts_dir(request))
+    return {
+        "discovered": result.discovered,
+        "skipped_existing": result.skipped_existing,
+        "soft_deleted": result.soft_deleted,
+    }

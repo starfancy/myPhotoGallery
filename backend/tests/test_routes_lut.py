@@ -64,3 +64,18 @@ def test_get_cube_unknown_slug_404(client_with_luts):
     c, _ = client_with_luts
     r = c.get("/api/luts/nonexistent/cube")
     assert r.status_code == 404
+
+
+def test_admin_rescan_discover_new_file(client_with_luts):
+    c, tmp_path = client_with_luts
+    # 运行时往 luts 目录丢新文件
+    _write_cube(tmp_path / "luts", "fujifilm/astia.cube")
+    r = c.post("/api/admin/luts/rescan")
+    assert r.status_code == 200
+    data = r.json()
+    assert "fujifilm/astia.cube" in data["discovered"]
+
+    # 立即出现在 admin 列表（默认 disabled）
+    r = c.get("/api/admin/luts")
+    slugs = [x["slug"] for x in r.json()]
+    assert "astia" in slugs
