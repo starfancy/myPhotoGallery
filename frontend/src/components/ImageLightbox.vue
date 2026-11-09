@@ -860,6 +860,26 @@ function open() {
       </svg>`,
       onClick: () => openHistPanel(),
     })
+    // "风格滤镜"按钮：新标签页打开滤镜预览
+    pswp!.ui!.registerElement({
+      name: "filter-preview",
+      ariaLabel: "风格滤镜",
+      order: 13,
+      isButton: true,
+      html: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="13.5" cy="6.5" r=".5" fill="white"/>
+        <circle cx="17.5" cy="10.5" r=".5" fill="white"/>
+        <circle cx="8.5" cy="7.5" r=".5" fill="white"/>
+        <circle cx="6.5" cy="12.5" r=".5" fill="white"/>
+        <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.129a1.688 1.688 0 0 1 1.668-1.688h1.996c1.661 0 3.313-1.333 3.313-2.999C21.942 6.014 17.451 2 12 2z"/>
+      </svg>`,
+      onClick: () => {
+        const it = pswp ? props.items[pswp.currIndex] : undefined
+        if (!it) return
+        const q = new URLSearchParams({ sha1: it.sha1, name: it.filename })
+        window.open(`/filter-preview?${q}`, "_blank", "noopener")
+      },
+    })
     // "更多操作"折叠按钮——仅 admin 可见，点击在正下方弹出下拉菜单
     if (auth.isAdmin) {
       pswp!.ui!.registerElement({
