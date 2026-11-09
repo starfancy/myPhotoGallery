@@ -68,6 +68,12 @@ export class LutRenderer {
     this.uImage = gl.getUniformLocation(this.prog, "u_image")
     this.uLut = gl.getUniformLocation(this.prog, "u_lut")
     this.uMix = gl.getUniformLocation(this.prog, "u_mix")
+    // 立刻把两个 sampler 的单元号设好——GLSL sampler uniform 默认值是 0，
+    // 若不显式设 u_lut=1，首次 render 时 u_image 和 u_lut 都指向 unit 0，
+    // 而 unit 0 绑的是 2D 图片纹理 → sampler3D 采样 2D 纹理报
+    // "Two textures of different types use the same sampler location"。
+    gl.uniform1i(this.uImage, 0)
+    gl.uniform1i(this.uLut, 1)
   }
 
   private buildProgram(): {
@@ -157,11 +163,16 @@ export class LutRenderer {
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    // RGB/UNSIGNED_BYTE 每行 lut.size*3 字节（如 33*3=99），GL 默认
+    // UNPACK_ALIGNMENT=4 会要求每行补齐到 4 的倍数，我们的连续字节数组
+    // 没有 padding → "ArrayBufferView not big enough"。临时把对齐降到 1。
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
     gl.texImage3D(
       gl.TEXTURE_3D, 0, gl.RGB8,
       lut.size, lut.size, lut.size, 0,
       gl.RGB, gl.UNSIGNED_BYTE, lut.data,
     )
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4) // 恢复默认
     gl.uniform1i(this.uLut, 1)
     this.lutCache.set(id, tex)
     this.activeLut = tex

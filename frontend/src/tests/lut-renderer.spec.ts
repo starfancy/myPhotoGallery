@@ -143,4 +143,31 @@ describe("LutRenderer", () => {
     expect(fragSrcCalls[0]).toMatch(/precision\s+mediump\s+sampler3D;/)
     expect(fragSrcCalls[0]).toMatch(/precision\s+mediump\s+sampler2D;/)
   })
+
+  it("initializes sampler uniforms in constructor (u_image=0, u_lut=1)", () => {
+    // GLSL sampler uniform 默认值是 0；若构造时不显式设 u_lut=1，
+    // 首次 render(0) 时 u_image 和 u_lut 都指向 unit 0（2D 图片纹理），
+    // sampler3D 采 2D 纹理报 "Two textures of different types use the same sampler location"。
+    const gl = makeFakeGl()
+    getContextSpy = vi.spyOn(canvas, "getContext").mockReturnValue(gl as any)
+    new LutRenderer(canvas)
+    const unitAssignments = gl.uniform1i.mock.calls.map((c) => c[1])
+    expect(unitAssignments).toContain(0) // u_image -> unit 0
+    expect(unitAssignments).toContain(1) // u_lut -> unit 1
+  })
+
+  it("sets UNPACK_ALIGNMENT=1 around texImage3D uploads", () => {
+    // RGB/UNSIGNED_BYTE 每行 lut.size*3 字节（如 33*3=99），默认 4 字节对齐
+    // 要求每行 padding，连续字节数组会报 "ArrayBufferView not big enough"。
+    const gl = makeFakeGl()
+    getContextSpy = vi.spyOn(canvas, "getContext").mockReturnValue(gl as any)
+    const r = new LutRenderer(canvas)
+    r.loadLut("warm", { size: 33, data: new Uint8Array(33 ** 3 * 3) })
+    const alignCalls = gl.pixelStorei.mock.calls
+      .filter((c) => c[1] === 1 || c[1] === 4)
+      .map((c) => c[1])
+    // 先设 1（上传），后恢复 4（默认）
+    expect(alignCalls[0]).toBe(1)
+    expect(alignCalls[alignCalls.length - 1]).toBe(4)
+  })
 })
