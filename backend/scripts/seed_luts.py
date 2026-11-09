@@ -39,20 +39,23 @@ async def main() -> int:
     luts_dir = Path(cfg.data_dir) / "luts"
     luts_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. 拷合成预设
-    src_dir = ROOT.parent / "frontend" / "public" / "filters"
+    # 1. 拷合成预设到运行时目录。
+    # 源文件在仓库内 backend/src/myphoto/lut_seeds/synthetic/（版本控制），
+    # 目标是运行时 data_dir/luts/synthetic/（gitignored）。
+    seed_dir = ROOT / "src" / "myphoto" / "lut_seeds" / "synthetic"
     synth_dir = luts_dir / "synthetic"
     synth_dir.mkdir(parents=True, exist_ok=True)
     for src_name, dst_name, _label in SYNTHETIC_PRESETS:
-        src = src_dir / src_name
+        src = seed_dir / src_name
         dst = synth_dir / dst_name
-        if src.exists() and not dst.exists():
-            shutil.copy2(src, dst)
-            print(f"copied {src_name} -> synthetic/{dst_name}")
-        elif dst.exists():
+        if dst.exists():
             print(f"skip existing synthetic/{dst_name}")
-        else:
-            print(f"WARN: source missing {src}")
+            continue
+        if not src.exists():
+            print(f"WARN: seed missing {src}")
+            continue
+        shutil.copy2(src, dst)
+        print(f"copied {src_name} -> synthetic/{dst_name}")
 
     # 2. 跑一次扫描（自动发现）
     engine = await make_engine(f"sqlite+aiosqlite:///{Path(cfg.data_dir) / 'app.db'}")
