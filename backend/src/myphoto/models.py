@@ -155,3 +155,22 @@ class Exclusion(Base):
                          name="uq_exclusion_path_per_root"),
         Index("ix_exclusion_root", "root_id"),
     )
+
+
+class Lut(Base):
+    """Backend LUT 库：.cube LUT 条目（spec § LUT library）。
+
+    - slug / file_path 唯一；group 用于前台分组；enabled 控制是否启用
+    - 时间戳为 Unix 秒（与其他表一致）
+    """
+    __tablename__ = "luts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    group: Mapped[str] = mapped_column(String, nullable=False, default="")
+    file_path: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="")
+    license: Mapped[str] = mapped_column(String, nullable=False, default="")
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
