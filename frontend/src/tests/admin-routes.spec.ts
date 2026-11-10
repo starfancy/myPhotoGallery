@@ -159,10 +159,10 @@ describe("AppHeader admin link", () => {
   it("shows 管理 button for admin users", () => {
     seedUser("admin")
     const w = mountHeader()
-    // P4: 管理现在是 dropdown 按钮（非直接链接），点击展开
-    const button = w.find('button[aria-haspopup="menu"]')
-    expect(button.exists()).toBe(true)
-    expect(button.text()).toContain("管理")
+    // 管理是 dropdown 按钮；现在 header 还有"工具"按钮，用 findAll 过滤
+    const buttons = w.findAll('button[aria-haspopup="menu"]')
+    const adminBtn = buttons.find((b) => b.text().includes("管理"))
+    expect(adminBtn).toBeTruthy()
   })
 
   it("hides 管理 button for viewer users", () => {

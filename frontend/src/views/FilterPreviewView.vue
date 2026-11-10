@@ -1,12 +1,19 @@
 <template>
   <div class="fp-page">
     <header class="fp-topbar">
-      <span class="fp-name">{{ name }}</span>
+      <span class="fp-name">{{ name || (isLocal ? "本地图片（未选择）" : "") }}</span>
+      <input ref="fileInputEl" type="file" accept="image/*" @change="onPickLocal" hidden />
+      <button v-if="isLocal" class="fp-pick-local" @click="fileInputEl?.click()">
+        选择本地图片
+      </button>
     </header>
 
     <main class="fp-stage">
       <canvas ref="canvasEl" class="fp-canvas"></canvas>
       <div v-if="fallbackMsg" class="fp-fallback">{{ fallbackMsg }}</div>
+      <div v-if="isLocal && !rendererReady && !fallbackMsg" class="fp-fallback">
+        从上方"选择本地图片"按钮选一张照片，纯前端处理，不上传服务器
+      </div>
     </main>
 
     <section class="fp-controls">
@@ -29,6 +36,7 @@
       >按住看原图</button>
       <button :disabled="!rendererReady" @click="onDownload">下载 JPEG</button>
       <button
+        v-if="!isLocal"
         :disabled="!rendererReady || !imageId || downloadingOriginal"
         @click="onDownloadOriginal"
       >{{ downloadingOriginal ? "处理中..." : "下载原尺寸 JPEG" }}</button>
@@ -73,11 +81,13 @@ interface LutEntry { slug: string; label: string; sort_order: number }
 interface LutGroup { group: string; items: LutEntry[] }
 
 const route = useRoute()
+const isLocal = route.query.local === "1"
 const sha1 = String(route.query.sha1 ?? "")
-const name = String(route.query.name ?? "")
+const name = ref(String(route.query.name ?? ""))
 const imageId = route.query.image_id ? Number(route.query.image_id) : null
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
+const fileInputEl = ref<HTMLInputElement | null>(null)
 const fallbackMsg = ref("")
 const rendererReady = ref(false)
 const filters = ref<FilterEntry[]>([])
@@ -152,7 +162,7 @@ async function onDownload() {
 
 function triggerDownload(blob: Blob, suffix: string) {
   const a = document.createElement("a")
-  const base = name.replace(/\.[^.]+$/, "") || "photo"
+  const base = name.value.replace(/\.[^.]+$/, "") || "photo"
   a.href = URL.createObjectURL(blob)
   a.download = `${base}-${suffix}.jpg`
   a.click()
@@ -191,8 +201,29 @@ async function onDownloadOriginal() {
   }
 }
 
+async function onPickLocal(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file || !renderer) return
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await loadImage(url)
+    if (cancelled) return
+    name.value = file.name
+    lastImg = img
+    renderer.setImage(img)
+    rendererReady.value = true
+    renderer.render(0)
+    // LUT 列表可能已加载完，补渲小样条
+    if (filters.value.length > 0) await renderThumbs()
+  } catch {
+    window.alert("本地图片加载失败")
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
 onMounted(async () => {
-  if (!sha1) {
+  if (!isLocal && !sha1) {
     fallbackMsg.value = "缺少图片参数（sha1）"
     return
   }
@@ -203,17 +234,19 @@ onMounted(async () => {
     fallbackMsg.value = err instanceof Error ? err.message : "WebGL 初始化失败"
     return
   }
-  // 2. 加载图片（1600 长边缩略图）。存到 lastImg 供离屏小样渲染器复用。
-  try {
-    const img = await loadImage(`/api/thumb/${sha1}?size=1600`)
-    if (cancelled) return
-    lastImg = img
-    renderer!.setImage(img)
-    rendererReady.value = true
-    renderer!.render(0)
-  } catch {
-    if (!cancelled) fallbackMsg.value = "图片加载失败"
-    return
+  // 2. gallery 模式：加载 1600 缩略图。本地模式：等用户选图（onPickLocal）。
+  if (!isLocal) {
+    try {
+      const img = await loadImage(`/api/thumb/${sha1}?size=1600`)
+      if (cancelled) return
+      lastImg = img
+      renderer!.setImage(img)
+      rendererReady.value = true
+      renderer!.render(0)
+    } catch {
+      if (!cancelled) fallbackMsg.value = "图片加载失败"
+      return
+    }
   }
   // 3. 从后端 /api/luts 拿已启用列表（按 group 分组）。整体失败才置空；
   // 单支 LUT 失败只跳过该支（小样位置无图，label 仍在），不影响其他滤镜。
@@ -245,10 +278,13 @@ onMounted(async () => {
         .filter((g) => g.items.length > 0)
     }
   }
-  // 4. 小样条：离屏 192×128 小 canvas + 独立第二个 LutRenderer（另一个 gl
-  // context），避免反复对主 1600px canvas toDataURL 堆全尺寸 dataURL。
-  // 缩到 192×128 由 GL LINEAR 采样完成。失败（如 context 耗尽）只跳过小样，
-  // 主预览不受影响。
+  // 4. 小样条渲染（本地模式下 onPickLocal 选完图后也会调）
+  await renderThumbs()
+})
+
+/** 离屏 192×128 小 canvas + 独立第二个 LutRenderer 渲小样。
+ *  本地模式 onMounted 时 lastImg 还是 null，由 onPickLocal 选图后补调。 */
+async function renderThumbs() {
   if (cancelled || !renderer || !lastImg) return
   const thumbCanvas = document.createElement("canvas")
   thumbCanvas.width = 192
@@ -257,8 +293,6 @@ onMounted(async () => {
   try {
     thumbRenderer = new LutRenderer(thumbCanvas)
     thumbRenderer.setImage(lastImg)
-    // setImage 把 canvas 重设为图片原生尺寸（1600px）；钉回 192×128，
-    // 让缩略图在小 buffer 上渲染，下采样由 GL LINEAR 完成。
     thumbRenderer.setViewport(192, 128)
     for (const f of filters.value) {
       if (cancelled) break
@@ -273,7 +307,7 @@ onMounted(async () => {
   } finally {
     thumbRenderer?.dispose()
   }
-})
+}
 </script>
 
 <style scoped>
@@ -284,6 +318,11 @@ onMounted(async () => {
 .fp-topbar {
   padding: 10px 16px; font-size: 14px;
   border-bottom: 1px solid #222;
+  display: flex; align-items: center; gap: 12px;
+}
+.fp-pick-local {
+  padding: 4px 12px; background: #2a2a2a; color: #eee;
+  border: 1px solid #444; border-radius: 6px; cursor: pointer; font-size: 13px;
 }
 .fp-name { color: #ccc; }
 .fp-stage {

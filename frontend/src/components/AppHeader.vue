@@ -5,6 +5,24 @@
       <slot name="title"></slot>
     </div>
     <nav v-if="auth.user" aria-label="账户与管理" class="flex items-center gap-2 text-sm">
+      <div ref="toolsMenuRef" class="relative">
+        <button type="button"
+                class="min-h-11 min-w-11 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink md:min-h-0 md:min-w-0"
+                :class="{ 'bg-surface-2 text-ink': toolsOpen }"
+                :aria-expanded="toolsOpen"
+                aria-haspopup="menu"
+                @click="toolsOpen = !toolsOpen">
+          工具
+        </button>
+        <div v-if="toolsOpen" role="menu"
+             class="absolute right-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-md border border-line bg-surface shadow-lg">
+          <router-link to="/filter-preview?local=1" role="menuitem"
+            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
+            @click="toolsOpen = false">
+            本地图片处理
+          </router-link>
+        </div>
+      </div>
       <div v-if="auth.isAdmin" ref="adminMenuRef" class="relative">
         <button type="button" ref="adminTriggerEl"
           class="min-h-11 min-w-11 rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink md:min-h-0 md:min-w-0"
@@ -112,6 +130,8 @@ const userTriggerEl = ref<HTMLElement | null>(null)
 const adminOpen = ref(false)
 const adminMenuRef = ref<HTMLElement | null>(null)
 const adminTriggerEl = ref<HTMLElement | null>(null)
+const toolsOpen = ref(false)
+const toolsMenuRef = ref<HTMLElement | null>(null)
 
 // 菜单关闭（Esc / 外部点击 / 选中 / 登出）后把焦点归还触发按钮，
 // 键盘用户不会在页面中丢失焦点。
@@ -131,11 +151,16 @@ function onDocClick(e: MouseEvent) {
     const el = adminMenuRef.value
     if (el && !el.contains(e.target as Node)) adminOpen.value = false
   }
+  if (toolsOpen.value) {
+    const el = toolsMenuRef.value
+    if (el && !el.contains(e.target as Node)) toolsOpen.value = false
+  }
 }
 function onEsc(e: KeyboardEvent) {
   if (e.key === "Escape") {
     open.value = false
     adminOpen.value = false
+    toolsOpen.value = false
   }
 }
 onMounted(() => {
