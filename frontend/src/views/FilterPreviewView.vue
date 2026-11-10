@@ -51,7 +51,7 @@
             @click="pick({ id: f.slug, label: f.label, slug: f.slug })"
           >
             <img v-if="thumbs[f.slug]" :src="thumbs[f.slug]" :alt="f.label" />
-            <span class="fp-thumb-label">{{ f.label }}</span>
+            <span class="fp-thumb-label" :title="f.label">{{ f.label }}</span>
           </button>
         </div>
       </div>
