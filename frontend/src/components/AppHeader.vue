@@ -16,11 +16,11 @@
         </button>
         <div v-if="toolsOpen" role="menu"
              class="absolute right-0 top-full z-50 mt-1 min-w-40 overflow-hidden rounded-md border border-line bg-surface shadow-lg">
-          <router-link to="/filter-preview?local=1" role="menuitem"
-            class="flex min-h-11 items-center px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink"
-            @click="toolsOpen = false">
+          <button type="button" role="menuitem"
+            class="flex min-h-11 w-full items-center px-3 py-2 text-left text-ink-2 hover:bg-surface-2 hover:text-ink"
+            @click="onOpenLocalTools">
             本地图片处理
-          </router-link>
+          </button>
         </div>
       </div>
       <div v-if="auth.isAdmin" ref="adminMenuRef" class="relative">
@@ -171,6 +171,11 @@ onBeforeUnmount(() => {
   document.removeEventListener("click", onDocClick)
   document.removeEventListener("keydown", onEsc)
 })
+
+function onOpenLocalTools() {
+  toolsOpen.value = false
+  window.open("/filter-preview?local=1", "_blank", "noopener")
+}
 
 async function onLogout() {
   open.value = false
