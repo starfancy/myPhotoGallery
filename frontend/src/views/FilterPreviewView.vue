@@ -315,8 +315,8 @@ onMounted(async () => {
 .fp-strip {
   border-top: 1px solid #222;
   padding: 8px 16px 12px;
-  /* 约两行缩略图高度（每行 ~100px），超出纵向滚动 */
-  max-height: 220px; overflow-y: auto;
+  /* 两行缩略图 + 分组标题 + group 间距：约 280px */
+  max-height: 280px; overflow-y: auto;
 }
 .fp-group { margin-bottom: 10px; }
 .fp-group:last-child { margin-bottom: 0; }
