@@ -24,6 +24,13 @@
           </button>
         </template>
         <div class="ml-auto flex items-center gap-1.5">
+          <SceneFilter
+            v-if="!searchQ"
+            :major="sceneMajor"
+            :minor="sceneMinor"
+            @update:major="onSceneMajor"
+            @update:minor="onSceneMinor"
+          />
           <SearchBox
             :model-value="searchQ"
             :scope-all="scopeAll"
@@ -143,6 +150,7 @@ import PaginationBar from "../components/PaginationBar.vue"
 import ImageLightbox from "../components/ImageLightbox.vue"
 import SearchBox from "../components/SearchBox.vue"
 import SearchResults from "../components/SearchResults.vue"
+import SceneFilter from "../components/SceneFilter.vue"
 import { apiGet, apiDelete, apiPost, HttpError, errorMessage } from "../api"
 import { useBrowseStore, PAGE_SIZE, type BrowseKey, type ImageRow } from "../stores/browse"
 import { useAuthStore } from "../stores/auth"
@@ -272,6 +280,10 @@ async function onSearchImageDeleted(id: number) {
 
 const sort = ref("name_asc")
 
+// 场景筛选（tags Phase 2）：空 = 不筛选
+const sceneMajor = ref("")
+const sceneMinor = ref("")
+
 const crumbs = ref<{ name: string; relative_path: string }[]>([])
 const folders = ref<any[]>([])
 const images = ref<ImageRow[]>([])
@@ -283,7 +295,10 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)
 const browse = useBrowseStore()
 
 function currentKey(): BrowseKey {
-  return { gid: gid.value, rid: rid.value, path: path.value, sort: sort.value }
+  return {
+    gid: gid.value, rid: rid.value, path: path.value, sort: sort.value,
+    sceneMajor: sceneMajor.value, sceneMinor: sceneMinor.value,
+  }
 }
 
 // ---------- grid layout preference ----------
@@ -626,4 +641,25 @@ watch([gid, rid, path, searchQ], (now, old) => {
 watch(scopeAll, () => {
   exitSelectionMode()
 })
+
+// ---------- 场景筛选（tags Phase 2） ----------
+
+function onSceneMajor(v: string) {
+  sceneMajor.value = v
+  sceneMinor.value = ""
+  reloadWithScene()
+}
+function onSceneMinor(v: string) {
+  sceneMinor.value = v
+  reloadWithScene()
+}
+/** 场景筛选变化：换 key 后重拉第 1 页，清选择。 */
+function reloadWithScene() {
+  if (searchQ.value) return
+  exitSelectionMode()
+  const key = currentKey()
+  browse.invalidate(key)
+  page.value = 1
+  renderPage(key, 1)
+}
 </script>

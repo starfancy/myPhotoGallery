@@ -107,6 +107,61 @@ def test_images_endpoint_subdir(client_with_data):
     assert filenames == ["b.jpg", "c.jpg"]
 
 
+def test_images_scene_filter(client_with_data):
+    c, gid, rid = client_with_data
+    app = c.app
+
+    async def _tag():
+        from sqlalchemy import update
+        from myphoto.models import Image
+        async with app.state.sessionmaker() as s:
+            await s.execute(update(Image).where(Image.filename == "b.jpg")
+                             .values(scene_major="自然风光", scene_minor="山景", tagged_at=1))
+            await s.execute(update(Image).where(Image.filename == "c.jpg")
+                             .values(scene_major="城市建筑", scene_minor="街道街景", tagged_at=1))
+            await s.commit()
+    c.portal.call(_tag)
+
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/images",
+              params={"path": "sub", "scene_major": "自然风光"})
+    assert r.status_code == 200
+    body = r.json()
+    assert [i["filename"] for i in body["items"]] == ["b.jpg"]
+    assert body["total"] == 1
+
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/images",
+              params={"path": "sub", "scene_major": "城市建筑", "scene_minor": "街道街景"})
+    assert [i["filename"] for i in r.json()["items"]] == ["c.jpg"]
+
+    # 无筛选时 sub/ 下全部返回（b.jpg + c.jpg）
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/images", params={"path": "sub"})
+    assert r.json()["total"] == 2
+
+
+def test_tags_stats_endpoint(client_with_data):
+    c, gid, rid = client_with_data
+    app = c.app
+
+    async def _tag():
+        from sqlalchemy import update
+        from myphoto.models import Image
+        async with app.state.sessionmaker() as s:
+            await s.execute(update(Image).where(Image.filename == "b.jpg")
+                             .values(scene_major="自然风光", scene_minor="山景", tagged_at=1))
+            await s.execute(update(Image).where(Image.filename == "c.jpg")
+                             .values(scene_major="自然风光", scene_minor="湖泊", tagged_at=1))
+            await s.commit()
+    c.portal.call(_tag)
+
+    r = c.get("/api/tags/stats")
+    assert r.status_code == 200
+    majors = r.json()["majors"]
+    natural = next(m for m in majors if m["name"] == "自然风光")
+    assert natural["count"] == 2
+    names = {m["name"]: m["count"] for m in natural["minors"]}
+    assert names == {"山景": 1, "湖泊": 1}
+
+
 def test_breadcrumbs(client_with_data):
     c, gid, rid = client_with_data
     r = c.get(

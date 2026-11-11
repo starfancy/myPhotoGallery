@@ -94,5 +94,6 @@ async function request<T>(
 export const apiGet = <T>(p: string, signal?: AbortSignal) =>
   request<T>("GET", p, undefined, signal)
 export const apiPost = <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {})
+export const apiPut = <T>(p: string, body?: unknown) => request<T>("PUT", p, body ?? {})
 export const apiPatch = <T>(p: string, body?: unknown) => request<T>("PATCH", p, body ?? {})
 export const apiDelete = <T>(p: string) => request<T>("DELETE", p)

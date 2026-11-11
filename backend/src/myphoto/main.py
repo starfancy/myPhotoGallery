@@ -173,6 +173,10 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
 
     app.include_router(lut_router)
 
+    from myphoto.routes_tags import router as tags_router
+
+    app.include_router(tags_router)
+
     @app.get("/api/health")
     def health():
         return {"ok": True}

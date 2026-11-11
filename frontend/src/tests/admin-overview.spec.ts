@@ -56,7 +56,9 @@ function mockStatus(
           ? analytics
           : String(url).includes("/api/admin/thumb-cache/usage")
             ? thumbUsage
-            : payload,
+            : String(url).includes("/api/tags/stats")
+              ? { majors: [] }
+              : payload,
         status,
       )),
     ),
@@ -367,6 +369,9 @@ describe("AdminOverview", () => {
     const fetchFn = vi.fn().mockImplementation((url: string) => {
       if (String(url).includes("/api/admin/analytics")) {
         return Promise.resolve(jsonResponse(EMPTY_ANALYTICS))
+      }
+      if (String(url).includes("/api/tags/stats")) {
+        return Promise.resolve(jsonResponse({ majors: [] }))
       }
       return Promise.resolve(jsonResponse(statusSeq[statusCalls++]))
     })

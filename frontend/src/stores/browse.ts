@@ -22,6 +22,9 @@ export interface BrowseKey {
   rid: number
   path: string
   sort: string
+  /** 场景筛选（tags Phase 2）：空 = 不筛选 */
+  sceneMajor?: string
+  sceneMinor?: string
 }
 
 interface CacheEntry {
@@ -39,7 +42,7 @@ export const PAGE_SIZE = 200
 const CACHE_MAX = 20
 
 function keyOf(k: BrowseKey) {
-  return `${k.gid}|${k.rid}|${k.path}|${k.sort}`
+  return `${k.gid}|${k.rid}|${k.path}|${k.sort}|${k.sceneMajor ?? ""}|${k.sceneMinor ?? ""}`
 }
 
 export const useBrowseStore = defineStore("browse", () => {
@@ -91,6 +94,8 @@ export const useBrowseStore = defineStore("browse", () => {
       limit: String(PAGE_SIZE),
       offset: String((page - 1) * PAGE_SIZE),
     })
+    if (k.sceneMajor) params.set("scene_major", k.sceneMajor)
+    if (k.sceneMinor) params.set("scene_minor", k.sceneMinor)
     const r = await apiGet<{ items: ImageRow[]; total: number }>(
       `/api/galleries/${k.gid}/roots/${k.rid}/images?${params}`,
     )

@@ -268,6 +268,8 @@ async def list_images(
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     cursor: str | None = None,
+    scene_major: str | None = Query(None, description="一级场景筛选，如 自然风光"),
+    scene_minor: str | None = Query(None, description="二级场景筛选，如 山景"),
     _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
@@ -284,14 +286,18 @@ async def list_images(
         ).scalar_one_or_none()
         if folder is None:
             return {"items": [], "next_cursor": None, "total": 0}
-        total = (
-            await s.execute(
-                select(func.count())
-                .select_from(Image)
-                .where(Image.folder_id == folder.id)
-            )
-        ).scalar_one()
+        # 场景筛选（tags Phase 2）：scene_major/minor 过滤；二级必须配一级
+        scene_filters = []
+        if scene_major:
+            scene_filters.append(Image.scene_major == scene_major)
+        if scene_minor:
+            scene_filters.append(Image.scene_minor == scene_minor)
+        total_q = select(func.count()).select_from(Image).where(Image.folder_id == folder.id)
         q = select(Image).where(Image.folder_id == folder.id)
+        for f in scene_filters:
+            total_q = total_q.where(f)
+            q = q.where(f)
+        total = (await s.execute(total_q)).scalar_one()
         if sort == "name_asc":
             q = q.order_by(Image.filename.asc(), Image.id.asc())
             if cursor:
@@ -471,3 +477,48 @@ async def search(
             "images": images_out,
             "next_cursor": next_cursor,
         }
+
+
+@router.get("/tags/stats")
+async def tags_stats(
+    request: Request,
+    response: Response,
+    gallery_id: int | None = Query(None, description="限定图库；默认全部"),
+    _user: User = Depends(access_scope_guard),
+):
+    """标签分布统计（tags Phase 2 概览页用）：一级 + 其下二级计数。"""
+    _no_store(response)
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        q = select(Image.scene_major, Image.scene_minor, func.count(Image.id)).where(
+            Image.scene_major.is_not(None)
+        )
+        if gallery_id is not None:
+            q = q.join(GalleryRoot, Image.root_id == GalleryRoot.id).where(
+                GalleryRoot.gallery_id == gallery_id
+            )
+        rows = (await s.execute(q.group_by(Image.scene_major, Image.scene_minor))).all()
+
+    # 按 HIERARCHY 顺序输出；未见过的组合追加在后
+    from myphoto.tagger import HIERARCHY
+
+    counts: dict[str, dict[str, int]] = {}
+    for major, minor, n in rows:
+        counts.setdefault(major, {})[minor or ""] = int(n)
+    majors = []
+    known = list(HIERARCHY.keys())
+    ordered = [m for m in known if m in counts] + sorted(
+        m for m in counts if m not in known
+    )
+    for major in ordered:
+        minors = counts[major]
+        minor_list = [
+            {"name": name, "count": cnt}
+            for name, cnt in sorted(minors.items(), key=lambda kv: -kv[1])
+        ]
+        majors.append({
+            "name": major,
+            "count": sum(minors.values()),
+            "minors": minor_list,
+        })
+    return {"majors": majors}

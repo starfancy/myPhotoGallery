@@ -1,6 +1,18 @@
 <template>
   <header class="sticky top-0 z-40 flex items-center gap-4 border-b border-line bg-surface/95 px-4 py-3 backdrop-blur">
     <router-link to="/galleries" class="font-semibold">myPhotoGallery</router-link>
+    <nav v-if="auth.user" aria-label="主导航" class="flex items-center gap-1 text-sm">
+      <router-link
+        to="/galleries"
+        class="rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink"
+        active-class="text-ink font-medium"
+      >图库</router-link>
+      <router-link
+        to="/people"
+        class="rounded px-2 py-1 text-ink-2 hover:bg-surface-2 hover:text-ink"
+        active-class="text-ink font-medium"
+      >人物</router-link>
+    </nav>
     <div class="flex-1 min-w-0 overflow-hidden">
       <slot name="title"></slot>
     </div>
