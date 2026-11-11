@@ -49,6 +49,10 @@ class AppConfig:
     download_batch_limit: int  # 单次批量下载 ZIP 图片数上限，合法 10–200，默认 100
     # [audit] section
     audit_retention_days: int  # 审计日志保留天数，合法 {0,30,90,180,365}，默认 180，0=永不清理
+    # [tagging] section（智能标签）
+    tagging_enabled: bool          # 总开关；false 时 scanner/CLI 都不打标
+    tagging_models_dir: str        # 模型目录；相对路径相对 config.toml 所在目录解析
+    tagging_scan_on_import: bool    # 扫描时对新变图片同步打标（设计 §3.1；不变文件不受影响）
 
 
 _DEFAULT_TEMPLATE = """\
@@ -82,6 +86,17 @@ retention_days = 180
 # 保持注释（默认）= 源码内置 min(8, CPU 核数)；
 # 机械硬盘或网络盘（SMB/NFS）随机读抖动时可调小，如 2。
 # hash_workers = 8
+
+[tagging]
+# 智能标签（CLIP 场景 + YOLO 人数 + InsightFace 人脸）。
+# enabled = false 可整体关闭（scanner 与 CLI 都不打标）。
+# scan_on_import = true：扫描时对新增/变化图片同步打标；
+#   未变化的图片（mtime+size 相同）不受影响，存量图片用 `myphoto tag run` 打。
+# models_dir 默认 "backend/models"（相对本配置文件所在目录）；
+# 模型文件不进 git，部署时手动拷贝。
+# enabled = true
+# scan_on_import = true
+# models_dir = "backend/models"
 """
 
 
@@ -149,6 +164,19 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
             )
             audit_retention_days = clamped
 
+    # [tagging] 段：布尔容错（非 true/1/yes 一律 False）；models_dir 相对路径
+    # 在 resolve_models_dir() 里相对 config 文件目录解析。
+    tagging_section = data.get("tagging", {})
+
+    def _as_bool(raw, default: bool) -> bool:
+        if raw is None:
+            return default
+        return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+    tagging_enabled = _as_bool(tagging_section.get("enabled"), True)
+    tagging_scan_on_import = _as_bool(tagging_section.get("scan_on_import"), True)
+    tagging_models_dir = str(tagging_section.get("models_dir") or "backend/models")
+
     # ---- data_dir resolution ----
     raw = app_section.get("data_dir")
     if raw is None:
@@ -177,4 +205,15 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
         scanner_hash_workers=scanner_hash_workers,
         download_batch_limit=download_batch_limit,
         audit_retention_days=audit_retention_days,
+        tagging_enabled=tagging_enabled,
+        tagging_models_dir=tagging_models_dir,
+        tagging_scan_on_import=tagging_scan_on_import,
     )
+
+
+def resolve_models_dir(cfg: "AppConfig", config_path: Union[str, Path]) -> Path:
+    """把 [tagging].models_dir 解析为绝对路径（相对路径相对 config 文件目录）。"""
+    raw = Path(cfg.tagging_models_dir)
+    if raw.is_absolute():
+        return raw
+    return (Path(config_path).resolve().parent / raw).resolve()

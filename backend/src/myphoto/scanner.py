@@ -18,6 +18,7 @@ from sqlalchemy import select
 from myphoto.audit import write_audit
 from myphoto.formats import classify, is_supported
 from myphoto.models import Exclusion, Folder, GalleryRoot, Image
+from myphoto.tagger import TAG_MODEL_VERSION
 
 log = logging.getLogger("myphoto.scanner")
 
@@ -109,10 +110,13 @@ class _ScanRecord:
     height: int | None
     taken_at: int | None
     exif_json: str | None
+    # 智能标签（tags upgrade Phase 1）：仅 changed 文件且 Scanner 带 tagger 时非空。
+    tag: object | None = None       # TagResult
+    tag_error: str | None = None    # 打标失败原因；不阻塞扫描
 
 
 class Scanner:
-    def __init__(self, sessionmaker, hash_workers: int | None = None):
+    def __init__(self, sessionmaker, hash_workers: int | None = None, tagger=None):
         self._sm = sessionmaker
         # [scanner].hash_workers override from config.toml; None/non-positive
         # falls back to the source default _HASH_WORKERS.
@@ -121,6 +125,10 @@ class Scanner:
             if isinstance(hash_workers, int) and hash_workers >= 1
             else _HASH_WORKERS
         )
+        # 智能打标（tags upgrade Phase 1）：None = 扫描不打标（默认，测试与
+        # 无模型环境）。非 None 时仅对 changed（新/变）图片同步打标，
+        # 未变图片（mtime+size 相同）走 unchanged 分支根本不碰 tagger。
+        self._tagger = tagger
         self._queue: asyncio.Queue[int] = asyncio.Queue()
         self._enqueued: set[int] = set()
         self._worker: asyncio.Task[None] | None = None
@@ -352,6 +360,23 @@ class Scanner:
                         walked.path,
                         classify(walked.filename) == "raw",
                     )
+                    # 智能打标：在同一 worker 线程内同步推理（tagger 内部锁
+                    # 串行化）。hash 刚读过文件，OS 缓存命中，解码代价低。
+                    # 单张失败只记 tag_error，不中断扫描（§3.1/§8.4）。
+                    tag_result = None
+                    tag_error = None
+                    if self._tagger is not None:
+                        try:
+                            from myphoto.tagging_jobs import _decode_and_tag
+
+                            tag_result = await asyncio.to_thread(
+                                _decode_and_tag, self._tagger, walked.path,
+                            )
+                        except Exception as exc:
+                            log.warning(
+                                "scan-time tag failed for %s: %s", walked.path, exc,
+                            )
+                            tag_error = str(exc)[:500]
                 except Exception as exc:
                     return walked, exc
                 finally:
@@ -360,6 +385,7 @@ class Scanner:
                 walked=walked, changed=True,
                 sha1=sha1, width=width, height=height,
                 taken_at=taken_at, exif_json=exif_json,
+                tag=tag_result, tag_error=tag_error,
             )
 
         # gather preserves input order, so records stay in walk order.
@@ -440,10 +466,11 @@ class Scanner:
                     )
                 ).scalars()
             }
+            pending_embeddings: list[tuple[object, object, int]] = []
             for record in batch:
                 target_folder_id = folder_ids[record.walked.relative_dir]
                 if record.changed:
-                    _upsert_image(
+                    image = _upsert_image(
                         session=session,
                         existing=existing.get(record.walked.relative_path),
                         root_id=root_id,
@@ -455,10 +482,30 @@ class Scanner:
                         taken_at=record.taken_at,
                         exif_json=record.exif_json,
                     )
+                    if record.tag is not None:
+                        now = int(time.time())
+                        image.scene_major = record.tag.scene_major
+                        image.scene_minor = record.tag.scene_minor
+                        image.scene_conf = record.tag.scene_conf
+                        image.person_count = record.tag.person_count
+                        image.tagged_at = now
+                        image.tag_model_version = TAG_MODEL_VERSION
+                        image.tagged_sha1 = image.sha1
+                        image.tag_error = None
+                        pending_embeddings.append((image, record.tag, now))
+                    elif record.tag_error is not None:
+                        image.tag_error = record.tag_error
                 else:
                     image = existing.get(record.walked.relative_path)
                     if image is not None and image.folder_id != target_folder_id:
                         image.folder_id = target_folder_id
+            if pending_embeddings:
+                # flush 为新建图片分配 id，embedding 行以 image_id 为主键
+                await session.flush()
+                from myphoto.tagging_jobs import _persist_embeddings
+
+                for image, result, now in pending_embeddings:
+                    await _persist_embeddings(session, image.id, result, now)
             await session.commit()
 
     async def _record_scan_error(self, root_id: int, error: str) -> None:
@@ -792,30 +839,29 @@ def _upsert_image(
     height: int | None,
     taken_at: int | None,
     exif_json: str | None,
-) -> None:
+) -> Image:
     kind = classify(walked.filename)
     extension = walked.filename.rsplit(".", 1)[-1].lower()
     indexed_at = int(time.time())
     if existing is None:
-        session.add(
-            Image(
-                root_id=root_id,
-                folder_id=folder_id,
-                relative_path=walked.relative_path,
-                filename=walked.filename,
-                ext=extension,
-                size_bytes=walked.size_bytes,
-                width=width,
-                height=height,
-                sha1=sha1,
-                mtime=walked.mtime,
-                taken_at=taken_at,
-                is_raw=int(kind == "raw"),
-                indexed_at=indexed_at,
-                exif_json=exif_json,
-            )
+        image = Image(
+            root_id=root_id,
+            folder_id=folder_id,
+            relative_path=walked.relative_path,
+            filename=walked.filename,
+            ext=extension,
+            size_bytes=walked.size_bytes,
+            width=width,
+            height=height,
+            sha1=sha1,
+            mtime=walked.mtime,
+            taken_at=taken_at,
+            is_raw=int(kind == "raw"),
+            indexed_at=indexed_at,
+            exif_json=exif_json,
         )
-        return
+        session.add(image)
+        return image
 
     existing.folder_id = folder_id
     existing.filename = walked.filename
@@ -829,6 +875,7 @@ def _upsert_image(
     existing.is_raw = int(kind == "raw")
     existing.indexed_at = indexed_at
     existing.exif_json = exif_json
+    return existing
 
 
 async def _ensure_folders(

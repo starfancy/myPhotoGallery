@@ -15,6 +15,14 @@ dependencies = [
   "python-multipart>=0.0.9",
   "tomli>=2.0; python_version<'3.11'",
   "click>=8.1",
+  # 智能标签（tags upgrade Phase 1）。openvino 锁 2024.6.0（2026.x API 不兼容）；
+  # 不要装 optimum（会升级 openvino 破坏环境）。模型文件本身不进 git。
+  "numpy>=1.26",
+  "openvino==2024.6.0",
+  "onnxruntime>=1.31",
+  "insightface>=2.1",
+  "opencv-python>=4.8",
+  "transformers>=4.40",
 ]
 
 [project.optional-dependencies]

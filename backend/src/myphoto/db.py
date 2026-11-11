@@ -25,6 +25,15 @@ _log = logging.getLogger("myphoto.db")
 _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "images": [
         ("exif_json", "TEXT"),  # Phase 3 — EXIF metadata JSON blob
+        # tags upgrade Phase 1 — 智能标签（全部可空；NULL = 未打标）
+        ("scene_major", "TEXT"),
+        ("scene_minor", "TEXT"),
+        ("scene_conf", "REAL"),
+        ("person_count", "INTEGER"),
+        ("tagged_at", "INTEGER"),
+        ("tag_model_version", "TEXT"),
+        ("tagged_sha1", "TEXT"),
+        ("tag_error", "TEXT"),
     ],
 }
 

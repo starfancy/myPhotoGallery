@@ -14,7 +14,12 @@ from sqlalchemy import select
 
 from myphoto.analytics import AnalyticsCache
 from myphoto.audit import purge_expired as purge_audit_expired
-from myphoto.config import AppConfig, load_or_init, resolve_config_path
+from myphoto.config import (
+    AppConfig,
+    load_or_init,
+    resolve_config_path,
+    resolve_models_dir,
+)
 from myphoto.db import make_engine, make_sessionmaker
 from myphoto.errors import AppError, install_error_handlers
 from myphoto.models import GalleryRoot
@@ -42,7 +47,18 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         if created and pw:
             # printed once to stdout so operator can grab it
             print(f"[myphoto] initial admin created. username=admin password={pw}", flush=True)
-        scanner = Scanner(sm, hash_workers=cfg.scanner_hash_workers)
+        # 智能打标（tags upgrade Phase 1）：enabled && scan_on_import && 模型就位
+        # 才把 Tagger 传给 Scanner；否则 None → 扫描行为与打标前完全一致。
+        tagger = None
+        if cfg.tagging_enabled and cfg.tagging_scan_on_import:
+            from myphoto.tagger import Tagger
+
+            candidate = Tagger(resolve_models_dir(cfg, config_file))
+            if candidate.available():
+                tagger = candidate
+            else:
+                log.info("tagging models not available; scan-time tagging disabled")
+        scanner = Scanner(sm, hash_workers=cfg.scanner_hash_workers, tagger=tagger)
         await scanner.start()
         async with sm() as session:
             roots = (

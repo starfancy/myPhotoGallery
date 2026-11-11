@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Index, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -75,12 +75,65 @@ class Image(Base):
     is_raw: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     indexed_at: Mapped[int] = mapped_column(Integer, nullable=False)
     exif_json: Mapped[str | None] = mapped_column(String, nullable=True)
+    # --- 智能标签（tags upgrade Phase 1，全部可空：NULL = 未打标）---
+    scene_major: Mapped[str | None] = mapped_column(String, nullable=True)   # 一级分类，如 "自然风光"
+    scene_minor: Mapped[str | None] = mapped_column(String, nullable=True)    # 二级分类，如 "海滩海岸"
+    scene_conf: Mapped[float | None] = mapped_column(Float, nullable=True)     # 二级得分（cosine）
+    person_count: Mapped[int | None] = mapped_column(Integer, nullable=True)  # YOLO 检测到的人数
+    tagged_at: Mapped[int | None] = mapped_column(Integer, nullable=True)       # 打标时间戳；NULL = 未打标
+    tag_model_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    tagged_sha1: Mapped[str | None] = mapped_column(String, nullable=True)     # 打标时的 sha1；不一致强制重打
+    tag_error: Mapped[str | None] = mapped_column(String, nullable=True)      # NULL = 成功；非空 = 失败原因
     __table_args__ = (
         UniqueConstraint("root_id", "relative_path", name="uq_image_path_per_root"),
         Index("ix_image_folder_filename", "folder_id", "filename"),
         Index("ix_image_folder_taken", "folder_id", "taken_at"),
         Index("ix_image_sha1", "sha1"),
     )
+
+
+class ImageEmbedding(Base):
+    """CLIP 图像向量（调提示词时不用重跑视觉模型，relabel 直接重算）。"""
+
+    __tablename__ = "image_embeddings"
+    image_id: Mapped[int] = mapped_column(
+        ForeignKey("images.id", ondelete="CASCADE"), primary_key=True,
+    )
+    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # 512 维 float32，约 2KB
+    model_version: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class FaceEmbedding(Base):
+    """人脸向量（聚类增量需要）。cluster_id NULL = 尚未分配簇。"""
+
+    __tablename__ = "face_embeddings"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    image_id: Mapped[int] = mapped_column(
+        ForeignKey("images.id", ondelete="CASCADE"), nullable=False,
+    )
+    face_index: Mapped[int] = mapped_column(Integer, nullable=False)  # 同图多脸时的序号
+    bbox: Mapped[str | None] = mapped_column(String, nullable=True)   # "[x1,y1,x2,y2]" 原图坐标系
+    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    cluster_id: Mapped[str | None] = mapped_column(String, nullable=True)  # "P001"，未分配时 NULL
+    model_version: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    __table_args__ = (
+        Index("idx_face_emb_cluster", "cluster_id"),
+        Index("idx_face_emb_image", "image_id"),
+    )
+
+
+class FaceCluster(Base):
+    """人物簇（用户可命名）。cluster_id 稳定，重聚类不复用新 ID（设计 §8.3）。"""
+
+    __tablename__ = "face_clusters"
+    cluster_id: Mapped[str] = mapped_column(String, primary_key=True)  # "P001"
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)  # 用户命名；NULL = 未命名
+    sample_face_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 代表性人脸
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class AuditLog(Base):

@@ -12,7 +12,7 @@ import uvicorn
 from sqlalchemy import func, select
 
 from myphoto.audit import write_audit
-from myphoto.config import load_or_init, resolve_config_path
+from myphoto.config import load_or_init, resolve_config_path, resolve_models_dir
 from myphoto.db import create_all, make_engine, make_sessionmaker
 from myphoto.formats import classify
 from myphoto.models import Gallery, GalleryRoot, Image, User
@@ -292,6 +292,166 @@ def reset_password(ctx, username, password):
                     click.echo(f"password for '{username}' has been reset to: {new_pw}")
                 else:
                     click.echo(f"password for '{username}' has been reset.")
+        finally:
+            await engine.dispose()
+
+    _run(_run_it())
+
+
+# ---------- 智能标签（tags upgrade Phase 1） ----------
+
+
+def _build_tagger(cfg, config_path: str | None):
+    """按 config 构造 Tagger；未启用 / 模型未就位 → None（调用方决定如何提示）。"""
+    if not cfg.tagging_enabled:
+        return None
+    from myphoto.tagger import Tagger
+
+    tagger = Tagger(resolve_models_dir(cfg, resolve_config_path(config_path)))
+    return tagger if tagger.available() else None
+
+
+async def _progress_echo(done: int, total: int, current) -> None:
+    click.echo(f"  [{done}/{total}] {current or ''}")
+
+
+async def _gallery_id_by_name(s, name: str) -> int:
+    g = (await s.execute(select(Gallery).where(Gallery.name == name))).scalar_one_or_none()
+    if g is None:
+        raise click.ClickException(f"gallery '{name}' not found")
+    return g.id
+
+
+@cli.group("tag")
+def tag_group():
+    """智能标签：status / run / cluster / relabel（见 docs/tags-upgrade-design.md）。"""
+
+
+@tag_group.command("status")
+@click.option("--gallery", default=None, help="只看指定图库")
+@click.pass_context
+def tag_status_cmd(ctx, gallery):
+    """列出所有图库的打标进度（total/tagged/pending/failed）。"""
+
+    async def _run_it():
+        engine, sm, cfg = await _bootstrap(ctx.obj["config_path"])
+        try:
+            from myphoto.tagging_jobs import tag_status
+
+            rows = await tag_status(sm)
+            if gallery:
+                rows = [r for r in rows if r["gallery"] == gallery]
+                if not rows:
+                    raise click.ClickException(f"gallery '{gallery}' not found")
+            ready = _build_tagger(cfg, ctx.obj["config_path"]) is not None
+            click.echo(f"models ready: {'yes' if ready else 'NO（拷贝模型到 [tagging].models_dir 后可用）'}")
+            click.echo(f"{'gallery':20s} {'total':>7s} {'tagged':>7s} {'pending':>8s} {'failed':>7s}")
+            click.echo("-" * 55)
+            for r in rows:
+                click.echo(
+                    f"{r['gallery']:20s} {r['total']:7d} {r['tagged']:7d} "
+                    f"{r['pending']:8d} {r['failed']:7d}"
+                )
+        finally:
+            await engine.dispose()
+
+    _run(_run_it())
+
+
+@tag_group.command("run")
+@click.option("--gallery", default=None, help="指定图库（默认全部）")
+@click.option("--folder", default=None, help="图库内文件夹前缀，如 '旅行-OLD/成都'")
+@click.option("--force", is_flag=True, default=False, help="强制重打（含已打标与历史失败）")
+@click.pass_context
+def tag_run_cmd(ctx, gallery, folder, force):
+    """给待打标图片打标；结束后自动增量聚类。"""
+
+    async def _run_it():
+        engine, sm, cfg = await _bootstrap(ctx.obj["config_path"])
+        try:
+            tagger = _build_tagger(cfg, ctx.obj["config_path"])
+            if tagger is None:
+                raise click.ClickException(
+                    "tagger 不可用：[tagging].enabled=false 或模型未就位"
+                    f"（期望目录 {resolve_models_dir(cfg, resolve_config_path(ctx.obj['config_path']))}）"
+                )
+            from myphoto.tagging_jobs import cluster_faces, tag_images
+
+            async with sm() as s:
+                gallery_id = await _gallery_id_by_name(s, gallery) if gallery else None
+
+            click.echo(f"tagging (force={force}) ...")
+            stats = await tag_images(
+                sm, tagger,
+                gallery_id=gallery_id, folder=folder, force=force,
+                progress_cb=_progress_echo,
+            )
+            click.echo(
+                f"tagged={stats.tagged} failed={stats.failed} "
+                f"missing={stats.skipped_missing} (scanned={stats.total})"
+            )
+            cs = await cluster_faces(sm, progress_cb=_progress_echo)
+            click.echo(f"clustered: assigned={cs.assigned} new_clusters={cs.new_clusters}")
+
+            async with sm() as s:
+                await write_audit(
+                    s, "tag_run", None, "cli",
+                    target=f"gallery:{gallery or 'all'}",
+                    detail=(
+                        f"tagged={stats.tagged} failed={stats.failed} "
+                        f"missing={stats.skipped_missing} force={int(force)}"
+                    ),
+                )
+                await s.commit()
+        finally:
+            await engine.dispose()
+
+    _run(_run_it())
+
+
+@tag_group.command("cluster")
+@click.pass_context
+def tag_cluster_cmd(ctx):
+    """对所有未分配人脸向量做增量聚类（cosine > 0.5 归入已有簇）。"""
+
+    async def _run_it():
+        engine, sm, _cfg = await _bootstrap(ctx.obj["config_path"])
+        try:
+            from myphoto.tagging_jobs import cluster_faces
+
+            cs = await cluster_faces(sm, progress_cb=_progress_echo)
+            click.echo(f"assigned={cs.assigned} new_clusters={cs.new_clusters}")
+            async with sm() as s:
+                await write_audit(s, "tag_cluster", None, "cli", target="all",
+                                  detail=f"assigned={cs.assigned} new={cs.new_clusters}")
+                await s.commit()
+        finally:
+            await engine.dispose()
+
+    _run(_run_it())
+
+
+@tag_group.command("relabel")
+@click.pass_context
+def tag_relabel_cmd(ctx):
+    """基于已有 image_embeddings 重算场景标签（不跑视觉模型）。"""
+
+    async def _run_it():
+        engine, sm, cfg = await _bootstrap(ctx.obj["config_path"])
+        try:
+            tagger = _build_tagger(cfg, ctx.obj["config_path"])
+            if tagger is None:
+                raise click.ClickException(
+                    "tagger 不可用：[tagging].enabled=false 或模型未就位"
+                )
+            from myphoto.tagging_jobs import relabel
+
+            n = await relabel(sm, tagger, progress_cb=_progress_echo)
+            click.echo(f"relabeled={n}")
+            async with sm() as s:
+                await write_audit(s, "tag_relabel", None, "cli", target="all",
+                                  detail=f"updated={n}")
+                await s.commit()
         finally:
             await engine.dispose()
 
