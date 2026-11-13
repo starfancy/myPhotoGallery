@@ -41,6 +41,7 @@
       :selection-mode="selectionMode"
       :selected-ids="selectedIds"
       :show-filename="showFilename"
+      :show-scene="showScene"
       @open="onOpen"
       @toggle-select="onToggleSelect"
       @menu-action="onMenuAction"
@@ -48,7 +49,7 @@
 
     <div v-else-if="!loading && !folders.length"
          class="mt-8 text-center text-ink-2" role="status">
-      未找到匹配的图片或文件夹
+      {{ q.trim() ? "未找到匹配的图片或文件夹" : "没有匹配当前筛选条件的图片" }}
     </div>
 
     <div v-if="nextCursor || loading" class="py-4 text-center" aria-live="polite">
@@ -72,6 +73,7 @@ import type { GridLayout } from "./GridLayoutSwitch.vue"
 import { apiGet, errorMessage } from "../api"
 import type { ImageRow } from "../stores/browse"
 import { encodePathSegments } from "../utils/path"
+import { appendFilterParams } from "../utils/filters"
 
 interface SearchFolder {
   name: string
@@ -100,6 +102,12 @@ const props = defineProps<{
   selectionMode?: boolean
   selectedIds?: Set<number>
   showFilename?: boolean
+  showScene?: boolean
+  sceneMajor?: string
+  sceneMinor?: string
+  /** 日期筛选，YYYY-MM-DD */
+  dateFrom?: string
+  dateTo?: string
 }>()
 
 const emit = defineEmits<{
@@ -147,7 +155,16 @@ function dirOf(it: ImageRow): string | null {
 const badgeFor = dirOf
 
 function folderLink(rel: string) {
-  return `/galleries/${props.gid}/r/${props.rid}/${encodePathSegments(rel)}`
+  // 下钻到普通浏览视图时保留场景/日期筛选
+  const query: Record<string, string> = {}
+  if (props.sceneMajor) query.scene_major = props.sceneMajor
+  if (props.sceneMinor) query.scene_minor = props.sceneMinor
+  if (props.dateFrom) query.date_from = props.dateFrom
+  if (props.dateTo) query.date_to = props.dateTo
+  return {
+    path: `/galleries/${props.gid}/r/${props.rid}/${encodePathSegments(rel)}`,
+    query,
+  }
 }
 
 function searchParams(cursor?: string | null) {
@@ -156,12 +173,29 @@ function searchParams(cursor?: string | null) {
     path: props.path,
     limit: "100",
   })
+  appendFilterParams(params, {
+    sceneMajor: props.sceneMajor,
+    sceneMinor: props.sceneMinor,
+    dateFrom: props.dateFrom,
+    dateTo: props.dateTo,
+  })
   if (cursor) params.set("cursor", cursor)
   return params
 }
 
+/** 无关键词但带筛选条件时，仍发纯筛选搜索 */
+function hasAnyFilter() {
+  return Boolean(
+    props.q.trim() ||
+      props.sceneMajor ||
+      props.sceneMinor ||
+      props.dateFrom ||
+      props.dateTo,
+  )
+}
+
 async function loadFirst() {
-  if (!props.q.trim()) return
+  if (!hasAnyFilter()) return
   const my = ++seq.value
   loading.value = true
   error.value = ""
@@ -221,7 +255,10 @@ async function reload() {
 }
 
 watch(
-  () => [props.gid, props.rid, props.q, props.path] as const,
+  () => [
+    props.gid, props.rid, props.q, props.path,
+    props.sceneMajor, props.sceneMinor, props.dateFrom, props.dateTo,
+  ] as const,
   () => {
     void loadFirst()
   },

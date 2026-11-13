@@ -193,15 +193,30 @@ myphoto tag gc --include-named # 连已命名但变孤儿的簇也删
 
 ### 4.2 搜索增强（未实现）
 
-现有搜索：关键字（文件名）。规划：
+现有搜索：关键字（文件名）。2026-11 落地场景 + 日期筛选：
 
 ```
-/api/search?q=关键字&scene_major=...&scene_minor=...&person_cluster=P001&date_from=...&date_to=...
+/api/search?q=关键字&scene_major=...&scene_minor=...&date_from=...&date_to=...
 ```
 
-- 范围逻辑不变（仍按当前图库/文件夹）
-- 日期范围基于 `taken_at`（已有 EXIF 字段）
-- 当前状态：`/search` 尚未接入 scene/date/person 参数，留待后续
+**参数与语义（落地版，不含 person_cluster，人物浏览由 /people 页承担）：**
+
+- `q` 改为**可选**：空关键词 + 有其它筛选条件 = 纯筛选搜索（返回全部满足
+  scene/date 的图片）；空关键词且无任何筛选 = 返回空结果，不做全量倾倒
+- `scene_major` / `scene_minor`：与 `/images` 列表同一套等值过滤
+- `date_from` / `date_to`：Unix 秒（含边界），基于 `taken_at`；启用日期筛选时
+  `taken_at IS NULL` 的图片自然被排除；`from > to` 返回 400
+- 文件夹命中区块（文件夹名 LIKE）**仅在 q 非空时**返回；纯筛选只出图片
+- keyset 分页（filename,id）不变，新增 WHERE 条件只缩小结果集，cursor 兼容
+- 前端筛选状态全部进 URL query；日期在 URL 里存 `YYYY-MM-DD`（可读、可分享），
+  调用 API 时按本地时区转当天 00:00:00 / 23:59:59 的 epoch 秒
+- 搜索态复用 BrowseView 的 SceneFilter（按当前搜索范围统计可选分类），
+  日期用两个原生 `<input type="date">`；搜索结果的文件夹/查看原图链接同样
+  透传筛选 query，下钻后筛选不丢
+- 原规划的 `person_cluster` 参数暂不实现
+- 同一套 scene/date 参数在 `/images` 与 `/folders` 同样生效：无关键词的
+  纯筛选走普通浏览视图（/images 过滤图片、/folders 按子树匹配数过滤文件夹），
+  有关键词走 /search；两条路径的筛选状态共用同一组 URL query
 
 ### 4.3 概览页标签统计
 

@@ -1,6 +1,7 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
 import { apiGet } from "../api"
+import { dayEndEpoch, dayStartEpoch } from "../utils/filters"
 
 export interface ImageRow {
   id: number
@@ -28,6 +29,9 @@ export interface BrowseKey {
   /** 场景筛选（tags Phase 2）：空 = 不筛选 */
   sceneMajor?: string
   sceneMinor?: string
+  /** 日期筛选（YYYY-MM-DD，空 = 不筛选） */
+  dateFrom?: string
+  dateTo?: string
 }
 
 interface CacheEntry {
@@ -45,7 +49,7 @@ export const PAGE_SIZE = 200
 const CACHE_MAX = 20
 
 function keyOf(k: BrowseKey) {
-  return `${k.gid}|${k.rid}|${k.path}|${k.sort}|${k.sceneMajor ?? ""}|${k.sceneMinor ?? ""}`
+  return `${k.gid}|${k.rid}|${k.path}|${k.sort}|${k.sceneMajor ?? ""}|${k.sceneMinor ?? ""}|${k.dateFrom ?? ""}|${k.dateTo ?? ""}`
 }
 
 export const useBrowseStore = defineStore("browse", () => {
@@ -99,6 +103,10 @@ export const useBrowseStore = defineStore("browse", () => {
     })
     if (k.sceneMajor) params.set("scene_major", k.sceneMajor)
     if (k.sceneMinor) params.set("scene_minor", k.sceneMinor)
+    const from = dayStartEpoch(k.dateFrom ?? "")
+    const to = dayEndEpoch(k.dateTo ?? "")
+    if (from !== null) params.set("date_from", String(from))
+    if (to !== null) params.set("date_to", String(to))
     const r = await apiGet<{ items: ImageRow[]; total: number }>(
       `/api/galleries/${k.gid}/roots/${k.rid}/images?${params}`,
     )

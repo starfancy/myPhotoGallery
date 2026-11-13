@@ -180,6 +180,45 @@ def test_folders_scene_filter_only_returns_matching_subfolders(client_with_data)
     assert "matching_count" not in body[0]
 
 
+def test_images_and_folders_date_range_filter(client_with_data):
+    c, gid, rid = client_with_data
+    app = c.app
+
+    async def _set_dates():
+        from sqlalchemy import update
+        from myphoto.models import Image
+        async with app.state.sessionmaker() as s:
+            await s.execute(update(Image).where(Image.filename == "b.jpg")
+                             .values(taken_at=1_700_000_000))
+            await s.execute(update(Image).where(Image.filename == "c.jpg")
+                             .values(taken_at=1_600_000_000))
+            await s.commit()
+    c.portal.call(_set_dates)
+
+    # /images 日期区间：只命中 b.jpg（c.jpg 太早，a.jpg 无 taken_at 被排除）
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/images",
+              params={"path": "sub", "date_from": 1_650_000_000, "date_to": 1_750_000_000})
+    body = r.json()
+    assert [i["filename"] for i in body["items"]] == ["b.jpg"]
+    assert body["total"] == 1
+
+    # 区间反转 → 400
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/images",
+              params={"path": "sub", "date_from": 2_000_000_000, "date_to": 1})
+    assert r.status_code == 400
+
+    # /folders 日期筛选：sub 子树有落在区间的图 → 保留并给 matching_count
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/folders",
+              params={"path": "", "date_from": 1_650_000_000, "date_to": 1_750_000_000})
+    body = r.json()
+    assert len(body) == 1 and body[0]["matching_count"] == 1
+
+    # 区间外 → 子文件夹被过滤
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/folders",
+              params={"path": "", "date_from": 1_800_000_000})
+    assert r.json() == []
+
+
 def test_tags_stats_endpoint(client_with_data):
     c, gid, rid = client_with_data
     app = c.app

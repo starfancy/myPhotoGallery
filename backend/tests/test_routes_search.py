@@ -150,9 +150,63 @@ def test_cursor_pagination_walks_all(env):
     assert seen == [f"ma{i}.jpg" for i in range(6)]
 
 
-def test_empty_query_rejected(env):
+def test_empty_query_without_filter_returns_empty(env):
     c, _, gid, rid = env
-    assert search(c, gid, rid, q="   ").status_code == 400
+    # 无关键词且无筛选：不再 400，返回空结果（不做全量倾倒）
+    body = search(c, gid, rid, q="   ").json()
+    assert body["images"] == [] and body["folders"] == []
+
+
+def test_search_scene_filter(env):
+    c, app, gid, rid = env
+    async def _tag():
+        from sqlalchemy import update
+        from myphoto.models import Image
+        async with app.state.sessionmaker() as s:
+            await s.execute(update(Image).where(Image.filename == "apple.JPG")
+                             .values(scene_major="食物", scene_minor="甜点", tagged_at=1))
+            await s.commit()
+    c.portal.call(_tag)
+
+    # 纯筛选（无关键词）：命中带标签的图
+    body = search(c, gid, rid, scene_major="食物").json()
+    assert [i["filename"] for i in body["images"]] == ["apple.JPG"]
+    assert body["folders"] == []  # 无关键词 → 无文件夹区块
+    # 二级联动
+    body = search(c, gid, rid, scene_major="食物", scene_minor="甜点").json()
+    assert len(body["images"]) == 1
+    body = search(c, gid, rid, scene_major="城市建筑").json()
+    assert body["images"] == []
+    # 关键词 + 场景叠加
+    body = search(c, gid, rid, q="apple", scene_major="食物").json()
+    assert len(body["images"]) == 1
+    body = search(c, gid, rid, q="apple", scene_major="城市建筑").json()
+    assert body["images"] == []
+
+
+def test_search_date_range_filter(env):
+    c, app, gid, rid = env
+    async def _tag():
+        from sqlalchemy import update
+        from myphoto.models import Image
+        async with app.state.sessionmaker() as s:
+            await s.execute(update(Image).where(Image.filename == "apple.JPG")
+                             .values(taken_at=1_700_000_000))
+            await s.execute(update(Image).where(Image.filename == "a_b.jpg")
+                             .values(taken_at=1_600_000_000))
+            await s.commit()
+    c.portal.call(_tag)
+
+    # 纯日期筛选（无关键词），含边界
+    body = search(c, gid, rid, date_from=1_700_000_000, date_to=1_800_000_000).json()
+    assert [i["filename"] for i in body["images"]] == ["apple.JPG"]
+    # taken_at 为 NULL 的图在日期筛选下被排除
+    body = search(c, gid, rid, date_from=1_500_000_000).json()
+    names = {i["filename"] for i in body["images"]}
+    assert "apple.JPG" in names and "a_b.jpg" in names
+    # 区间反转 → 400
+    r = search(c, gid, rid, date_from=2_000_000_000, date_to=1_000_000_000)
+    assert r.status_code == 400
 
 
 def test_path_traversal_rejected(env):

@@ -8,8 +8,8 @@
     </AppHeader>
     <main id="main-content" class="p-3">
       <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换。
-           hasScene 也要保留工具栏：筛选全空时仍需能清除筛选条件。 -->
-      <div v-if="images.length || folders.length || searchQ || hasScene"
+           hasScene/hasDate 也要保留工具栏：筛选全空时仍需能清除筛选条件。 -->
+      <div v-if="images.length || folders.length || searchQ || hasScene || hasDate"
            class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <button v-if="!selectionMode"
                 type="button"
@@ -25,16 +25,21 @@
             {{ isAllSelected ? "取消全选" : "全选" }}
           </button>
         </template>
-        <div class="ml-auto flex items-center gap-1.5">
+        <div class="ml-auto flex flex-wrap items-center gap-1.5">
           <SceneFilter
-            v-if="!searchQ"
             :major="sceneMajor"
             :minor="sceneMinor"
             :gid="gid"
             :rid="rid"
-            :path="path"
+            :path="effectivePath"
             @update:major="onSceneMajor"
             @update:minor="onSceneMinor"
+          />
+          <DateRangeFilter
+            :date-from="dateFrom"
+            :date-to="dateTo"
+            @update:date-from="onDateFrom"
+            @update:date-to="onDateTo"
           />
           <SearchBox
             :model-value="searchQ"
@@ -95,19 +100,19 @@
                        @menu-action="onGridMenuAction"
                        @toggle-select="onToggleSelect" />
         <!-- 筛选态：本文件夹无匹配图片但还有子文件夹可下钻 -->
-        <div v-else-if="hasScene && folders.length && !loading"
+        <div v-else-if="(hasScene || hasDate) && folders.length && !loading"
              class="mt-4 text-center text-sm text-ink-2" role="status">
-          当前文件夹内没有匹配「{{ sceneMinor || sceneMajor }}」的图片，可进入下方子文件夹查看
+          当前文件夹内没有匹配当前筛选条件的图片，可进入下方子文件夹查看
         </div>
         <!-- 筛选态：图片和子文件夹都无匹配 → 给清除入口，避免困在空页 -->
-        <div v-else-if="hasScene && !folders.length && !loading"
+        <div v-else-if="(hasScene || hasDate) && !folders.length && !loading"
              class="mt-8 flex flex-col items-center gap-3 text-center text-ink-2"
              role="status">
-          <span>没有匹配「{{ sceneMinor || sceneMajor }}」的图片或子文件夹</span>
+          <span>没有匹配当前筛选条件的图片或子文件夹</span>
           <button type="button"
                   class="min-h-11 rounded bg-surface-2 px-3 py-1 text-sm text-ink hover:bg-surface-3"
-                  @click="clearSceneFilter">
-            清除场景筛选
+                  @click="clearAllFilters">
+            清除筛选
           </button>
         </div>
         <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-ink-2"
@@ -128,6 +133,11 @@
         :selection-mode="selectionMode"
         :selected-ids="selectedIds"
         :show-filename="showFilenames"
+        :show-scene="showScene"
+        :scene-major="sceneMajor"
+        :scene-minor="sceneMinor"
+        :date-from="dateFrom"
+        :date-to="dateTo"
         @open="onSearchOpen"
         @toggle-select="onToggleSelect"
         @menu-action="onSearchMenuAction"
@@ -191,11 +201,13 @@ import ImageLightbox from "../components/ImageLightbox.vue"
 import SearchBox from "../components/SearchBox.vue"
 import SearchResults from "../components/SearchResults.vue"
 import SceneFilter from "../components/SceneFilter.vue"
+import DateRangeFilter from "../components/DateRangeFilter.vue"
 import { apiGet, apiDelete, apiPost, HttpError, errorMessage } from "../api"
 import { useBrowseStore, PAGE_SIZE, type BrowseKey, type ImageRow } from "../stores/browse"
 import { useAuthStore } from "../stores/auth"
 import { useToastStore } from "../stores/toast"
 import { encodePathSegments } from "../utils/path"
+import { dayEndEpoch, dayStartEpoch } from "../utils/filters"
 
 const route = useRoute()
 const router = useRouter()
@@ -293,9 +305,11 @@ function searchLocation(it: ImageRow): string {
 
 function onViewInFolder(it: ImageRow) {
   const dir = searchLocation(it)
-  router.push(
-    `/galleries/${gid.value}/r/${rid.value}${dir ? `/${encodePathSegments(dir)}` : ""}`,
-  )
+  router.push({
+    path: `/galleries/${gid.value}/r/${rid.value}${dir ? `/${encodePathSegments(dir)}` : ""}`,
+    // 下钻到普通浏览视图时保留场景/日期筛选
+    query: sceneQuery.value,
+  })
 }
 
 async function onSearchMenuAction(id: number, action: "delete") {
@@ -332,11 +346,21 @@ const sort = ref("name_asc")
 const sceneMajor = computed(() => String(route.query.scene_major ?? ""))
 const sceneMinor = computed(() => String(route.query.scene_minor ?? ""))
 const hasScene = computed(() => sceneMajor.value !== "" || sceneMinor.value !== "")
-/** 给文件夹卡片/面包屑链接透传的场景 query（空则无键） */
+/** 日期筛选（URL 存 YYYY-MM-DD），搜索态与浏览态共用 */
+const dateFrom = computed(() => String(route.query.date_from ?? ""))
+const dateTo = computed(() => String(route.query.date_to ?? ""))
+const hasDate = computed(() => dateFrom.value !== "" || dateTo.value !== "")
+/** 搜索态勾选“整个 root”时有效路径是 root 根；SceneFilter 按此范围统计 */
+const effectivePath = computed(() =>
+  searchQ.value && scopeAll.value ? "" : path.value,
+)
+/** 给文件夹卡片/面包屑链接透传的筛选 query（场景+日期，空则无键） */
 const sceneQuery = computed<Record<string, string>>(() => {
   const q: Record<string, string> = {}
   if (sceneMajor.value) q.scene_major = sceneMajor.value
   if (sceneMinor.value) q.scene_minor = sceneMinor.value
+  if (dateFrom.value) q.date_from = dateFrom.value
+  if (dateTo.value) q.date_to = dateTo.value
   return q
 })
 
@@ -354,6 +378,7 @@ function currentKey(): BrowseKey {
   return {
     gid: gid.value, rid: rid.value, path: path.value, sort: sort.value,
     sceneMajor: sceneMajor.value, sceneMinor: sceneMinor.value,
+    dateFrom: dateFrom.value, dateTo: dateTo.value,
   }
 }
 
@@ -580,6 +605,10 @@ async function loadFolders() {
   const params = new URLSearchParams({ path: path.value })
   if (sceneMajor.value) params.set("scene_major", sceneMajor.value)
   if (sceneMinor.value) params.set("scene_minor", sceneMinor.value)
+  if (dayStartEpoch(dateFrom.value) !== null)
+    params.set("date_from", String(dayStartEpoch(dateFrom.value)))
+  if (dayEndEpoch(dateTo.value) !== null)
+    params.set("date_to", String(dayEndEpoch(dateTo.value)))
   const [c, f] = await Promise.all([
     apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/breadcrumbs?path=${encodeURIComponent(path.value)}`),
     apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/folders?${params.toString()}`),
@@ -624,6 +653,10 @@ async function enrichBorrowedCovers() {
         const params = new URLSearchParams({ path: folder.relative_path })
         if (sceneMajor.value) params.set("scene_major", sceneMajor.value)
         if (sceneMinor.value) params.set("scene_minor", sceneMinor.value)
+        if (dayStartEpoch(dateFrom.value) !== null)
+          params.set("date_from", String(dayStartEpoch(dateFrom.value)))
+        if (dayEndEpoch(dateTo.value) !== null)
+          params.set("date_to", String(dayEndEpoch(dateTo.value)))
         const children = await apiGet<any[]>(
           `/api/galleries/${gid.value}/roots/${rid.value}/folders?${params.toString()}`,
         )
@@ -736,12 +769,36 @@ function clearSceneFilter() {
   writeSceneQuery("", "")
 }
 
+function clearAllFilters() {
+  const query = queryWithoutImage()
+  delete query.scene_major
+  delete query.scene_minor
+  delete query.date_from
+  delete query.date_to
+  router.replace({ query })
+}
+
+function writeDateQuery(from: string, to: string) {
+  const query = queryWithoutImage()
+  delete query.date_from
+  delete query.date_to
+  if (from) query.date_from = from
+  if (to) query.date_to = to
+  router.replace({ query })
+}
+function onDateFrom(v: string) {
+  writeDateQuery(v, dateTo.value)
+}
+function onDateTo(v: string) {
+  writeDateQuery(dateFrom.value, v)
+}
+
 // 场景 query 变化：文件夹（分面过滤）+ 图片都重拉，回到第 1 页。
 // 同 root 内路径变化时 query 保持不变 → 此 watcher 不触发，筛选自然保留；
 // 跨 root/图库导航的链接不带 scene query → 自动回到无筛选态，且由 loc
 // watcher 的 loadAll 统一处理，这里靠 sceneWatcherLoc 跳过避免重复请求。
 const sceneWatcherLoc = ref("")
-watch([sceneMajor, sceneMinor], () => {
+watch([sceneMajor, sceneMinor, dateFrom, dateTo], () => {
   if (searchQ.value) return
   const loc = `${gid.value}/${rid.value}`
   if (loc !== sceneWatcherLoc.value) {

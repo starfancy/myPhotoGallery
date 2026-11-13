@@ -219,4 +219,54 @@ describe("SearchResults", () => {
                  relative_path: "b.jpg" }], next_cursor: null }))
     await flushPromises()
   })
+
+  it("把场景与日期筛选透传到 /search，日期转 epoch 秒", async () => {
+    const calls: string[] = []
+    const fetchFn = vi.fn((input: RequestInfo | URL) => {
+      calls.push(String(input))
+      return Promise.resolve(json({ q: "", path: "", folders: [],
+        folders_truncated: false, images: IMAGES_A, next_cursor: null }))
+    })
+    const w = mountResults(fetchFn)
+    await w.setProps({
+      sceneMajor: "自然风光",
+      sceneMinor: "山景",
+      dateFrom: "2024-01-01",
+      dateTo: "2024-01-31",
+    })
+    await flushPromises()
+    const url = new URL(calls.at(-1)!, "http://t/")
+    expect(url.searchParams.get("scene_major")).toBe("自然风光")
+    expect(url.searchParams.get("scene_minor")).toBe("山景")
+    const from = Number(url.searchParams.get("date_from"))
+    const to = Number(url.searchParams.get("date_to"))
+    expect(new Date(from * 1000).getDate()).toBe(1)
+    expect(new Date(to * 1000).getHours()).toBe(23)
+  })
+
+  it("无关键词但有筛选条件时仍发请求，空态文案区分纯筛选", async () => {
+    const fetchFn = vi.fn(async () => json({
+      q: "", path: "", folders: [], folders_truncated: false,
+      images: [], next_cursor: null,
+    }))
+    const w = mountResults(fetchFn)
+    await w.setProps({ q: "", sceneMajor: "自然风光" })
+    await flushPromises()
+    expect(fetchFn).toHaveBeenCalled()
+    expect(w.text()).toContain("没有匹配当前筛选条件的图片")
+  })
+
+  it("文件夹卡片链接携带筛选 query", async () => {
+    const fetchFn = vi.fn(async () => json({
+      q: "旅行", path: "", folders: FOLDERS, folders_truncated: false,
+      images: [], next_cursor: null,
+    }))
+    const w = mountResults(fetchFn)
+    await w.setProps({ sceneMajor: "自然风光", dateFrom: "2024-01-01" })
+    await flushPromises()
+    const link = w.find("a")
+    const href = link.attributes("href")
+    expect(href).toContain("scene_major=")
+    expect(href).toContain("date_from=2024-01-01")
+  })
 })

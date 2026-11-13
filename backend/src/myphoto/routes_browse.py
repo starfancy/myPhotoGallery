@@ -145,6 +145,8 @@ async def list_folders(
     path: str = "",
     scene_major: str | None = Query(None, description="场景一级筛选"),
     scene_minor: str | None = Query(None, description="场景二级筛选"),
+    date_from: int | None = Query(None, description="拍摄时间下限 Unix 秒"),
+    date_to: int | None = Query(None, description="拍摄时间上限 Unix 秒"),
     _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
@@ -173,7 +175,7 @@ async def list_folders(
         # 只返回 >0 的子文件夹（分面下钻：父层只显示包含该分类的子文件夹）。
         # 注意用显式 active 标志：零匹配时 matching 为空 dict（falsy），
         # 不能靠 dict 真假判断筛选是否生效。
-        filter_active = bool(scene_major or scene_minor)
+        filter_active = bool(scene_major or scene_minor or date_from or date_to)
         matching: dict[str, int] = {}
         if filter_active:
             mq = select(Image.relative_path).where(Image.root_id == rid)
@@ -181,6 +183,10 @@ async def list_folders(
                 mq = mq.where(Image.scene_major == scene_major)
             if scene_minor:
                 mq = mq.where(Image.scene_minor == scene_minor)
+            if date_from is not None:
+                mq = mq.where(Image.taken_at >= date_from)
+            if date_to is not None:
+                mq = mq.where(Image.taken_at <= date_to)
             matched_paths = (await s.execute(mq)).scalars().all()
             base = f"{rel}/" if rel else ""
             for p in matched_paths:
@@ -303,9 +309,13 @@ async def list_images(
     cursor: str | None = None,
     scene_major: str | None = Query(None, description="一级场景筛选，如 自然风光"),
     scene_minor: str | None = Query(None, description="二级场景筛选，如 山景"),
+    date_from: int | None = Query(None, description="拍摄时间下限 Unix 秒"),
+    date_to: int | None = Query(None, description="拍摄时间上限 Unix 秒"),
     _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise AppError("bad_request", 400, "date_from must be <= date_to")
     rel = _norm_or_400(path)
     sm = request.app.state.sessionmaker
     async with sm() as s:
@@ -319,15 +329,19 @@ async def list_images(
         ).scalar_one_or_none()
         if folder is None:
             return {"items": [], "next_cursor": None, "total": 0}
-        # 场景筛选（tags Phase 2）：scene_major/minor 过滤；二级必须配一级
-        scene_filters = []
+        # 场景+日期筛选：二级必须配一级；日期基于 taken_at，NULL 自然排除
+        extra_filters = []
         if scene_major:
-            scene_filters.append(Image.scene_major == scene_major)
+            extra_filters.append(Image.scene_major == scene_major)
         if scene_minor:
-            scene_filters.append(Image.scene_minor == scene_minor)
+            extra_filters.append(Image.scene_minor == scene_minor)
+        if date_from is not None:
+            extra_filters.append(Image.taken_at >= date_from)
+        if date_to is not None:
+            extra_filters.append(Image.taken_at <= date_to)
         total_q = select(func.count()).select_from(Image).where(Image.folder_id == folder.id)
         q = select(Image).where(Image.folder_id == folder.id)
-        for f in scene_filters:
+        for f in extra_filters:
             total_q = total_q.where(f)
             q = q.where(f)
         total = (await s.execute(total_q)).scalar_one()
@@ -412,16 +426,21 @@ async def search(
     path: str = "",
     limit: int = Query(100, ge=1, le=500),
     cursor: str | None = None,
+    scene_major: str | None = Query(None),
+    scene_minor: str | None = Query(None),
+    date_from: int | None = Query(None, description="拍摄时间下限，Unix 秒（含）"),
+    date_to: int | None = Query(None, description="拍摄时间上限，Unix 秒（含）"),
     _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
     term = q.strip()
-    if not term:
-        raise AppError("bad_request", 400, "query must not be empty")
-    if len(term) > 100:
+    if term and len(term) > 100:
         raise AppError("bad_request", 400, "query too long")
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise AppError("bad_request", 400, "date_from must be <= date_to")
     rel = _norm_or_400(path)
-    needle = f"%{_escape_like(term.lower())}%"
+    # q 可选：无关键词时必须带至少一个筛选条件，否则不做全量倾倒
+    has_filter = bool(term or scene_major or scene_minor or date_from or date_to)
     sm = request.app.state.sessionmaker
     async with sm() as s:
         await _get_root_or_404(s, gid, rid)
@@ -436,53 +455,67 @@ async def search(
             "q": term, "path": rel, "folders": [],
             "folders_truncated": False, "images": [], "next_cursor": None,
         }
-        if anchor is None:
+        if anchor is None or not has_filter:
             return empty
 
-        # ---- 文件夹命中：严格后代，固定 50 条上限 ----
-        fq = select(Folder).where(Folder.root_id == rid, Folder.name != "")
-        if rel:
-            fq = fq.where(
-                Folder.relative_path.like(
-                    _escape_like(rel) + "/%", escape="\\"
-                )
-            )
-        fq = (
-            fq.where(func.lower(Folder.name).like(needle, escape="\\"))
-            .order_by(Folder.name.asc(), Folder.id.asc())
-            .limit(51)
-        )
-        frows = (await s.execute(fq)).scalars().all()
+        # ---- 文件夹命中：严格后代，固定 50 条上限；仅有关键词时才查 ----
         folders_out = []
-        for f in frows[:50]:
-            cover = (
-                await s.execute(
-                    select(Image.sha1)
-                    .where(Image.folder_id == f.id)
-                    .order_by(Image.filename.asc())
-                    .limit(1)
+        frows = []
+        if term:
+            needle = f"%{_escape_like(term.lower())}%"
+            fq = select(Folder).where(Folder.root_id == rid, Folder.name != "")
+            if rel:
+                fq = fq.where(
+                    Folder.relative_path.like(
+                        _escape_like(rel) + "/%", escape="\\"
+                    )
                 )
-            ).scalar_one_or_none()
-            folders_out.append({
-                "name": f.name,
-                "relative_path": f.relative_path,
-                "image_count": f.image_count,
-                "descendant_count": f.descendant_count,
-                "cover_thumb_sha1": cover,
-            })
+            fq = (
+                fq.where(func.lower(Folder.name).like(needle, escape="\\"))
+                .order_by(Folder.name.asc(), Folder.id.asc())
+                .limit(51)
+            )
+            frows = (await s.execute(fq)).scalars().all()
+            for f in frows[:50]:
+                cover = (
+                    await s.execute(
+                        select(Image.sha1)
+                        .where(Image.folder_id == f.id)
+                        .order_by(Image.filename.asc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                folders_out.append({
+                    "name": f.name,
+                    "relative_path": f.relative_path,
+                    "image_count": f.image_count,
+                    "descendant_count": f.descendant_count,
+                    "cover_thumb_sha1": cover,
+                })
 
-        # ---- 图片命中：子树内 filename LIKE，keyset 分页 ----
+        # ---- 图片命中：子树 + 关键词 + 场景 + 日期，keyset 分页 ----
         iq = (
             select(Image)
             .join(Folder, Image.folder_id == Folder.id)
-            .where(
-                Image.root_id == rid,
-                func.lower(Image.filename).like(needle, escape="\\"),
-            )
+            .where(Image.root_id == rid)
         )
+        if term:
+            iq = iq.where(
+                func.lower(Image.filename).like(
+                    f"%{_escape_like(term.lower())}%", escape="\\"
+                )
+            )
         subtree = _subtree_clause(Folder.relative_path, rel)
         if subtree is not None:
             iq = iq.where(subtree)
+        if scene_major:
+            iq = iq.where(Image.scene_major == scene_major)
+        if scene_minor:
+            iq = iq.where(Image.scene_minor == scene_minor)
+        if date_from is not None:
+            iq = iq.where(Image.taken_at >= date_from)
+        if date_to is not None:
+            iq = iq.where(Image.taken_at <= date_to)
         if cursor:
             last_val, last_id = _decode_cursor(cursor)
             iq = iq.where(or_(
