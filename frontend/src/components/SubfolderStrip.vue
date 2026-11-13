@@ -26,7 +26,9 @@
         </div>
         <div class="truncate p-2">
           <div class="truncate font-medium">{{ f.name }}</div>
-          <div class="text-xs text-ink-2">{{ f.descendant_count }} 张</div>
+          <div class="text-xs text-ink-2">
+            {{ f.matching_count ?? f.descendant_count }} 张<span v-if="f.matching_count != null">（匹配）</span>
+          </div>
         </div>
       </router-link>
       <!-- Admin-only 省略号：hover / 键盘 focus 才显示，点击弹快捷菜单 -->
@@ -62,6 +64,8 @@ type FolderItem = {
   descendant_count: number
   cover_thumb_sha1: string | null
   cover_source_name?: string | null
+  /** 场景筛选态：后端返回的子树匹配数（无筛选时不存在） */
+  matching_count?: number
 }
 
 const props = defineProps<{
@@ -70,6 +74,8 @@ const props = defineProps<{
   rid: number
   /** 管理员为 true：显示省略号、响应右键与长按 */
   canExclude?: boolean
+  /** 透传 query（场景筛选），下钻时保留筛选条件 */
+  query?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -129,7 +135,10 @@ function onCoverLoad(sha1: string | null, e: Event) {
 }
 
 function linkFor(rel: string) {
-  return `/galleries/${props.gid}/r/${props.rid}/${rel}`
+  return {
+    path: `/galleries/${props.gid}/r/${props.rid}/${rel}`,
+    query: props.query ?? {},
+  }
 }
 </script>
 

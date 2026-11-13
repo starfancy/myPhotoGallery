@@ -14,10 +14,15 @@ const props = defineProps<{
   crumbs: Array<{ name: string; relative_path: string }>
   gid: number
   rid: number
+  /** 透传 query（如场景筛选 scene_major/scene_minor），上跳文件夹时保留筛选 */
+  query?: Record<string, string>
 }>()
 
 function linkFor(rel: string) {
   const suffix = rel ? `/${rel}` : ""
-  return `/galleries/${props.gid}/r/${props.rid}${suffix}`
+  return {
+    path: `/galleries/${props.gid}/r/${props.rid}${suffix}`,
+    query: props.query ?? {},
+  }
 }
 </script>

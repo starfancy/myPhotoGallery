@@ -2,12 +2,14 @@
   <div>
     <AppHeader>
       <template #title>
-        <Breadcrumb v-if="crumbs.length" :crumbs="crumbs" :gid="gid" :rid="rid" />
+        <Breadcrumb v-if="crumbs.length" :crumbs="crumbs" :gid="gid" :rid="rid"
+                    :query="sceneQuery" />
       </template>
     </AppHeader>
     <main id="main-content" class="p-3">
-      <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换 -->
-      <div v-if="images.length || folders.length || searchQ"
+      <!-- 工具栏：左侧选择操作（所有角色；viewer 仅可下载），右侧排版切换。
+           hasScene 也要保留工具栏：筛选全空时仍需能清除筛选条件。 -->
+      <div v-if="images.length || folders.length || searchQ || hasScene"
            class="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <button v-if="!selectionMode"
                 type="button"
@@ -81,6 +83,7 @@
 
       <template v-if="!searchQ">
         <SubfolderStrip v-if="folders.length" :folders="folders" :gid="gid" :rid="rid"
+                        :query="sceneQuery"
                         :can-exclude="auth.isAdmin"
                         @exclude="onExcludeFolder" />
         <component :is="gridComponent" v-if="images.length" :items="images"
@@ -91,6 +94,22 @@
                        @open="onOpen"
                        @menu-action="onGridMenuAction"
                        @toggle-select="onToggleSelect" />
+        <!-- 筛选态：本文件夹无匹配图片但还有子文件夹可下钻 -->
+        <div v-else-if="hasScene && folders.length && !loading"
+             class="mt-4 text-center text-sm text-ink-2" role="status">
+          当前文件夹内没有匹配「{{ sceneMinor || sceneMajor }}」的图片，可进入下方子文件夹查看
+        </div>
+        <!-- 筛选态：图片和子文件夹都无匹配 → 给清除入口，避免困在空页 -->
+        <div v-else-if="hasScene && !folders.length && !loading"
+             class="mt-8 flex flex-col items-center gap-3 text-center text-ink-2"
+             role="status">
+          <span>没有匹配「{{ sceneMinor || sceneMajor }}」的图片或子文件夹</span>
+          <button type="button"
+                  class="min-h-11 rounded bg-surface-2 px-3 py-1 text-sm text-ink hover:bg-surface-3"
+                  @click="clearSceneFilter">
+            清除场景筛选
+          </button>
+        </div>
         <div v-else-if="!loading && !folders.length" class="mt-8 text-center text-ink-2"
              role="status">
           此目录暂无图片
@@ -199,11 +218,18 @@ const lightboxId = computed(() => {
 })
 function onLightboxClose() {
   const suffix = path.value ? `/${path.value}` : ""
-  router.push(`/galleries/${gid.value}/r/${rid.value}${suffix}`)
+  // 保留 query（场景筛选 scene_*、搜索 q 等），关灯箱不丢筛选状态
+  router.push({
+    path: `/galleries/${gid.value}/r/${rid.value}${suffix}`,
+    query: queryWithoutImage(),
+  })
 }
 function onLightboxChange(id: number) {
   const suffix = path.value ? `/${path.value}` : ""
-  router.replace(`/galleries/${gid.value}/r/${rid.value}${suffix}/image/${id}`)
+  router.replace({
+    path: `/galleries/${gid.value}/r/${rid.value}${suffix}/image/${id}`,
+    query: queryWithoutImage(),
+  })
 }
 
 // ---------- 搜索态 ----------
@@ -301,9 +327,18 @@ async function onSearchImageDeleted(id: number) {
 
 const sort = ref("name_asc")
 
-// 场景筛选（tags Phase 2）：空 = 不筛选
-const sceneMajor = ref("")
-const sceneMinor = ref("")
+// 场景筛选（tags Phase 2）：状态放在 URL query（scene_major/scene_minor），
+// 刷新/分享链接可保留；同 root 内下钻/上跳文件夹时筛选不重置。
+const sceneMajor = computed(() => String(route.query.scene_major ?? ""))
+const sceneMinor = computed(() => String(route.query.scene_minor ?? ""))
+const hasScene = computed(() => sceneMajor.value !== "" || sceneMinor.value !== "")
+/** 给文件夹卡片/面包屑链接透传的场景 query（空则无键） */
+const sceneQuery = computed<Record<string, string>>(() => {
+  const q: Record<string, string> = {}
+  if (sceneMajor.value) q.scene_major = sceneMajor.value
+  if (sceneMinor.value) q.scene_minor = sceneMinor.value
+  return q
+})
 
 const crumbs = ref<{ name: string; relative_path: string }[]>([])
 const folders = ref<any[]>([])
@@ -542,9 +577,12 @@ async function onExcludeFolder(folder: { name: string; relative_path: string }) 
  * 快捷排除成功后使用：不清图片分页缓存、不滚顶、不重置页码。
  */
 async function loadFolders() {
+  const params = new URLSearchParams({ path: path.value })
+  if (sceneMajor.value) params.set("scene_major", sceneMajor.value)
+  if (sceneMinor.value) params.set("scene_minor", sceneMinor.value)
   const [c, f] = await Promise.all([
     apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/breadcrumbs?path=${encodeURIComponent(path.value)}`),
-    apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/folders?path=${encodeURIComponent(path.value)}`),
+    apiGet<any[]>(`/api/galleries/${gid.value}/roots/${rid.value}/folders?${params.toString()}`),
   ])
   crumbs.value = c
   folders.value = f
@@ -583,11 +621,14 @@ async function enrichBorrowedCovers() {
   await Promise.all(
     candidates.map(async (folder) => {
       try {
+        const params = new URLSearchParams({ path: folder.relative_path })
+        if (sceneMajor.value) params.set("scene_major", sceneMajor.value)
+        if (sceneMinor.value) params.set("scene_minor", sceneMinor.value)
         const children = await apiGet<any[]>(
-          `/api/galleries/${gid.value}/roots/${rid.value}/folders?path=${encodeURIComponent(folder.relative_path)}`,
+          `/api/galleries/${gid.value}/roots/${rid.value}/folders?${params.toString()}`,
         )
         const donor = children.find(
-          (ch) => ch.image_count > 0 && ch.cover_thumb_sha1 != null,
+          (ch) => (ch.matching_count ?? ch.image_count) > 0 && ch.cover_thumb_sha1 != null,
         )
         if (donor) {
           folder.cover_thumb_sha1 = donor.cover_thumb_sha1
@@ -628,7 +669,10 @@ async function changePage(p: number) {
 
 function onOpen(id: number) {
   const suffix = path.value ? `/${path.value}` : ""
-  router.push(`/galleries/${gid.value}/r/${rid.value}${suffix}/image/${id}`)
+  router.push({
+    path: `/galleries/${gid.value}/r/${rid.value}${suffix}/image/${id}`,
+    query: queryWithoutImage(),
+  })
 }
 
 function onScroll() {
@@ -639,6 +683,7 @@ function onScroll() {
 }
 
 onMounted(() => {
+  sceneWatcherLoc.value = `${gid.value}/${rid.value}`
   window.addEventListener("scroll", onScroll, { passive: true })
   loadAll()
 })
@@ -654,6 +699,7 @@ watch([gid, rid, path, searchQ], (now, old) => {
     now[0] !== ogid || now[1] !== orid || now[2] !== opath
   if (locChanged) {
     // loadAll 在搜索态会跳过 /images，由 SearchResults 自取
+    sceneWatcherLoc.value = `${gid.value}/${rid.value}`
     loadAll()
   } else if (oq && !now[3]) {
     // 同路径 q 由非空变空（刷新在 ?q= 页后清除、同目录 view-in-folder）：
@@ -667,30 +713,50 @@ watch(scopeAll, () => {
   exitSelectionMode()
 })
 
-// ---------- 场景筛选（tags Phase 2） ----------
+// ---------- 场景筛选（tags Phase 2，状态存 URL query） ----------
+
+/** 把场景筛选写进 URL（保留其余 query，如 q/scope），驱动 watcher 重拉。 */
+function writeSceneQuery(major: string, minor: string) {
+  const query = queryWithoutImage()
+  delete query.scene_major
+  delete query.scene_minor
+  if (major) query.scene_major = major
+  if (minor) query.scene_minor = minor
+  router.replace({ query })
+}
 
 function onSceneMajor(v: string) {
-  sceneMajor.value = v
-  sceneMinor.value = ""
-  reloadWithScene()
+  // 切一级时二级必须清空（旧二级在新一级下无意义）
+  writeSceneQuery(v, "")
 }
 function onSceneMinor(v: string) {
-  sceneMinor.value = v
-  reloadWithScene()
+  writeSceneQuery(sceneMajor.value, v)
 }
-/** 场景筛选变化：换 key 后重拉第 1 页，清选择。 */
-function reloadWithScene() {
-  if (searchQ.value) return
-  exitSelectionMode()
-  const key = currentKey()
-  browse.invalidate(key)
-  page.value = 1
-  renderPage(key, 1)
+function clearSceneFilter() {
+  writeSceneQuery("", "")
 }
 
-// 浏览文件夹切换时重置场景筛选（旧筛选值可能在新文件夹里不存在）
-watch([gid, rid, path], () => {
-  sceneMajor.value = ""
-  sceneMinor.value = ""
+// 场景 query 变化：文件夹（分面过滤）+ 图片都重拉，回到第 1 页。
+// 同 root 内路径变化时 query 保持不变 → 此 watcher 不触发，筛选自然保留；
+// 跨 root/图库导航的链接不带 scene query → 自动回到无筛选态，且由 loc
+// watcher 的 loadAll 统一处理，这里靠 sceneWatcherLoc 跳过避免重复请求。
+const sceneWatcherLoc = ref("")
+watch([sceneMajor, sceneMinor], () => {
+  if (searchQ.value) return
+  const loc = `${gid.value}/${rid.value}`
+  if (loc !== sceneWatcherLoc.value) {
+    sceneWatcherLoc.value = loc
+    return
+  }
+  exitSelectionMode()
+  page.value = 1
+  void reloadSceneScope()
 })
+
+async function reloadSceneScope() {
+  const key = currentKey()
+  browse.invalidate(key)
+  await loadFolders()
+  await renderPage(key, 1)
+}
 </script>

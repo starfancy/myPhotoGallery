@@ -44,12 +44,18 @@ async function loadStats() {
 onMounted(loadStats)
 
 const currentMinors = ref<MinorGroup[]>([])
+// 只在 major【实际变化】时清空 minor；immediate 初次运行不能清，
+// 否则带 scene_minor 的 URL（分享链接/刷新）一挂载就被抹掉二级筛选。
+let lastMajor = props.major
 watch(
   () => props.major,
   (m) => {
     const group = majors.value.find((g) => g.name === m)
     currentMinors.value = group ? group.minors : []
-    if (props.minor) emit("update:minor", "")
+    if (m !== lastMajor) {
+      lastMajor = m
+      if (props.minor) emit("update:minor", "")
+    }
   },
   { immediate: true },
 )

@@ -143,6 +143,8 @@ async def list_folders(
     request: Request,
     response: Response,
     path: str = "",
+    scene_major: str | None = Query(None, description="场景一级筛选"),
+    scene_minor: str | None = Query(None, description="场景二级筛选"),
     _user: User = Depends(gallery_scope_guard),
 ):
     _no_store(response)
@@ -166,8 +168,35 @@ async def list_folders(
                 .order_by(Folder.name.asc())
             )
         ).scalars().all()
+
+        # 场景筛选：统计每个直接子文件夹【整个子树】内的匹配图片数，
+        # 只返回 >0 的子文件夹（分面下钻：父层只显示包含该分类的子文件夹）。
+        # 注意用显式 active 标志：零匹配时 matching 为空 dict（falsy），
+        # 不能靠 dict 真假判断筛选是否生效。
+        filter_active = bool(scene_major or scene_minor)
+        matching: dict[str, int] = {}
+        if filter_active:
+            mq = select(Image.relative_path).where(Image.root_id == rid)
+            if scene_major:
+                mq = mq.where(Image.scene_major == scene_major)
+            if scene_minor:
+                mq = mq.where(Image.scene_minor == scene_minor)
+            matched_paths = (await s.execute(mq)).scalars().all()
+            base = f"{rel}/" if rel else ""
+            for p in matched_paths:
+                if not p.startswith(base):
+                    continue
+                rest = p[len(base):]
+                if "/" not in rest:
+                    continue  # 当前文件夹自身的图片不属于任何子文件夹
+                child_name = rest.split("/", 1)[0]
+                child_rel = f"{base}{child_name}"
+                matching[child_rel] = matching.get(child_rel, 0) + 1
+
         out = []
         for c in children:
+            if filter_active and c.relative_path not in matching:
+                continue
             cover = (
                 await s.execute(
                     select(Image.sha1)
@@ -176,15 +205,17 @@ async def list_folders(
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            out.append(
-                {
-                    "name": c.name,
-                    "relative_path": c.relative_path,
-                    "image_count": c.image_count,
-                    "descendant_count": c.descendant_count,
-                    "cover_thumb_sha1": cover,
-                }
-            )
+            item = {
+                "name": c.name,
+                "relative_path": c.relative_path,
+                "image_count": c.image_count,
+                "descendant_count": c.descendant_count,
+                "cover_thumb_sha1": cover,
+            }
+            if filter_active:
+                # 筛选态额外给匹配数；无筛选时响应结构不变，兼容旧消费方
+                item["matching_count"] = matching[c.relative_path]
+            out.append(item)
         return out
 
 

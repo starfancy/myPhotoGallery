@@ -138,6 +138,48 @@ def test_images_scene_filter(client_with_data):
     assert r.json()["total"] == 2
 
 
+def test_folders_scene_filter_only_returns_matching_subfolders(client_with_data):
+    c, gid, rid = client_with_data
+    app = c.app
+
+    async def _tag():
+        from sqlalchemy import update
+        from myphoto.models import Image
+        async with app.state.sessionmaker() as s:
+            await s.execute(update(Image).where(Image.filename == "b.jpg")
+                             .values(scene_major="自然风光", scene_minor="山景", tagged_at=1))
+            await s.execute(update(Image).where(Image.filename == "c.jpg")
+                             .values(scene_major="城市建筑", scene_minor="街道街景", tagged_at=1))
+            await s.commit()
+    c.portal.call(_tag)
+
+    # 根目录唯一子文件夹 sub；筛选自然风光 → sub 出现，匹配数 1（子树计数）
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/folders",
+              params={"path": "", "scene_major": "自然风光"})
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["relative_path"] == "sub"
+    assert body[0]["matching_count"] == 1
+
+    # 无任何图片命中的分类 → 子文件夹被过滤掉
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/folders",
+              params={"path": "", "scene_major": "宠物动物"})
+    assert r.json() == []
+
+    # 二级筛选：sub 内含 1 张街道街景
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/folders",
+              params={"path": "", "scene_major": "城市建筑", "scene_minor": "街道街景"})
+    body = r.json()
+    assert len(body) == 1 and body[0]["matching_count"] == 1
+
+    # 无筛选：响应不含 matching_count，结构与旧版一致
+    r = c.get(f"/api/galleries/{gid}/roots/{rid}/folders", params={"path": ""})
+    body = r.json()
+    assert len(body) == 1
+    assert "matching_count" not in body[0]
+
+
 def test_tags_stats_endpoint(client_with_data):
     c, gid, rid = client_with_data
     app = c.app
