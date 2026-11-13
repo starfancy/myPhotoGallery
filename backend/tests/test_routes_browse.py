@@ -146,6 +146,8 @@ def test_tags_stats_endpoint(client_with_data):
         from sqlalchemy import update
         from myphoto.models import Image
         async with app.state.sessionmaker() as s:
+            await s.execute(update(Image).where(Image.filename == "a.jpg")
+                             .values(scene_major="城市建筑", scene_minor="街景", tagged_at=1))
             await s.execute(update(Image).where(Image.filename == "b.jpg")
                              .values(scene_major="自然风光", scene_minor="山景", tagged_at=1))
             await s.execute(update(Image).where(Image.filename == "c.jpg")
@@ -153,13 +155,26 @@ def test_tags_stats_endpoint(client_with_data):
             await s.commit()
     c.portal.call(_tag)
 
+    # 全库：3 张
     r = c.get("/api/tags/stats")
     assert r.status_code == 200
     majors = r.json()["majors"]
-    natural = next(m for m in majors if m["name"] == "自然风光")
-    assert natural["count"] == 2
-    names = {m["name"]: m["count"] for m in natural["minors"]}
-    assert names == {"山景": 1, "湖泊": 1}
+    by_name = {m["name"]: m["count"] for m in majors}
+    assert by_name == {"城市建筑": 1, "自然风光": 2}
+
+    # 限定 root + path=sub：只统计 sub/ 下的 b+c（2 张自然风光）
+    r = c.get("/api/tags/stats", params={"root_id": rid, "path": "sub"})
+    assert r.status_code == 200
+    majors = r.json()["majors"]
+    assert len(majors) == 1
+    assert majors[0]["name"] == "自然风光"
+    assert majors[0]["count"] == 2
+
+    # gallery_id 限定：统计该图库全部（含 a.jpg）
+    r = c.get("/api/tags/stats", params={"gallery_id": gid})
+    assert r.status_code == 200
+    by_name = {m["name"]: m["count"] for m in r.json()["majors"]}
+    assert by_name == {"城市建筑": 1, "自然风光": 2}
 
 
 def test_breadcrumbs(client_with_data):

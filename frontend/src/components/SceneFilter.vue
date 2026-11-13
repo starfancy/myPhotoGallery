@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 场景筛选下拉（tags Phase 2）：一级 + 联动二级。
- *  选项来自 /api/tags/stats（只列出图库中实际存在的标签）；
+ *  选项来自 /api/tags/stats，按当前浏览文件夹范围过滤；
  *  一级固定 9 类，二级按选中一级动态加载。 */
 import { onMounted, ref, watch } from "vue"
 import { apiGet } from "../api"
@@ -8,6 +8,10 @@ import { apiGet } from "../api"
 const props = defineProps<{
   major: string
   minor: string
+  /** 当前浏览范围（用于限定统计只显示此文件夹下的分类） */
+  gid?: number
+  rid?: number
+  path?: string
 }>()
 const emit = defineEmits<{
   (e: "update:major", v: string): void
@@ -23,7 +27,12 @@ const loading = ref(false)
 async function loadStats() {
   loading.value = true
   try {
-    const r = await apiGet<{ majors: MajorGroup[] }>("/api/tags/stats")
+    const params = new URLSearchParams()
+    if (props.rid) params.set("root_id", String(props.rid))
+    if (props.path) params.set("path", props.path)
+    else if (props.gid) params.set("gallery_id", String(props.gid))
+    const query = params.toString() ? `?${params.toString()}` : ""
+    const r = await apiGet<{ majors: MajorGroup[] }>(`/api/tags/stats${query}`)
     majors.value = r.majors
   } catch {
     majors.value = []
@@ -40,16 +49,16 @@ watch(
   (m) => {
     const group = majors.value.find((g) => g.name === m)
     currentMinors.value = group ? group.minors : []
-    // 切换一级时，旧二级失效
     if (props.minor) emit("update:minor", "")
   },
   { immediate: true },
 )
-// stats 晚到时也要刷新二级列表
 watch(majors, () => {
   const group = majors.value.find((g) => g.name === props.major)
   currentMinors.value = group ? group.minors : []
 })
+// 浏览范围变化时重新拉取当前文件夹的分类分布
+watch(() => [props.rid, props.path], loadStats)
 
 function onMajor(e: Event) {
   emit("update:major", (e.target as HTMLSelectElement).value)

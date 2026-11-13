@@ -28,6 +28,9 @@
             v-if="!searchQ"
             :major="sceneMajor"
             :minor="sceneMinor"
+            :gid="gid"
+            :rid="rid"
+            :path="path"
             @update:major="onSceneMajor"
             @update:minor="onSceneMinor"
           />
@@ -662,4 +665,10 @@ function reloadWithScene() {
   page.value = 1
   renderPage(key, 1)
 }
+
+// 浏览文件夹切换时重置场景筛选（旧筛选值可能在新文件夹里不存在）
+watch([gid, rid, path], () => {
+  sceneMajor.value = ""
+  sceneMinor.value = ""
+})
 </script>

@@ -483,17 +483,31 @@ async def search(
 async def tags_stats(
     request: Request,
     response: Response,
-    gallery_id: int | None = Query(None, description="限定图库；默认全部"),
+    gallery_id: int | None = Query(None, description="限定图库"),
+    root_id: int | None = Query(None, description="限定 root（需配合 path）"),
+    path: str = Query("", description="文件夹相对路径（空=该 root 全部）"),
     _user: User = Depends(access_scope_guard),
 ):
-    """标签分布统计（tags Phase 2 概览页用）：一级 + 其下二级计数。"""
+    """标签分布统计：一级 + 其下二级计数。
+
+    - 不给任何参数：全库分布
+    - gallery_id：限定图库
+    - root_id + path：限定某 root 下某文件夹子树（浏览页筛选用）
+    """
     _no_store(response)
     sm = request.app.state.sessionmaker
+    rel = _norm_or_400(path) if root_id is not None else ""
     async with sm() as s:
         q = select(Image.scene_major, Image.scene_minor, func.count(Image.id)).where(
             Image.scene_major.is_not(None)
         )
-        if gallery_id is not None:
+        if root_id is not None:
+            q = q.where(Image.root_id == root_id)
+            if rel:
+                subtree = _subtree_clause(Folder.relative_path, rel)
+                if subtree is not None:
+                    q = q.join(Folder, Image.folder_id == Folder.id).where(subtree)
+        elif gallery_id is not None:
             q = q.join(GalleryRoot, Image.root_id == GalleryRoot.id).where(
                 GalleryRoot.gallery_id == gallery_id
             )
