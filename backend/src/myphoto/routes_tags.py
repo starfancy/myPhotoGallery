@@ -44,7 +44,11 @@ async def list_clusters(
     response: Response,
     _user: User = Depends(access_scope_guard),
 ):
-    """人物簇列表：按该簇下照片数降序。"""
+    """人物簇列表：按该簇下照片数降序。
+
+    用 inner join 排除零照片的孤儿簇（force 重打后旧簇 ID 无 face 指向时，
+    不应在人物页显示空项）。
+    """
     _no_store(response)
     sm = request.app.state.sessionmaker
     async with sm() as s:
@@ -54,7 +58,7 @@ async def list_clusters(
                 FaceCluster,
                 func.count(func.distinct(FaceEmbedding.image_id)),
             )
-            .outerjoin(FaceEmbedding, FaceEmbedding.cluster_id == FaceCluster.cluster_id)
+            .join(FaceEmbedding, FaceEmbedding.cluster_id == FaceCluster.cluster_id)
             .group_by(FaceCluster.cluster_id)
             .order_by(func.count(func.distinct(FaceEmbedding.image_id)).desc())
         )).all()

@@ -142,13 +142,20 @@ myphoto tag run --gallery "我的照片" --force
 myphoto tag cluster
 
 # 调整提示词后，基于已有向量秒级重算标签（不跑模型）
-myphoto tag relabel --promptset v3
+myphoto tag relabel
 ```
 
 **设计要点**：
 - 按图库逐个跑，用户验证完一个再跑下一个（需求 2）
-- 断点续跑：`tagged_at IS NULL` 的才跑
-- 进度输出：每 100 张打印一次进度 + 预计剩余时间
+- 断点续跑：`tagged_at IS NULL` 或 `tagged_sha1 != sha1` 的才跑；历史失败
+  （`tag_error` 非空）默认跳过，需 `--force` 才重试
+- 进度输出（2026-11 落地）：首条在第 1 张即打印（小批量也有反馈），之后按
+  自适应间隔（约总量 5%，夹在 10–100 之间）+ 末条；每行含
+  `[done/total] 百分比 已用 剩余ETA 当前文件`。聚类/relabel 同规则。
+- 已知边界：`--force` 会先清后插该范围内的 `face_embeddings`（cluster_id
+  随之丢失），重新聚类可能分配**新的簇 ID**；已命名的旧簇会变孤儿
+  （`face_clusters` 行保留但无 face 指向）。无命名时无实际损失；簇 ID 稳定
+  回填留待 Phase 4。
 
 ### 3.3 人脸聚类时机
 

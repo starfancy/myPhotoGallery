@@ -36,6 +36,22 @@ CLUSTER_ASSIGN_THRESHOLD = 0.5
 _WRITE_BATCH = 50  # 每 N 张提交一次，与 scanner 短事务原则一致
 
 
+def _report_interval(total: int) -> int:
+    """进度回调间隔：约总量 5%，夹在 [10,100]。
+
+    大库（万张）每 100 张一行不刷屏；小库（几十张）间隔 10，配合
+    _should_report 的首条/末条规则，3 张这种批量也能看到中间反馈。
+    """
+    if total <= 1:
+        return 1
+    return min(100, max(10, total // 20))
+
+
+def _should_report(done: int, total: int) -> bool:
+    """首条（done=1）、末条（done=total）立即报；中间按自适应间隔。"""
+    return done == 1 or done == total or done % _report_interval(total) == 0
+
+
 @dataclass
 class TagRunStats:
     total: int = 0
@@ -144,7 +160,7 @@ async def tag_images(
             if dirty >= _WRITE_BATCH:
                 await s.commit()
                 dirty = 0
-            if progress_cb is not None and (idx + 1) % 100 == 0:
+            if progress_cb is not None and _should_report(idx + 1, stats.total):
                 await progress_cb(idx + 1, stats.total, image.relative_path)
         await s.commit()
 
@@ -244,7 +260,7 @@ async def cluster_faces(sm, progress_cb=None) -> ClusterStats:
             assigned_embs.append(emb)
             assigned_cluster_ids.append(chosen)
             stats.assigned += 1
-            if progress_cb is not None and (idx + 1) % 500 == 0:
+            if progress_cb is not None and _should_report(idx + 1, len(unassigned)):
                 await progress_cb(idx + 1, len(unassigned), chosen)
 
         for cluster_id, face_id in to_update:
@@ -286,7 +302,7 @@ async def relabel(sm, tagger, progress_cb=None) -> int:
             image.scene_minor = minor
             image.scene_conf = conf
             updated += 1
-            if progress_cb is not None and (idx + 1) % 500 == 0:
+            if progress_cb is not None and _should_report(idx + 1, len(rows)):
                 await progress_cb(idx + 1, len(rows), None)
         await s.commit()
     return updated

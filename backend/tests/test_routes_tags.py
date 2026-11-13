@@ -100,6 +100,27 @@ def test_list_clusters(client):
     assert body[0]["image_count"] == 2
 
 
+def test_list_clusters_hides_orphan_empty_clusters(client):
+    """force 重打后无 face 指向的孤儿簇不应出现在列表。"""
+    c, _gid, _rid = client
+    app = c.app
+
+    async def _add_orphan():
+        from myphoto.models import FaceCluster
+        async with app.state.sessionmaker() as s:
+            s.add(FaceCluster(
+                cluster_id="P999", display_name="孤儿", sample_face_id=None,
+                created_at=int(time.time()), updated_at=int(time.time()),
+            ))
+            await s.commit()
+    c.portal.call(_add_orphan)
+
+    body = c.get("/api/tags/clusters").json()
+    ids = [row["cluster_id"] for row in body]
+    assert "P001" in ids
+    assert "P999" not in ids
+
+
 def test_cluster_images_groups_by_year_month(client):
     c, _gid, _rid = client
     r = c.get("/api/tags/clusters/P001/images")

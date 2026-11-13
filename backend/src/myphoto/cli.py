@@ -311,8 +311,33 @@ def _build_tagger(cfg, config_path: str | None):
     return tagger if tagger.available() else None
 
 
-async def _progress_echo(done: int, total: int, current) -> None:
-    click.echo(f"  [{done}/{total}] {current or ''}")
+def _fmt_duration(seconds: float) -> str:
+    """秒 → '42s' / '3m05s' / '1h12m'。"""
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{sec:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
+
+
+def _make_progress_echo():
+    """生成带起始时间的进度回调：百分比 + 已用 + ETA + 当前项。"""
+    start = time.perf_counter()
+
+    async def _echo(done: int, total: int, current) -> None:
+        elapsed = time.perf_counter() - start
+        pct = done * 100 // max(total, 1)
+        eta = elapsed / done * (total - done) if done else 0.0
+        tail = f"  {current}" if current else ""
+        click.echo(
+            f"  [{done}/{total}] {pct:3d}%  已用 {_fmt_duration(elapsed)}  "
+            f"剩余 {_fmt_duration(eta)}{tail}"
+        )
+
+    return _echo
 
 
 async def _gallery_id_by_name(s, name: str) -> int:
@@ -384,13 +409,13 @@ def tag_run_cmd(ctx, gallery, folder, force):
             stats = await tag_images(
                 sm, tagger,
                 gallery_id=gallery_id, folder=folder, force=force,
-                progress_cb=_progress_echo,
+                progress_cb=_make_progress_echo(),
             )
             click.echo(
                 f"tagged={stats.tagged} failed={stats.failed} "
                 f"missing={stats.skipped_missing} (scanned={stats.total})"
             )
-            cs = await cluster_faces(sm, progress_cb=_progress_echo)
+            cs = await cluster_faces(sm, progress_cb=_make_progress_echo())
             click.echo(f"clustered: assigned={cs.assigned} new_clusters={cs.new_clusters}")
 
             async with sm() as s:
@@ -419,7 +444,7 @@ def tag_cluster_cmd(ctx):
         try:
             from myphoto.tagging_jobs import cluster_faces
 
-            cs = await cluster_faces(sm, progress_cb=_progress_echo)
+            cs = await cluster_faces(sm, progress_cb=_make_progress_echo())
             click.echo(f"assigned={cs.assigned} new_clusters={cs.new_clusters}")
             async with sm() as s:
                 await write_audit(s, "tag_cluster", None, "cli", target="all",
@@ -446,7 +471,7 @@ def tag_relabel_cmd(ctx):
                 )
             from myphoto.tagging_jobs import relabel
 
-            n = await relabel(sm, tagger, progress_cb=_progress_echo)
+            n = await relabel(sm, tagger, progress_cb=_make_progress_echo())
             click.echo(f"relabeled={n}")
             async with sm() as s:
                 await write_audit(s, "tag_relabel", None, "cli", target="all",
