@@ -27,11 +27,17 @@ const selectedId = ref<string>("")
 const loading = ref(false)
 const renaming = ref(false)
 const renameInput = ref("")
+const loadError = ref("")
 
 async function loadClusters() {
-  clusters.value = await apiGet<Cluster[]>("/api/tags/clusters")
-  if (!selectedId.value && clusters.value.length) {
-    selectCluster(clusters.value[0].cluster_id)
+  loadError.value = ""
+  try {
+    clusters.value = await apiGet<Cluster[]>("/api/tags/clusters")
+    if (!selectedId.value && clusters.value.length) {
+      selectCluster(clusters.value[0].cluster_id)
+    }
+  } catch (err) {
+    loadError.value = err instanceof Error ? err.message : "加载失败"
   }
 }
 
@@ -71,6 +77,8 @@ function groupTitle(g: Group) {
   if (g.year === 0) return "未知日期"
   return `${g.year}年${g.month}月`
 }
+
+onMounted(loadClusters)
 </script>
 
 <template>
@@ -79,7 +87,10 @@ function groupTitle(g: Group) {
       <template #title><span class="text-ink-2">人物</span></template>
     </AppHeader>
     <main id="main-content" class="p-3">
-      <div v-if="clusters.length === 0" class="mt-8 text-center text-ink-2" role="status">
+      <div v-if="loadError" class="mt-8 text-center text-danger-text" role="alert">
+        加载人物簇失败：{{ loadError }}
+      </div>
+      <div v-else-if="clusters.length === 0" class="mt-8 text-center text-ink-2" role="status">
         暂无人物簇（打标完成后自动聚类）
       </div>
       <div v-else class="flex gap-4">
