@@ -1,8 +1,9 @@
 # 智能标签系统升级设计
 
-> 状态：设计稿，待评审
+> 状态：Phase 1–3 已落地（2026-11），Phase 4 调优待做；本文档已按实际实现修订
 > 原型验证：`prototypes/classify_pipeline/`（YOLO + CLIP + InsightFace 三管线已跑通）
-> 性能基线（i5-11320H + Iris Xe，OpenVINO GPU）：合并管线 ~150ms/张，万张全量 ~25 分钟
+> 实测性能（i5-11320H + Iris Xe，OpenVINO GPU）：纯推理 ~270ms/张，含解码+IO 稳态
+> ~350ms/张；全量 2923 张 17 分钟、0 失败；人脸 576 → 269 簇
 
 ## 1. 目标
 
@@ -11,7 +12,9 @@
 - **场景标签**（CLIP 零样本分类，9 大类 ~45 小类）
 - **人物标签**（YOLO 检测人数 + InsightFace 人脸聚类）
 
-支持按标签筛选、按人物聚类浏览，不影响现有扫描速度（增量打标异步）。
+支持按标签筛选、按人物聚类浏览。增量打标在扫描时**同步串行**执行（仅针对
+新增/变化文件，未变文件不碰模型），兼顾机械硬盘的 IO 最优；存量图库通过 CLI
+`myphoto tag run` 单独批量打标。
 
 ## 2. 数据库设计
 
@@ -80,36 +83,43 @@ CREATE TABLE face_clusters (
 扫描目录 → hash → EXIF → 写 images 行（不生成缩略图）
 ```
 
-升级后（**同步串行，单线程**）：
+升级后（**同步串行，单线程**；2026-11 落地实现）：
 
 ```
-扫描目录 → hash → EXIF → 解码原图 → 生成 400px 缩略图（顺便存缓存）
-       → 用内存中的 400px 图跑 CLIP + YOLO
-       → 如果有人脸 → 从内存中的原图裁脸跑 InsightFace
+扫描目录 → hash → EXIF → 解码原图（全分辨率，内存）
+       → 同一张全尺寸图喂 CLIP + YOLO（模型内部各自降采样）
+       → YOLO 检测到人脸 → 从全尺寸原图裁脸跑 InsightFace
        → 写 images 行 + 标签 + 向量
 ```
+
+> **实现与初稿的差异（重要）**：初稿设想"先 resize 到 400px 再跑模型，并顺便写
+> 400 缩略图缓存"。落地时去掉了 400 中间层——各模型本就会内部降采样
+> （CLIP→224、YOLO→640），多一道 400 resize 是冗余；且缩略图保持纯按需生成，
+> 不与扫描/打标耦合。全尺寸解码实测 ~80ms，瓶颈在推理（~270ms），去掉中间
+> resize 对小脸/远处人物检测更有利。**扫描与打标全程不生成、不保存任何缩略图。**
 
 **为什么同步而不是异步**（针对机械硬盘场景）：
 
 - 机械硬盘单线程随机读 ~100 IOPS，并行解码 N 张会导致磁盘寻址抖动
 - 异步打标 = 原图读 2 次（扫描时 hash/EXIF 一次，打标时解码一次）
-- 同步打标 = 原图只读 1 次，内存中同时持有原图和 400px 版本
-- 虽然 CPU 推理（~150ms/张）拖慢扫描，但总 IO 最优，机械硬盘上反而更快
+- 同步打标 = 打标只处理新增/变化文件，hash 刚读过文件、OS 缓存命中，解码代价低
+- 虽然 CPU 推理（实测 ~350ms/张稳态）拖慢扫描，但总 IO 最优，机械硬盘上反而更快
 
-**配置开关**：
+**配置开关**（落地为 `[tagging]` 段，见 §8.5）：
 
 ```toml
-[scanner]
-tag_during_scan = "auto"   # auto / always / never
-# auto: 机械硬盘同步打标；SSD 可异步（但当前 V1 统一同步）
+[tagging]
+enabled = true            # 总开关；false 时 scanner/CLI 都不打标
+scan_on_import = true     # 扫描时对新增/变化图片同步打标（未变文件不碰模型）
+models_dir = "backend/models"
 ```
 
 **设计要点**：
 
-- 原图只解码 1 次，内存中复用
-- 400px 缩略图顺便生成，用户预览时直接命中缓存
+- 原图只解码 1 次，三个模型在内存中共享全尺寸图
+- **不生成/不写缩略图缓存**；缩略图仍是用户预览时按需生成（与打标解耦）
 - 打标失败不阻塞扫描：catch 异常，写 `tag_error`，继续下一张
-- 模型常驻内存（OpenVINO 编译一次，整个扫描过程复用）
+- 模型懒加载、常驻内存（OpenVINO 首次调用编译一次，整个扫描过程复用）
 
 ### 3.2 存量打标（CLI 命令）
 
@@ -236,32 +246,43 @@ POST /api/tags/relabel                   # 基于新提示词重算标签（管�
 
 ## 6. 图像输入策略
 
-### 6.1 缩略图不是现成的
+### 6.1 缩略图不是现成的，打标也不依赖/不生成它
 
-项目的缩略图（200/400/1600px）是**按需生成**——只有用户预览时才会渲染并缓存。打标不能依赖"缩略图已存在"。
+项目的缩略图（`ALLOWED_SIZES = {200, 400, 1600}`）是**按需生成**——只有用户预览
+时才经 `ThumbnailGenerator.ensure()` 渲染并缓存（入口仅 `routes_media` 与
+`routes_trash`）。打标**既不读缩略图缓存，也不写**：scanner、tagger、
+tagging_jobs 全程不调用 ThumbnailGenerator。
 
-### 6.2 打标流程（同步，内存复用）
+### 6.2 打标流程（同步，全尺寸原图 + 内存内各模型自行降采样）
+
+> 2026-11 落地实现，已取代初稿的"400px 中间层"方案。
 
 ```
-对每张图打标时（scanner 已把原图解码到内存）：
-  1. 从内存中的原图 resize 到 400px → 存缩略图缓存（顺便）
-  2. 用 400px 图跑 CLIP（场景分类）+ YOLO（人数检测）
-  3. 如果 YOLO 检测到人脸 → 从内存中的原图裁脸区域 → 跑 InsightFace
+对每张图打标时（PIL 打开原图，全分辨率，仅在内存）：
+  1. 同一张全尺寸 RGB 图喂 CLIP（CLIPProcessor 内部 resize 到 224×224）→ 场景分类
+  2. 同一张全尺寸图喂 YOLO（letterbox 到 640×640）→ 人数检测
+  3. YOLO 检测到人脸 → SCRFD 在全尺寸图上检测（640×640 输入）
+     → 按原图坐标裁脸、5 点对齐到 112×112 → InsightFace 出 embedding
 ```
 
-**设计要点**：
-- 原图只解码 1 次（scanner 读 hash/EXIF 时已解码），内存复用
-- 400px 缩略图顺便生成，用户预览时直接命中缓存
-- CLIP 强制 224×224 输入，400→224 resize 质量足够
-- InsightFace 需要 112×112 对齐脸，从原图裁脸（不是从 400px 缩略图）
-- 平均耗时：风景照（80%）~110ms CPU，有人脸的（20%）~410ms CPU，加权 **~170ms/张**
-- 磁盘 IO：每张图只 1 次顺序读（原图）+ 1 次顺序写（400px 缓存）
+**设计要点（实际实现）**：
+- 原图只解码 1 次，三个模型共享这张内存中的全尺寸图，各自内部降采样
+- **不经过 400px 中间尺寸**，也不写缩略图缓存——避免冗余 resize，且对小脸/
+  远处人物检测更有利
+- 各模型固定输入：CLIP 224×224、YOLO/SCRFD 640×640、识别对齐脸 112×112
+- 人脸 bbox 与裁脸都在**原图坐标系**，聚类质量不受缩略图尺寸影响
+- 实测（i5-11320H + Iris Xe，OpenVINO GPU）：全尺寸解码 ~80ms；纯推理
+  CLIP ~110ms + YOLO ~50ms + 人脸 ~110ms ≈ 270ms；全量 2923 张平均稳态
+  **~350ms/张**（含解码与 IO），万张约 1 小时
+- 磁盘 IO：每张图只顺序读原图，**无额外缩略图写盘**
 
-### 6.3 为什么用 400px 而不是 224px
+### 6.3 为什么放弃 400px 中间层（相对初稿的变更）
 
-- 400px 是项目已有尺寸（`ALLOWED_SIZES = {200, 400, 1600}`），复用缓存路径
-- 200px 太小，YOLO 检测小脸（合照）会漏
-- 1600px 解码慢，没必要
+- 初稿想用 400px（项目已有缩略图尺寸）做统一输入并顺便写缓存；落地时发现
+  CLIP 本就要降到 224、YOLO 要 letterbox 到 640，400 是多余的一道缩放
+- 缩略图写盘会把"按需缓存"耦合进扫描/打标流程，增加写 IO 与失败面
+- 全尺寸输入对 YOLO 小脸（合照）与 SCRFD 人脸检测召回更好
+- 全尺寸解码 ~80ms，相对 ~270ms 推理可忽略，没有性能动机去缩小输入
 
 ## 7. 模型与依赖
 
@@ -308,24 +329,25 @@ def get_inference_backend():
 
 ## 7. 实施阶段
 
-### Phase 1：DB 迁移 + 打标管线（后端）
+### Phase 1：DB 迁移 + 打标管线（后端）✅ 已完成（2026-11）
 
-- [ ] 写 migration SQL（§2.1–2.2）
-- [ ] 实现 `Tagger` 类（封装 YOLO + CLIP + InsightFace）
-- [ ] 实现 CLI `tag status / run / cluster / relabel`（§3.2）
-- [ ] scanner 接入异步打标队列（§3.1）
+- [x] 写 migration SQL（§2.1–2.2；走 db.py `_COLUMN_MIGRATIONS` 幂等升级）
+- [x] 实现 `Tagger` 类（封装 YOLO + CLIP + InsightFace，懒加载、线程安全）
+- [x] 实现 CLI `tag status / run / cluster / relabel`（§3.2）
+- [x] scanner 接入同步打标挂钩（仅新增/变化文件，未变文件不碰模型，§3.1）
 
-### Phase 2：标签筛选 UI
+### Phase 2：标签筛选 UI（部分完成）
 
-- [ ] BrowseView 加场景筛选下拉（§4.1）
-- [ ] 搜索 API 加 scene / date 参数（§4.2）
-- [ ] 概览页标签统计（§4.3）
+- [x] BrowseView 加场景筛选下拉（§4.1；按当前文件夹范围统计）
+- [ ] 搜索 API 加 scene / date 参数（§4.2；**未做**，目前 scene 筛选只接在
+  `/images` 列表，未接入 `/search`，date 参数也未做）
+- [x] 概览页标签统计（§4.3，TagStatsPanel）
 
-### Phase 3：人物页
+### Phase 3：人物页 ✅ 已完成（2026-11）
 
-- [ ] 顶栏加"人物"入口（§4.4）
-- [ ] PersonClusterView 页面（簇列表 + 照片网格 + 按年月分组）
-- [ ] 重命名交互
+- [x] 顶栏加"人物"入口（§4.4）
+- [x] PersonClusterView 页面（簇列表 + 人脸缩略图 + 照片网格 + 按年月分组）
+- [x] 重命名交互（PUT /api/tags/clusters/{cid}）
 
 ### Phase 4：调优（可选）
 
@@ -369,14 +391,14 @@ ALTER TABLE images ADD COLUMN tagged_sha1 TEXT;
 
 ### 8.5 资源配置开关
 
-`config.toml` 新增：
+`config.toml` 新增（落地字段；`backend` 初稿设想未实现，设备由 Tagger 自动
+探测 GPU→CPU）：
 
 ```toml
 [tagging]
-enabled = true              # 总开关
-backend = "auto"            # auto / openvino-gpu / openvino-cpu / onnxruntime-cpu
-models_dir = "backend/models"
-scan_on_import = true       # 扫描时是否异步打标
+enabled = true              # 总开关；false 时 scanner/CLI 都不打标
+models_dir = "backend/models"   # 相对路径相对 config.toml 所在目录解析
+scan_on_import = true       # 扫描时对新增/变化图片【同步】打标（未变文件不碰）
 ```
 
 ### 8.6 隐私提示
@@ -393,12 +415,12 @@ scan_on_import = true       # 扫描时是否异步打标
 ## 9. 风险与权衡
 
 | 风险 | 缓解 |
-|---|---|
-| 打标拖慢扫描 | 异步队列，不阻塞 |
-| 万张全量 25 分钟 | 按图库逐个跑，用户可控 |
+| --- | --- |
+| 打标拖慢扫描 | 同步串行但只处理新增/变化文件；未变文件不碰模型；单张失败写 `tag_error` 不中断 |
+| 全量打标耗时（实测 2923 张 17 分钟，万张约 1 小时） | 按图库/文件夹逐个跑（CLI 支持 `--gallery`/`--folder`），用户可控、断点续跑 |
 | CLIP 二级准确率 83% | 二级作辅助标签，前端淡化显示 |
-| 人脸聚类把相似的人混了 | UI 可重命名/合并，V1 先不做自动纠错 |
-| 模型文件 300MB 部署麻烦 | 不进 git，提供 `scripts/download_models.ps1` |
-| 3060 机器没 OpenVINO | 运行时探测后端，fallback 到 onnxruntime-gpu |
+| 人脸聚类把相似的人混了 | UI 可重命名；合并/拆分留 Phase 4，V1 不做自动纠错 |
+| 模型文件 ~900MB 部署麻烦 | 不进 git（`.gitignore` 排除 `backend/models/`、`prototypes/`），手动拷贝 |
+| 无 GPU / 3060 机器没 OpenVINO | Tagger 自动探测 GPU→CPU fallback；onnxruntime 作为人脸识别后端 |
 | 照片被修改后旧标签残留 | `tagged_sha1` 联动校验，hash 变了强制重打 |
 | 人脸簇重聚类丢失用户命名 | 增量聚类优先复用已有簇 ID，不自动合并 |
