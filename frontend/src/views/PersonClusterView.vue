@@ -159,7 +159,9 @@ onMounted(loadClusters)
               <img
                 v-for="img in g.images"
                 :key="img.id"
-                :src="`/api/thumb/${img.sha1}?size=200`"
+                :src="`/api/thumb/${img.sha1}?size=400`"
+                :srcset="`/api/thumb/${img.sha1}?size=200 200w, /api/thumb/${img.sha1}?size=400 400w`"
+                sizes="112px"
                 :alt="img.filename"
                 class="h-28 rounded object-cover"
                 loading="lazy"
