@@ -4,10 +4,10 @@
        aria-label="缩略图排版方式">
     <button v-for="opt in OPTIONS" :key="opt.value"
             type="button"
-            class="flex min-h-11 min-w-11 items-center rounded-md px-2.5 py-1"
-            :class="modelValue === opt.value
-                    ? 'bg-surface-4 text-ink shadow-sm ring-1 ring-line'
-                    : 'text-ink-2 transition-colors hover:text-ink'"
+            class="flex min-h-11 min-w-11 items-center rounded-md px-2.5 py-1 transition-colors"
+            :style="modelValue === opt.value
+                    ? 'background-color: rgb(82 82 82); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.3);'
+                    : 'color: rgb(161 161 170);'"
             :title="opt.label"
             :aria-label="opt.label"
             :aria-pressed="modelValue === opt.value"
