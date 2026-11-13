@@ -324,6 +324,39 @@ async def test_cluster_faces_reuses_existing_cluster_id(env):
         assert new_id == "P003"
 
 
+# ---------- prune_orphan_clusters ----------
+
+
+async def test_prune_removes_unnamed_orphans_but_keeps_used_and_named(env):
+    from myphoto.tagging_jobs import prune_orphan_clusters
+
+    _root_dir, sm, root_id, _gid = env
+    img = await _add_image(sm, root_id, "a.jpg")
+    now = int(time.time())
+    async with sm() as s:
+        # P001 有 face 指向（正常簇）；P002 孤儿未命名；P003 孤儿但已命名
+        s.add(FaceCluster(cluster_id="P001", created_at=now, updated_at=now))
+        s.add(FaceCluster(cluster_id="P002", created_at=now, updated_at=now))
+        s.add(FaceCluster(cluster_id="P003", display_name="张三",
+                          created_at=now, updated_at=now))
+        await s.commit()
+    await _insert_face(sm, img, _unit_vec(512, 0), cluster_id="P001")
+
+    # 默认：只删未命名孤儿 P002，保留 P001（在用）和 P003（命名）
+    removed = await prune_orphan_clusters(sm)
+    assert removed == ["P002"]
+    async with sm() as s:
+        ids = set((await s.execute(select(FaceCluster.cluster_id))).scalars().all())
+    assert ids == {"P001", "P003"}
+
+    # include_named：连命名孤儿 P003 也删，在用的 P001 仍保留
+    removed = await prune_orphan_clusters(sm, include_named=True)
+    assert removed == ["P003"]
+    async with sm() as s:
+        ids = set((await s.execute(select(FaceCluster.cluster_id))).scalars().all())
+    assert ids == {"P001"}
+
+
 # ---------- tag_status ----------
 
 

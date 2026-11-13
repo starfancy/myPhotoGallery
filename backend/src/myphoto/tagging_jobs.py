@@ -308,6 +308,31 @@ async def relabel(sm, tagger, progress_cb=None) -> int:
     return updated
 
 
+async def prune_orphan_clusters(sm, *, include_named: bool = False) -> list[str]:
+    """删除无任何 face_embedding 指向的孤儿簇（force 重打后的残留）。
+
+    默认保留已命名的孤儿簇（命名是用户显式劳动，删除前需 --include-named
+    显式确认）。返回被删除的 cluster_id 列表。
+    """
+    async with sm() as s:
+        used_ids = set((await s.execute(
+            select(FaceEmbedding.cluster_id)
+            .where(FaceEmbedding.cluster_id.is_not(None))
+            .distinct()
+        )).scalars().all())
+        clusters = (await s.execute(select(FaceCluster))).scalars().all()
+        orphans = [
+            c for c in clusters
+            if c.cluster_id not in used_ids
+            and (include_named or c.display_name is None)
+        ]
+        removed = [c.cluster_id for c in orphans]
+        for c in orphans:
+            await s.delete(c)
+        await s.commit()
+        return removed
+
+
 async def tag_status(sm) -> list[dict]:
     """每图库打标状态：total / tagged / failed / pending。"""
     tagged_cnt = func.sum(case((Image.tagged_at.is_not(None), 1), else_=0))

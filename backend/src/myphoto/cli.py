@@ -483,6 +483,35 @@ def tag_relabel_cmd(ctx):
     _run(_run_it())
 
 
+@tag_group.command("gc")
+@click.option("--include-named", is_flag=True, default=False,
+              help="同时删除已命名的孤儿簇（默认保留命名簇，只清未命名的）")
+@click.pass_context
+def tag_gc_cmd(ctx, include_named):
+    """清理无任何人脸指向的孤儿人物簇（--force 重打后的残留）。"""
+
+    async def _run_it():
+        engine, sm, _cfg = await _bootstrap(ctx.obj["config_path"])
+        try:
+            from myphoto.tagging_jobs import prune_orphan_clusters
+
+            removed = await prune_orphan_clusters(sm, include_named=include_named)
+            if removed:
+                click.echo(f"removed {len(removed)} orphan cluster(s): {', '.join(removed)}")
+            else:
+                click.echo("no orphan clusters")
+            async with sm() as s:
+                await write_audit(
+                    s, "tag_gc", None, "cli", target="all",
+                    detail=f"removed={len(removed)} include_named={int(include_named)}",
+                )
+                await s.commit()
+        finally:
+            await engine.dispose()
+
+    _run(_run_it())
+
+
 @cli.command("serve")
 @click.option("--host", default=None, help="覆盖 config.toml 中的 listen_host")
 @click.option("--port", default=None, type=int, help="覆盖 config.toml 中的 listen_port")
