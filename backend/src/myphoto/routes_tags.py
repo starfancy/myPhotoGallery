@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import io
+import json
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, select, update
@@ -15,6 +19,7 @@ from myphoto.errors import AppError
 from myphoto.models import (
     FaceCluster,
     FaceEmbedding,
+    GalleryRoot,
     Image,
     User,
 )
@@ -62,6 +67,65 @@ async def list_clusters(
                 "image_count": int(n_images or 0),
             })
         return out
+
+
+@router.get("/clusters/{cluster_id}/face.jpg")
+async def cluster_face(
+    cluster_id: str,
+    request: Request,
+    response: Response,
+    _user: User = Depends(access_scope_guard),
+):
+    """返回该簇代表性人脸 crop（~100px JPEG），用于簇列表缩略图。"""
+    sm = request.app.state.sessionmaker
+    async with sm() as s:
+        cluster = await _get_cluster_or_404(s, cluster_id)
+        # 优先用 sample_face_id；没有则取该簇第一张人脸
+        face = None
+        if cluster.sample_face_id:
+            face = await s.get(FaceEmbedding, cluster.sample_face_id)
+        if face is None:
+            face = (await s.execute(
+                select(FaceEmbedding)
+                .where(FaceEmbedding.cluster_id == cluster_id)
+                .limit(1)
+            )).scalar_one_or_none()
+        if face is None:
+            raise AppError("not_found", 404, "no face in cluster")
+
+        image = await s.get(Image, face.image_id)
+        root = await s.get(GalleryRoot, image.root_id)
+        path = Path(root.absolute_path) / image.relative_path
+
+    def _render():
+        from PIL import Image as PILImage, ImageOps
+        with PILImage.open(path) as im:
+            im = ImageOps.exif_transpose(im).convert("RGB")
+            bbox = json.loads(face.bbox) if face.bbox else None
+            if bbox and len(bbox) == 4:
+                x1, y1, x2, y2 = [int(v) for v in bbox]
+                # 向外扩 20% 避免人脸紧贴边缘
+                w, h = im.size
+                pad_x = int((x2 - x1) * 0.2)
+                pad_y = int((y2 - y1) * 0.2)
+                x1 = max(0, x1 - pad_x)
+                y1 = max(0, y1 - pad_y)
+                x2 = min(w, x2 + pad_x)
+                y2 = min(h, y2 + pad_y)
+                im = im.crop((x1, y1, x2, y2))
+            im.thumbnail((100, 100), PILImage.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=85)
+            return buf.getvalue()
+
+    try:
+        data = await asyncio.to_thread(_render)
+    except Exception as exc:
+        raise AppError("internal_error", 500, f"face render failed: {exc}")
+
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    response.headers["ETag"] = f"face-{face.id}-{cluster.updated_at}"
+    return Response(content=data, media_type="image/jpeg")
 
 
 @router.get("/clusters/{cluster_id}/images")

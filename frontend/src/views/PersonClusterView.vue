@@ -95,19 +95,25 @@ onMounted(loadClusters)
       </div>
       <div v-else class="flex gap-4">
         <!-- 左：簇列表 -->
-        <aside class="w-48 shrink-0 space-y-1">
+        <aside class="w-56 shrink-0 space-y-1">
           <button
             v-for="c in clusters"
             :key="c.cluster_id"
             type="button"
-            class="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm"
+            class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm"
             :class="c.cluster_id === selectedId
                      ? 'bg-primary/10 text-ink'
                      : 'text-ink-2 hover:bg-surface-2 hover:text-ink'"
             :aria-pressed="c.cluster_id === selectedId"
             @click="selectCluster(c.cluster_id)"
           >
-            <span class="truncate">{{ clusterLabel(c) }}</span>
+            <img
+              :src="`/api/tags/clusters/${c.cluster_id}/face.jpg`"
+              :alt="clusterLabel(c)"
+              class="h-10 w-10 shrink-0 rounded-full object-cover"
+              loading="lazy"
+            />
+            <span class="min-w-0 flex-1 truncate">{{ clusterLabel(c) }}</span>
             <span class="ml-2 shrink-0 text-xs text-ink-muted">{{ c.image_count }}</span>
           </button>
         </aside>
