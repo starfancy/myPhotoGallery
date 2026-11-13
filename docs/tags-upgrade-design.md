@@ -143,6 +143,10 @@ myphoto tag cluster
 
 # 调整提示词后，基于已有向量秒级重算标签（不跑模型）
 myphoto tag relabel
+
+# 清理无任何人脸指向的孤儿人物簇（--force 重打后的残留）
+myphoto tag gc                 # 只删未命名孤儿，保留在用簇与已命名簇
+myphoto tag gc --include-named # 连已命名但变孤儿的簇也删
 ```
 
 **设计要点**：
@@ -156,6 +160,9 @@ myphoto tag relabel
   随之丢失），重新聚类可能分配**新的簇 ID**；已命名的旧簇会变孤儿
   （`face_clusters` 行保留但无 face 指向）。无命名时无实际损失；簇 ID 稳定
   回填留待 Phase 4。
+- `tag gc`（2026-11 落地）：删除孤儿 `face_clusters` 行；默认保护已命名簇，
+  `--include-named` 才一并删；人物页簇列表本身也用 inner join 过滤孤儿，
+  不显示空项。每次执行写 `tag_gc` 审计事件。
 
 ### 3.3 人脸聚类时机
 
