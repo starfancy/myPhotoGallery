@@ -16,14 +16,20 @@
            :alt="filename"
            class="h-full w-full object-cover" />
     </button>
-    <!-- 文件名开关：底部渐变阴影上居中显示文件名；不拦截点击 -->
-    <div v-if="showFilename || showScene"
-         class="lb-cell-filename pointer-events-none flex items-end justify-between gap-1 px-1"
-         :class="{ 'lb-cell-filename--solo': !showFilename }">
-      <span v-if="showFilename" class="truncate" :title="filename">{{ filename }}</span>
-      <span v-if="showFilename" class="flex-1"></span>
+    <!-- 文件名/场景标签：单独显示时居中；同时显示时文件名左、场景右 -->
+    <div v-if="showFilename || (showScene && sceneLabel)"
+         class="lb-cell-filename pointer-events-none"
+         :class="(showFilename && showScene && sceneLabel)
+                 ? 'flex items-end justify-between gap-1 px-1'
+                 : 'text-center'">
+      <template v-if="showFilename">
+        <span class="truncate" :title="filename">{{ filename }}</span>
+        <span v-if="showScene && sceneLabel" class="flex-1"></span>
+      </template>
       <span v-if="showScene && sceneLabel"
-            class="shrink-0 rounded bg-black/50 px-1 text-[10px] text-white/90"
+            :class="showFilename
+                    ? 'shrink-0 rounded bg-black/50 px-1 text-[10px] text-white/90'
+                    : ''"
             :title="sceneLabel">{{ sceneLabel }}</span>
     </div>
     <div v-if="badge"
@@ -141,10 +147,6 @@ function onTouchEnd() {
   font-size: 11px;
   line-height: 1.3;
   /* truncate / text-center 由工具类提供；超长省略号，hover 看 title 全名 */
-}
-.lb-cell-filename--solo {
-  padding-left: 4px;
-  padding-right: 4px;
 }
 .lb-cell-badge {
   position: absolute;
