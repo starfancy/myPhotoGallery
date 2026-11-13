@@ -5,13 +5,13 @@
          class="flex items-center gap-1 rounded-lg bg-surface-2 p-0.5 text-sm">
       <router-link
         to="/galleries"
-        class="rounded-md px-2.5 py-1 text-ink-2 transition-colors hover:text-ink"
-        active-class="!bg-surface-3 !text-ink font-medium shadow-sm"
+        class="rounded-md px-2.5 py-1 transition-colors hover:text-ink"
+        :class="isGalleryActive ? 'bg-surface-3 text-ink font-medium shadow-sm' : 'text-ink-2'"
       >图库</router-link>
       <router-link
         to="/people"
-        class="rounded-md px-2.5 py-1 text-ink-2 transition-colors hover:text-ink"
-        active-class="!bg-surface-3 !text-ink font-medium shadow-sm"
+        class="rounded-md px-2.5 py-1 transition-colors hover:text-ink"
+        :class="isPeopleActive ? 'bg-surface-3 text-ink font-medium shadow-sm' : 'text-ink-2'"
       >人物</router-link>
     </nav>
     <div class="flex-1 min-w-0 overflow-hidden">
@@ -130,12 +130,16 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue"
-import { useRouter } from "vue-router"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { useRoute, useRouter } from "vue-router"
 import { useAuthStore } from "../stores/auth"
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+
+const isGalleryActive = computed(() => route.path.startsWith("/galleries"))
+const isPeopleActive = computed(() => route.path.startsWith("/people"))
 
 const open = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
