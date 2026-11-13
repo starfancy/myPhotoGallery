@@ -18,3 +18,6 @@ backend/config.toml.bak
 *.7z
 # 智能标签模型文件（~900MB），不进 git；部署时手动拷贝
 backend/models/
+
+# 原型验证脚本与模型（~900MB，不进 git）
+prototypes/

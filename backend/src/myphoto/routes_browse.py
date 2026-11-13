@@ -254,6 +254,8 @@ def _image_payload(r: Image) -> dict:
         "taken_at": r.taken_at,
         "mtime": r.mtime,
         "is_raw": bool(r.is_raw),
+        "scene_major": r.scene_major,
+        "scene_minor": r.scene_minor,
     }
 
 

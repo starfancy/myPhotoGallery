@@ -59,6 +59,23 @@
               <path d="M5 11h6" />
             </svg>
           </button>
+          <button type="button"
+                  class="flex min-h-11 min-w-11 items-center justify-center rounded px-1.5 py-1"
+                  :class="showScene
+                          ? 'bg-surface-3 text-ink'
+                          : 'text-ink-2 hover:text-ink'"
+                  title="缩略图上显示场景分类标签"
+                  aria-label="缩略图上显示场景分类标签"
+                  :aria-pressed="showScene"
+                  @click="showScene = !showScene">
+            <!-- 标签图标：圆角矩形 + 文字 -->
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+                 stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
+                 aria-hidden="true">
+              <rect x="1.5" y="4" width="13" height="8" rx="1.5" />
+              <path d="M4 7.5h8M4 9.5h5" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -70,6 +87,7 @@
                        :selection-mode="selectionMode"
                        :selected-ids="selectedIds"
                        :show-filename="showFilenames"
+                       :show-scene="showScene"
                        @open="onOpen"
                        @menu-action="onGridMenuAction"
                        @toggle-select="onToggleSelect" />
@@ -322,6 +340,10 @@ const gridComponent = computed(() =>
 const SHOW_FILENAMES_KEY = "browse.grid.showFilenames"
 const showFilenames = ref(localStorage.getItem(SHOW_FILENAMES_KEY) === "1")
 watch(showFilenames, (v) => localStorage.setItem(SHOW_FILENAMES_KEY, v ? "1" : "0"))
+
+const SHOW_SCENE_KEY = "browse.grid.showScene"
+const showScene = ref(localStorage.getItem(SHOW_SCENE_KEY) === "1")
+watch(showScene, (v) => localStorage.setItem(SHOW_SCENE_KEY, v ? "1" : "0"))
 
 // ---------- selection mode ----------
 

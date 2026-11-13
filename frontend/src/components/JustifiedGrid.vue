@@ -11,6 +11,9 @@
                  :selection-mode="selectionMode"
                  :show-menu="isAdmin && !selectionMode"
                  :show-filename="showFilename"
+                 :show-scene="showScene"
+                 :scene-major="itemById.get(cell.id)?.scene_major ?? null"
+                 :scene-minor="itemById.get(cell.id)?.scene_minor ?? null"
                  :cell-style="{ width: `${cell.scaledW}px`, height: `${cell.scaledH}px` }"
                  :badge="badgeFor ? badgeFor(itemById.get(cell.id)!) ?? undefined : undefined"
                  @activate="onCellClick(cell.id)"
@@ -42,6 +45,8 @@ const props = defineProps<{
   selectedIds?: Set<number>
   /** 在缩略图底部渐变阴影上叠加文件名 */
   showFilename?: boolean
+  /** 在缩略图底部渐变阴影上叠加场景标签 */
+  showScene?: boolean
   /** 搜索结果用：把图片映射成角标文本（所在目录）；不传则无角标 */
   badgeFor?: (item: ImageRow) => string | null
 }>()

@@ -17,10 +17,14 @@
            class="h-full w-full object-cover" />
     </button>
     <!-- 文件名开关：底部渐变阴影上居中显示文件名；不拦截点击 -->
-    <div v-if="showFilename"
-         class="lb-cell-filename pointer-events-none truncate text-center"
-         :title="filename">
-      {{ filename }}
+    <div v-if="showFilename || showScene"
+         class="lb-cell-filename pointer-events-none flex items-end justify-between gap-1 px-1"
+         :class="{ 'lb-cell-filename--solo': !showFilename }">
+      <span v-if="showFilename" class="truncate" :title="filename">{{ filename }}</span>
+      <span v-if="showFilename" class="flex-1"></span>
+      <span v-if="showScene && sceneLabel"
+            class="shrink-0 rounded bg-black/50 px-1 text-[10px] text-white/90"
+            :title="sceneLabel">{{ sceneLabel }}</span>
     </div>
     <div v-if="badge"
          class="lb-cell-badge pointer-events-none truncate text-left"
@@ -58,6 +62,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue"
+
 const props = defineProps<{
   id: number
   sha1: string
@@ -68,11 +74,22 @@ const props = defineProps<{
   showMenu?: boolean
   /** 是否在底部渐变阴影上叠加文件名 */
   showFilename?: boolean
+  /** 是否在底部渐变阴影上叠加场景标签（一级/二级） */
+  showScene?: boolean
+  /** tags：场景一级分类 */
+  sceneMajor?: string | null
+  /** tags：场景二级分类 */
+  sceneMinor?: string | null
   /** 单元格尺寸/定位样式：行排版给宽高，列排版给 grid-row span */
   cellStyle?: Record<string, string | number>
   /** 搜索结果：所在目录小字（posix 目录路径）；root 图片与普通浏览不传 */
   badge?: string
 }>()
+
+const sceneLabel = computed(() => {
+  if (!props.sceneMajor) return ""
+  return props.sceneMinor ? `${props.sceneMajor}/${props.sceneMinor}` : props.sceneMajor
+})
 
 const emit = defineEmits<{
   (e: "activate"): void
@@ -124,6 +141,10 @@ function onTouchEnd() {
   font-size: 11px;
   line-height: 1.3;
   /* truncate / text-center 由工具类提供；超长省略号，hover 看 title 全名 */
+}
+.lb-cell-filename--solo {
+  padding-left: 4px;
+  padding-right: 4px;
 }
 .lb-cell-badge {
   position: absolute;
