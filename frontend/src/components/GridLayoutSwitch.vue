@@ -6,7 +6,7 @@
             type="button"
             class="flex min-h-11 min-w-11 items-center rounded-md px-2.5 py-1"
             :class="modelValue === opt.value
-                    ? 'bg-surface-3 text-ink font-medium shadow-sm'
+                    ? 'bg-surface-4 text-ink shadow-sm ring-1 ring-line'
                     : 'text-ink-2 transition-colors hover:text-ink'"
             :title="opt.label"
             :aria-label="opt.label"
