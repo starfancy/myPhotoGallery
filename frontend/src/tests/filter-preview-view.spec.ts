@@ -130,6 +130,45 @@ describe("FilterPreviewView", () => {
     expect(w.find("section.fp-strip").attributes("style")).toBe("display: none;")
   })
 
+  it("竖版图片的小样 viewport 保持源图宽高比，不被拉伸", async () => {
+    // 改用竖版 3:4 的 Image mock；结束后恢复文件级横版 mock
+    vi.stubGlobal("Image", class {
+      onload: (() => void) | null = null
+      set src(_url: string) {
+        queueMicrotask(() => {
+          ;(this as unknown as { width: number }).width = 300
+          ;(this as unknown as { height: number }).height = 400
+          this.onload?.()
+        })
+      }
+    })
+    try {
+      mount(FilterPreviewView)
+      await flushPromises()
+      await flushPromises()
+      // 小样 renderer 是第二个实例（主 renderer 之后在 renderThumbs 中创建）
+      const thumb = instances()[1] as unknown as {
+        setViewport: ReturnType<typeof vi.fn>
+      }
+      expect(thumb).toBeTruthy()
+      const [w, h] = thumb.setViewport.mock.calls[0]
+      expect(h).toBe(128) // 竖版以高度 128 为约束
+      expect(w).toBe(96) // 128 × 300/400 = 96
+      expect(w / h).toBeCloseTo(300 / 400, 2)
+    } finally {
+      vi.stubGlobal("Image", class {
+        onload: (() => void) | null = null
+        set src(_url: string) {
+          queueMicrotask(() => {
+            ;(this as unknown as { width: number }).width = 1600
+            ;(this as unknown as { height: number }).height = 1000
+            this.onload?.()
+          })
+        }
+      })
+    }
+  })
+
   it("shows fallback when renderer constructor throws", async () => {
     vi.spyOn(lutMod, "LutRenderer").mockImplementationOnce(() => {
       throw new Error("WebGL2 not available")

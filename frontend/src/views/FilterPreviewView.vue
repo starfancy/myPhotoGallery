@@ -282,18 +282,25 @@ onMounted(async () => {
   await renderThumbs()
 })
 
-/** 离屏 192×128 小 canvas + 独立第二个 LutRenderer 渲小样。
+/** 离屏小 canvas + 独立第二个 LutRenderer 渲小样。
+ *  buffer 按源图宽高比拟合进 192×128 盒内（等比缩放，不拉伸），
+ *  显示端 .fp-thumb img 的 object-fit:cover 再做居中裁剪；
  *  本地模式 onMounted 时 lastImg 还是 null，由 onPickLocal 选图后补调。 */
 async function renderThumbs() {
   if (cancelled || !renderer || !lastImg) return
+  const srcW = lastImg.naturalWidth || lastImg.width
+  const srcH = lastImg.naturalHeight || lastImg.height
+  const scale = Math.min(192 / srcW, 128 / srcH)
+  const tw = Math.max(1, Math.round(srcW * scale))
+  const th = Math.max(1, Math.round(srcH * scale))
   const thumbCanvas = document.createElement("canvas")
-  thumbCanvas.width = 192
-  thumbCanvas.height = 128
+  thumbCanvas.width = tw
+  thumbCanvas.height = th
   let thumbRenderer: LutRenderer | null = null
   try {
     thumbRenderer = new LutRenderer(thumbCanvas)
     thumbRenderer.setImage(lastImg)
-    thumbRenderer.setViewport(192, 128)
+    thumbRenderer.setViewport(tw, th)
     for (const f of filters.value) {
       if (cancelled) break
       const lut = lutCache.get(f.id)
