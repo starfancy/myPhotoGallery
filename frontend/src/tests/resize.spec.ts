@@ -3,6 +3,7 @@ import {
   RESIZE_STEP,
   clampHeight,
   draggedHeight,
+  draggedWidth,
   steppedHeight,
 } from "../lib/resize"
 
@@ -23,6 +24,13 @@ describe("resize helpers", () => {
     expect(draggedHeight(200, 300, 280)).toBe(220)
     // 下移 30 → 高度 -30
     expect(draggedHeight(200, 300, 330)).toBe(170)
+  })
+
+  it("draggedWidth：竖向右缘手柄右移加宽、左移变窄", () => {
+    // currentX 比 startX 大 20（右移）→ 宽度 +20
+    expect(draggedWidth(200, 300, 320)).toBe(220)
+    // 左移 30 → 宽度 -30
+    expect(draggedWidth(200, 300, 270)).toBe(170)
   })
 
   it("steppedHeight：按 RESIZE_STEP 步进并在边界钳制", () => {

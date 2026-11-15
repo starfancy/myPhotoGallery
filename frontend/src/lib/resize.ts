@@ -25,3 +25,12 @@ export function steppedHeight(
 ): number {
   return clampHeight(current + dir * RESIZE_STEP, min, max)
 }
+
+/** 竖向右缘手柄：指针右移（currentX > startX）时侧栏加宽。 */
+export function draggedWidth(
+  startWidth: number,
+  startX: number,
+  currentX: number,
+): number {
+  return startWidth + (currentX - startX)
+}
