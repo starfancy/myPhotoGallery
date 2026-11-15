@@ -16,12 +16,16 @@
            :alt="filename"
            class="h-full w-full object-cover" />
     </button>
-    <!-- 文件名/场景标签：单独显示时居中；同时显示时文件名左、场景右 -->
+    <!-- 文件名/场景标签：单独显示时居中；同时显示时文件名左、场景右。
+         文件名与位置角标同时出现时加高单层渐变，覆盖角标行（--tall）。 -->
     <div v-if="showFilename || (showScene && sceneLabel)"
          class="lb-cell-filename pointer-events-none"
-         :class="(showFilename && showScene && sceneLabel)
-                 ? 'flex items-end justify-between gap-1 px-1'
-                 : 'text-center'">
+         :class="[
+           (showFilename && showScene && sceneLabel)
+             ? 'flex items-end justify-between gap-1 px-1'
+             : 'text-center',
+           showFilename && badge ? 'lb-cell-filename--tall' : '',
+         ]">
       <template v-if="showFilename">
         <span class="truncate" :title="filename">{{ filename }}</span>
         <span v-if="showScene && sceneLabel" class="flex-1"></span>
@@ -161,8 +165,14 @@ function onTouchEnd() {
   line-height: 1.2;
 }
 .lb-cell-badge--up {
-  /* 同时显示文件名时，目录行抬到文件名行之上 */
+  /* 同时显示文件名时，目录行抬到文件名行之上；
+     不再自绘渐变，与文件名层共用同一条，避免双渐变带 */
   bottom: 15px;
+  background: none;
+}
+.lb-cell-filename--tall {
+  /* 单层渐变加高，覆盖上方位置角标行（角标文字约在 18–30px 高度区间） */
+  padding-top: 34px;
 }
 .lb-cell-menu-btn {
   position: absolute;
