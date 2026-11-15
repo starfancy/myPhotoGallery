@@ -19,6 +19,7 @@ from myphoto.errors import AppError
 from myphoto.models import (
     FaceCluster,
     FaceEmbedding,
+    Gallery,
     GalleryRoot,
     Image,
     User,
@@ -158,16 +159,18 @@ async def cluster_images(
             return {"groups": [], "total": 0}
 
         rows = (await s.execute(
-            select(Image)
+            select(Image, GalleryRoot, Gallery)
+            .join(GalleryRoot, GalleryRoot.id == Image.root_id)
+            .join(Gallery, Gallery.id == GalleryRoot.gallery_id)
             .where(Image.id.in_(image_ids))
             .order_by(Image.taken_at.desc().nullslast(), Image.id.desc())
             .limit(limit)
-        )).scalars().all()
+        )).all()
 
         # 按年/月分桶（taken_at 缺失 → 未知组，§8.7；不回退 mtime，
         # 因为 mtime 是文件系统时间，不是拍摄时间，按月分组会误导）
         groups: dict[tuple[int, int], list[dict]] = {}
-        for img in rows:
+        for img, root, gallery in rows:
             if img.taken_at:
                 lt = time.localtime(img.taken_at)
                 key = (lt.tm_year, lt.tm_mon)
@@ -180,6 +183,16 @@ async def cluster_images(
                 "height": img.height,
                 "sha1": img.sha1,
                 "taken_at": img.taken_at,
+                "size_bytes": img.size_bytes,
+                "mtime": img.mtime,
+                "is_raw": bool(img.is_raw),
+                "scene_major": img.scene_major,
+                "scene_minor": img.scene_minor,
+                "gallery_id": gallery.id,
+                "root_id": root.id,
+                "gallery_name": gallery.name,
+                # "2024/a.jpg" → "2024"；根目录 "a.jpg" → ""
+                "folder_path": img.relative_path.rpartition("/")[0],
             }
             groups.setdefault(key, []).append(item)
 

@@ -154,3 +154,62 @@ def test_cluster_not_found(client):
     c, _gid, _rid = client
     assert c.get("/api/tags/clusters/P999/images").status_code == 404
     assert c.put("/api/tags/clusters/P999", json={"display_name": "x"}).status_code == 404
+
+
+def test_cluster_images_include_lightbox_and_location_fields(client):
+    """图片项包含灯箱所需 ImageRow 字段与图库/位置字段；夹具图片都在 root 根。"""
+    c, gid, rid = client
+    body = c.get("/api/tags/clusters/P001/images").json()
+    # 分组按 (年,月) 倒序，第一个分组是 2024-01 的 a.jpg
+    img = body["groups"][0]["images"][0]
+    assert img["filename"] == "a.jpg"
+    # 与浏览接口 _image_payload 对齐的灯箱字段
+    assert img["size_bytes"] == 100
+    assert isinstance(img["mtime"], int)
+    assert img["is_raw"] is False
+    assert img["scene_major"] is None
+    assert img["scene_minor"] is None
+    # 位置字段
+    assert img["gallery_id"] == gid
+    assert img["root_id"] == rid
+    assert img["gallery_name"] == "G"
+    assert img["folder_path"] == ""
+
+
+def test_cluster_images_folder_path_uses_directory_part(client):
+    """子目录图片的 folder_path 是 relative_path 的目录部分；根目录图片为空串。"""
+    c, _gid, _rid = client
+    app = c.app
+
+    async def _add_subfolder_face():
+        from sqlalchemy import select
+        from myphoto.models import FaceEmbedding, Folder, GalleryRoot, Image
+
+        async with app.state.sessionmaker() as s:
+            root = (await s.execute(select(GalleryRoot))).scalar_one()
+            sub = Folder(
+                root_id=root.id, relative_path="sub", name="sub",
+                image_count=1, descendant_count=1,
+            )
+            s.add(sub)
+            await s.flush()
+            img = Image(
+                root_id=root.id, folder_id=sub.id,
+                relative_path="sub/x.jpg", filename="x.jpg", ext="jpg",
+                size_bytes=100, sha1="sha_x", mtime=int(time.time()),
+                taken_at=1704067200, indexed_at=int(time.time()),
+            )
+            s.add(img)
+            await s.flush()
+            s.add(FaceEmbedding(
+                image_id=img.id, face_index=0, bbox="[0,0,10,10]",
+                embedding=b"\x00" * 20, confidence=0.9,
+                cluster_id="P001", model_version="v1", created_at=int(time.time()),
+            ))
+            await s.commit()
+
+    c.portal.call(_add_subfolder_face)
+    body = c.get("/api/tags/clusters/P001/images").json()
+    by_name = {im["filename"]: im for g in body["groups"] for im in g["images"]}
+    assert by_name["x.jpg"]["folder_path"] == "sub"
+    assert by_name["a.jpg"]["folder_path"] == ""
