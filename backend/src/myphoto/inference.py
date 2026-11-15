@@ -61,9 +61,24 @@ def preload_cuda_dlls() -> None:
     显式传 providers 建会话不会触发 ORT/insightface 内部的默认预加载，
     因此 cuda 计划必须自己调一次：它会从 pip 的 nvidia-* 包目录
     （site-packages/nvidia/*/bin）、PyTorch 自带库目录及系统 PATH 查找
-    CUDA 12.x / cuDNN 9.x。ORT 约定缺失的 cuDNN 库只忽略、不报错；
-    老版本 ORT 没有该 API 时静默跳过。
+    CUDA / cuDNN DLL。ORT 约定缺失的 cuDNN 库只忽略、不报错；老版本
+    ORT 没有该 API 时静默跳过。
+
+    若系统 PATH 已能解析 CUDA 运行库（典型：系统级 Toolkit 安装，如
+    ``C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.5\\bin``），
+    标准 DLL 搜索即可让会话正常加载，此时跳过预加载——preload_dlls 不认识
+    这类安装位置，强行调用只会刷 "Failed to load ... cublas64_*.dll" 警告。
     """
+    import shutil
+    import sys
+
+    if sys.platform == "win32":
+        runtime_names = ("cudart64_13.dll", "cudart64_12.dll")
+    else:
+        runtime_names = ("libcudart.so.13", "libcudart.so.12")
+    if any(shutil.which(name) for name in runtime_names):
+        return
+
     import onnxruntime as ort
 
     preload = getattr(ort, "preload_dlls", None)

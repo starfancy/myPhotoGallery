@@ -282,30 +282,43 @@ transformers、numpy）。注意点：
   pip install onnxruntime-gpu
   ```
 
-- **系统前置**：NVIDIA 驱动与 CUDA 12.x 运行库（cudart、cuBLAS）。
-  cuDNN 9 推荐直接装 pip 包，无需手工配 PATH：
+- **系统前置**：NVIDIA 驱动与 CUDA 运行库（cudart、cuBLAS），版本由
+  onnxruntime-gpu wheel 决定——看它搜索的 DLL 名后缀即可判断：
+  `cudart64_12.dll` = CUDA 12 构建，`cudart64_13.dll` = CUDA 13 构建
+  （ORT 1.31 的 GPU wheel 已是 CUDA 13 目标，配 CUDA Toolkit 13.x）。
+  两种安装方式任选：
 
-  ```bash
-  pip install nvidia-cudnn-cu12
-  ```
+  1. **系统级 Toolkit（Windows 常见）**：官网装 CUDA Toolkit，确保其
+     `bin` 目录在 PATH 中（路径含 "Program Files" 等空格没有问题）。
+     程序检测到 PATH 能解析 cudart 后会跳过 ORT 自带预加载，直接走
+     标准 DLL 搜索。
+  2. **纯 pip 环境（无系统 Toolkit）**：按需安装
+     `nvidia-cuda-runtime-cu12`、`nvidia-cublas-cu12`、
+     `nvidia-cudnn-cu12`（CUDA 13 环境把包名后缀换成 `-cu13`）；打标器
+     创建 CUDA 会话前调用 ORT 的 `preload_dlls()` 自动从
+     `site-packages/nvidia/*/bin` 加载（显式指定 providers 时 ORT 不会
+     自己预加载，所以这一步由程序完成）。
 
-  它把 `cudnn64_9.dll` 等装入 `site-packages/nvidia/cudnn/bin/`；打标器
-  在创建 CUDA 会话前会调用 ORT 的 `preload_dlls()` 自动从该目录加载
-  （显式指定 providers 时 ORT 不会自己预加载，所以这一步由程序完成）。
-  也可以从 NVIDIA 官网安装系统级 cuDNN 9 并把其 `bin` 目录加入 PATH。
-  注意 **CUDA Toolkit 不包含 cuDNN**，二者是官网的两个独立下载项；
-  若 CUDA EP 已能初始化（日志出现 Memcpy nodes）而只报
-  `cudnn64_9.dll` 缺失，说明 Toolkit / CUDA 运行库已就位，仅缺 cuDNN。
-  若主机连 CUDA 运行库都是 pip 方式管理的，按需再装
-  `nvidia-cublas-cu12`、`nvidia-cuda-runtime-cu12`。
-- **常见报错排查**：
+  cuDNN 与 Toolkit 是两个独立下载项（**Toolkit 不含 cuDNN**），同样
+  可二选一：pip 装 `nvidia-cudnn-cu12`（或 `-cu13`），或官网装系统级
+  cuDNN 9（DLL 名 `cudnn64_9.dll`）并把 `bin` 加入 PATH。
+- **常见报错与日志排查**：
 
   - `LoadLibrary failed for cudnn64_9.dll with error 2`：找不到 cuDNN 9
-    （error 2 = 文件不存在）。按上面装 `nvidia-cudnn-cu12` 即可；装完
-    仍报错时确认该包与 onnxruntime-gpu 在同一个虚拟环境内。
-  - 启动日志的 `4 Memcpy nodes are added to the graph ... for
-    CUDAExecutionProvider` 只是提示（CPU/GPU 间拷贝节点），batch=1 的
-    打标场景可忽略，不影响正确性。
+    （error 2 = 文件不存在），按上面任一方式安装即可。
+  - `Failed to load cublas64_13.dll / cudart64_13.dll ... Please follow
+    https://onnxruntime.ai/...`：这是 `preload_dlls()` 在 pip 包目录里
+    没找到库时的提示；若你用的是系统级 Toolkit 且 PATH 配置正确，会话
+    仍会经标准 DLL 搜索正常加载——随后日志出现 `Memcpy nodes` 且
+    `tag status` 显示 cuda 即证明实际可用。新版本程序检测到 PATH 上的
+    cudart 后会直接跳过预加载，不再打印这组提示。
+  - `4 Memcpy nodes are added to the graph ... for
+    CUDAExecutionProvider` 与 `No registered plugin EP device found ...
+    device_id=0`：均为 ORT 的一次性提示（拷贝节点 / 插件式 EP 注册
+    日志），batch=1 打标场景可忽略，不影响正确性。
+  - 确认 GPU 真的在工作：bench 脚本打印的各会话 providers 含
+    `CUDAExecutionProvider`，且同机 `TAGGER_DEVICE=cpu` 与默认
+    （cuda/auto）两次跑出来的耗时有明显差距。
 - **启用配置**：`config.toml` 的 `[tagging]` 段设 `device = "cuda"`；
   保持默认 `auto` 时，探测到 `CUDAExecutionProvider` 也会自动启用。
 - **额外模型文件**：cuda 计划需要 `backend/models/clip-onnx/visual.onnx`

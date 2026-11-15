@@ -1,5 +1,8 @@
 """inference 设备/provider 决策纯函数（不加载任何模型）。"""
 
+import shutil
+
+import onnxruntime as ort
 import pytest
 
 from myphoto.inference import (
@@ -56,7 +59,25 @@ def test_resolve_backend_explicit_cuda_missing_raises():
         resolve_backend("cuda", ["CPUExecutionProvider"])
 
 
-def test_preload_cuda_dlls_ignores_missing_libraries():
-    # 本机（CI/无 GPU）没有 CUDA/cuDNN DLL：ORT 约定缺失库忽略而非报错，
-    # 调用必须安全返回；老版本 ORT 无 preload_dlls API 时同样静默跳过。
+def test_preload_cuda_dlls_ignores_missing_libraries(monkeypatch):
+    # 本机（CI/无 GPU）PATH 上没有 CUDA 运行库，会真实调用 ORT 预加载；
+    # ORT 约定缺失库忽略而非报错，调用必须安全返回。
     preload_cuda_dlls()
+
+
+def test_preload_skips_ort_call_when_cuda_runtime_resolvable_on_path(monkeypatch):
+    # 系统级 Toolkit（如 CUDA v13.5 装在 Program Files）已在 PATH：
+    # 标准 DLL 加载即可工作，跳过 preload 避免 "Failed to load" 噪音。
+    monkeypatch.setattr(shutil, "which", lambda name: f"C:/fake/{name}")
+    calls = []
+    monkeypatch.setattr(ort, "preload_dlls", lambda: calls.append(1))
+    preload_cuda_dlls()
+    assert calls == []
+
+
+def test_preload_calls_ort_when_no_cuda_runtime_on_path(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    calls = []
+    monkeypatch.setattr(ort, "preload_dlls", lambda: calls.append(1))
+    preload_cuda_dlls()
+    assert calls == [1]
