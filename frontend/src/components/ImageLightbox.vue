@@ -956,7 +956,7 @@ watch(
 }
 
 /* 搜索/人物灯箱专属：路径标注底部居中（仅传入 locationResolver 时才注册）。
-   bottom 44px 抬高一档，避开左下拍摄时间与右下缩放比例两个贴底胶囊。 */
+   窄屏抬高到 44px，避开左下拍摄时间与右下缩放比例两个贴底胶囊。 */
 .pswp__location-label {
   position: absolute;
   left: 50%;
@@ -974,6 +974,13 @@ watch(
   white-space: nowrap;
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
   user-select: none;
+}
+
+/* 桌面端（md 断点 768px 起）：与拍摄时间、缩放比例胶囊对齐到同一基线 */
+@media (min-width: 768px) {
+  .pswp__location-label {
+    bottom: 10px;
+  }
 }
 
 /* ---- 右下角显示比例 ---- */
