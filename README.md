@@ -191,7 +191,12 @@ The Python dependencies install with the normal `pip install -e ".[dev]"`
 (NumPy, OpenVINO, onnxruntime, InsightFace, OpenCV, Transformers). Two
 caveats: **`openvino` is pinned to 2024.6.0** — newer 2026.x releases break
 its API — and do not install `optimum`, which pulls in an incompatible
-OpenVINO.
+OpenVINO. PyTorch is intentionally **not** a dependency: inference runs on
+OpenVINO/onnxruntime and Transformers is used only for `CLIPProcessor`
+(PIL/numpy preprocessing). On a torch-free host Transformers prints an
+advisory `PyTorch was not found …` warning at import — it is harmless, the
+tagger suppresses it automatically, and installing torch (a multi-GB CUDA
+wheel) just to silence it is unnecessary.
 
 The model weights themselves are **not tracked by git** (about **900 MB** in
 total). Place them under `[tagging] models_dir` (default `backend/models/`,
@@ -219,7 +224,9 @@ files come from the official InsightFace model zoo (same source as the
 Device selection is automatic: OpenVINO uses a GPU when one is exposed
 (validated on an Intel i5-11320H with Iris Xe) and otherwise falls back to
 CPU; the face detector and recognition model always run on CPU via
-onnxruntime (there is no CUDA dependency). Reference throughput on that
+onnxruntime. There is no CUDA execution path today: on an NVIDIA-only host
+(e.g. an RTX 3060 machine without an Intel iGPU) every model runs on CPU and
+the NVIDIA GPU stays unused. Reference throughput on that
 hardware: about 350 ms per photo including decode and disk IO — a 2,923-photo
 library tagged in 17 minutes with zero failures (576 faces → 269 clusters),
 i.e. roughly an hour per 10k photos; CPU-only works but is slower. Models

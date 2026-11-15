@@ -252,10 +252,17 @@ Caddy 在各发行版上有官方安装包，安装后通常自带 systemd servi
 
 打标依赖已写入 `pyproject.toml`，随 `pip install -e ".[dev]"` 一并
 安装（openvino、onnxruntime、insightface、opencv-python、
-transformers、numpy）。三个注意点：
+transformers、numpy）。注意点：
 
 - **openvino 锁定 2024.6.0**：2026.x 版本 API 不兼容，不要手动升级。
 - **不要安装 optimum**：它会连带升级 openvino，破坏运行环境。
+- **不需要、也不要安装 PyTorch**：推理全部走 OpenVINO / onnxruntime，
+  transformers 只用于 `CLIPProcessor` 的 PIL/numpy 预处理，运行时不
+  加载任何 HF 模型类。无 torch 环境下 transformers 会打印
+  `PyTorch was not found. Models won't be available ...` 的 advisory
+  警告——这只是提示而非报错，打标照常工作，tagger 已通过官方环境变量
+  `TRANSFORMERS_NO_ADVISORY_WARNINGS` 自动抑制它；为消除警告而安装
+  torch（CUDA 版 wheel 数 GB）没有必要。
 - 国内网络拉取大 wheel 超时时，改用阿里镜像：
 
   ```bash
@@ -321,6 +328,11 @@ models_dir = "backend/models"
 - 设备自动选择：OpenVINO 探测到 GPU 就用 GPU（已在 Intel
   i5-11320H + Iris Xe 核显上验证），否则回退 CPU；人脸检测与识别
   固定走 onnxruntime 的 CPU provider，**不依赖 CUDA / NVIDIA 显卡**。
+- **NVIDIA 显卡（如 RTX 3060）当前不会被调用**：pip 版 OpenVINO 只
+  带 Intel 设备插件，在 N 卡主机上回退 CPU；onnxruntime 也固定使用
+  CPU provider。即 N 卡主机上打标功能完全可用，但全部模型跑在 CPU
+  上、速度较慢。启用 CUDA 需要改造打标后端（onnxruntime-gpu +
+  CUDAExecutionProvider，CLIP 还需额外导出 ONNX），属未实现的规划项。
 - 参考性能（上述 i5 + 核显）：含解码与磁盘 IO 稳态约 350ms / 张，
   2923 张全量 17 分钟、0 失败（576 张脸聚成 269 簇），折合万张
   约 1 小时；纯 CPU 可用但更慢，请预留更宽裕的时间窗。

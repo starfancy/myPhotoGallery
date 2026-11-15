@@ -175,9 +175,14 @@ myphoto tag gc [--include-named]                                # 清理孤儿�
 ### 模型部署要求
 
 Python 依赖随常规的 `pip install -e ".[dev]"` 一并安装（NumPy、
-OpenVINO、onnxruntime、InsightFace、OpenCV、Transformers）。两个
+OpenVINO、onnxruntime、InsightFace、OpenCV、Transformers）。三个
 注意点：**`openvino` 锁定 2024.6.0**——2026.x 版本 API 不兼容；
-**不要安装 `optimum`**，它会连带升级 OpenVINO 破坏环境。
+**不要安装 `optimum`**，它会连带升级 OpenVINO 破坏环境；**故意不
+依赖 PyTorch**——推理全部走 OpenVINO / onnxruntime，Transformers 只
+承担 `CLIPProcessor` 的 PIL/numpy 预处理。无 torch 环境下
+Transformers 会在 import 时打印 `PyTorch was not found …` 的 advisory
+警告，不影响运行，tagger 已自动抑制该提示，不要为消除警告去装 torch
+（CUDA 版 wheel 达数 GB）。
 
 模型权重本身**不进 git**，总计约 **900 MB**。请按下面的确切目录
 结构放到 `[tagging] models_dir` 指向的位置（默认 `backend/models/`，
@@ -203,7 +208,9 @@ OpenVINO IR；两个 InsightFace 文件来自 InsightFace 官方模型库
 
 设备自动选择：OpenVINO 探测到 GPU 就用 GPU（已在 Intel i5-11320H +
 Iris Xe 上验证），否则回退 CPU；人脸检测与识别固定通过 onnxruntime
-跑在 CPU 上，不依赖 CUDA。参考性能（上述 i5 + 核显）：含解码与磁盘
+跑在 CPU 上。当前**没有 CUDA 执行路径**：在只有 N 卡的主机上（例如
+RTX 3060 且无 Intel 核显），所有模型都跑 CPU，NVIDIA 显卡不会被
+调用。参考性能（上述 i5 + 核显）：含解码与磁盘
 IO 稳态约 350ms / 张——2923 张图库全量 17 分钟、0 失败（576 张脸
 聚成 269 簇），折合万张约 1 小时；纯 CPU 可用但更慢。模型首次使用
 时才懒加载并常驻内存，启动 web 服务本身不会加载模型。

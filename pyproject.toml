@@ -17,6 +17,9 @@ dependencies = [
   "click>=8.1",
   # 智能标签（tags upgrade Phase 1）。openvino 锁 2024.6.0（2026.x API 不兼容）；
   # 不要装 optimum（会升级 openvino 破坏环境）。模型文件本身不进 git。
+  # 故意不依赖 torch：推理走 OpenVINO/onnxruntime，transformers 仅用
+  # CLIPProcessor（numpy 路径）；无 torch 时 transformers 的 advisory 警告
+  # 已在 tagger.py 用 TRANSFORMERS_NO_ADVISORY_WARNINGS 抑制。
   "numpy>=1.26",
   "openvino==2024.6.0",
   "onnxruntime>=1.31",

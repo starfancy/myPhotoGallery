@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -212,6 +213,11 @@ class Tagger:
             raise RuntimeError(f"tagger models missing: {missing}")
 
         from openvino.runtime import Core  # heavy import
+        # 本项目只用 CLIPProcessor 的 PIL/numpy 预处理路径，不实例化任何 HF
+        # 模型类，因此运行时不需要 PyTorch。未装 torch 时 transformers 会在
+        # import 期打 advisory 警告（"PyTorch was not found. Models won't be
+        # available ..."），用官方环境变量抑制；setdefault 保留用户覆盖权。
+        os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
         from transformers import CLIPProcessor
 
         md = self.models_dir
