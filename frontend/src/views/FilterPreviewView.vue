@@ -1,5 +1,5 @@
 <template>
-  <div class="fp-page">
+  <div class="fp-page" :class="{ 'is-resizing': dragging }">
     <header class="fp-topbar">
       <span class="fp-name">{{ name || (isLocal ? "本地图片（未选择）" : "") }}</span>
       <input ref="fileInputEl" type="file" accept="image/*" @change="onPickLocal" hidden />
@@ -48,7 +48,23 @@
       >{{ stripOpen ? "▲ 收起" : "▼ 滤镜" }}</button>
     </section>
 
-    <section v-show="stripOpen" class="fp-strip">
+    <section v-show="stripOpen" class="fp-strip" ref="stripEl" :style="stripStyle">
+      <div
+        class="fp-resize-handle"
+        :class="{ active: dragging }"
+        role="separator"
+        tabindex="0"
+        aria-label="调节滤镜列表高度"
+        aria-orientation="horizontal"
+        :aria-valuenow="ariaNow"
+        :aria-valuemin="minHeight ?? 0"
+        :aria-valuemax="maxHeight"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+        @pointercancel="onPointerUp"
+        @keydown="onKeydown"
+      ></div>
       <div v-for="g in groups" :key="g.group" class="fp-group">
         <div class="fp-group-label">{{ groupLabel(g.group) }}</div>
         <div class="fp-group-items">
@@ -69,9 +85,10 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue"
+import { computed, onMounted, onUnmounted, ref } from "vue"
 import { useRoute } from "vue-router"
 import { LutRenderer } from "../lib/lutRenderer"
+import { clampHeight, draggedHeight, steppedHeight } from "../lib/resize"
 import { parseCube } from "../lib/lutParser"
 import type { LutData } from "../lib/lutParser"
 import { groupLabel } from "../lib/lutGroups"
@@ -97,6 +114,92 @@ const activeId = ref<string | null>(null)
 const mixPct = ref(0)
 const stripOpen = ref(true)
 const downloadingOriginal = ref(false)
+
+// ---- 滤镜条可调高度 ----
+const stripEl = ref<HTMLElement | null>(null)
+/** null = 未手动调节，沿用 CSS 默认 max-height；数字 = 显式像素高度 */
+const stripHeight = ref<number | null>(null)
+const minHeight = ref<number | null>(null)
+const dragging = ref(false)
+const maxHeight = computed(() => Math.round(window.innerHeight / 2))
+// 显式高度必须同时覆盖 CSS 默认的 max-height:280px，否则 >280 的拖拽结果被钳回去
+const stripStyle = computed(() =>
+  stripHeight.value === null
+    ? {}
+    : { height: `${stripHeight.value}px`, maxHeight: "50vh" },
+)
+const ariaNow = computed(() =>
+  stripHeight.value === null ? undefined : Math.round(stripHeight.value),
+)
+
+/** 首次交互时实测一行（组标题+缩略图行）所需最小高度，只算一次。 */
+function ensureMin(): number {
+  if (minHeight.value !== null) return minHeight.value
+  const strip = stripEl.value
+  const group = strip?.querySelector<HTMLElement>(".fp-group")
+  if (!strip || !group) {
+    minHeight.value = 120
+    return minHeight.value
+  }
+  const cs = getComputedStyle(strip)
+  // || 0 兜底：jsdom 不解析 scoped CSS 时 padding 返回空串
+  const pt = parseInt(cs.paddingTop, 10) || 0
+  const pb = parseInt(cs.paddingBottom, 10) || 0
+  minHeight.value = group.offsetHeight + pt + pb
+  return minHeight.value
+}
+
+let dragStartY = 0
+let dragStartH = 0
+
+function onPointerDown(e: PointerEvent) {
+  const min = ensureMin()
+  const max = maxHeight.value
+  dragStartY = e.clientY
+  dragStartH = clampHeight(
+    stripHeight.value ?? stripEl.value!.getBoundingClientRect().height,
+    min,
+    max,
+  )
+  stripHeight.value = dragStartH
+  dragging.value = true
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+
+function onPointerMove(e: PointerEvent) {
+  if (!dragging.value) return
+  stripHeight.value = clampHeight(
+    draggedHeight(dragStartH, dragStartY, e.clientY),
+    ensureMin(),
+    maxHeight.value,
+  )
+}
+
+function onPointerUp(e: PointerEvent) {
+  if (!dragging.value) return
+  dragging.value = false
+  ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+}
+
+function onKeydown(e: KeyboardEvent) {
+  const min = ensureMin()
+  const max = maxHeight.value
+  const cur =
+    stripHeight.value ??
+    Math.round(stripEl.value!.getBoundingClientRect().height)
+  if (e.key === "ArrowUp") {
+    stripHeight.value = steppedHeight(cur, 1, min, max)
+  } else if (e.key === "ArrowDown") {
+    stripHeight.value = steppedHeight(cur, -1, min, max)
+  } else if (e.key === "Home") {
+    stripHeight.value = min
+  } else if (e.key === "End") {
+    stripHeight.value = max
+  } else {
+    return
+  }
+  e.preventDefault()
+}
 
 let renderer: LutRenderer | null = null
 let lastImg: HTMLImageElement | null = null
@@ -359,11 +462,36 @@ async function renderThumbs() {
 }
 .fp-controls button:disabled { opacity: 0.4; cursor: not-allowed; }
 .fp-strip {
+  position: relative; /* 手柄绝对定位的参照 */
   border-top: 1px solid #222;
   padding: 8px 16px 12px;
-  /* 两行缩略图 + 分组标题 + group 间距：约 280px */
-  max-height: 280px; overflow-y: auto;
+  /* 两行缩略图 + 分组标题 + group 间距：约 280px；小屏不超过半屏 */
+  max-height: min(280px, 50vh);
+  overflow-y: auto;
 }
+.fp-resize-handle {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 6px; /* 热区 */
+  cursor: row-resize;
+  touch-action: none; /* 触屏拖动不引发页面滚动 */
+  z-index: 2;
+}
+.fp-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 2px;
+  height: 2px; /* 视觉线 */
+  background: #444;
+}
+.fp-resize-handle:hover::after,
+.fp-resize-handle:focus-visible::after,
+.fp-resize-handle.active::after {
+  background: #3b82f6;
+}
+.fp-resize-handle:focus-visible { outline: none; }
+/* 拖拽期间禁止选中文本（在根节点切类，避免 :has 兼容问题） */
+.fp-page.is-resizing { user-select: none; }
 .fp-group { margin-bottom: 10px; }
 .fp-group:last-child { margin-bottom: 0; }
 .fp-group-label {
@@ -381,7 +509,7 @@ async function renderThumbs() {
 }
 .fp-thumb.active { border-color: #3b82f6; }
 .fp-thumb img {
-  width: 88px; height: 58px; object-fit: cover; border-radius: 4px;
+  width: 88px; height: 58px; object-fit: contain; border-radius: 4px;
   background: #333; display: block;
 }
 .fp-thumb-label {

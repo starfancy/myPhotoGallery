@@ -170,11 +170,67 @@ describe("FilterPreviewView", () => {
   })
 
   it("shows fallback when renderer constructor throws", async () => {
-    vi.spyOn(lutMod, "LutRenderer").mockImplementationOnce(() => {
+    // spy 必须 restore：否则 lutMod.LutRenderer 被替换成无静态 instances 的
+    // 包装函数，会让后续用例 beforeEach 的 instances().length=0 抛错
+    const spy = vi.spyOn(lutMod, "LutRenderer").mockImplementationOnce(() => {
       throw new Error("WebGL2 not available")
     })
-    const w = mount(FilterPreviewView)
-    await flushPromises()
-    expect(w.text()).toContain("WebGL2")
+    try {
+      const w = mount(FilterPreviewView)
+      await flushPromises()
+      expect(w.text()).toContain("WebGL2")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("滤镜条高度手柄：ARIA 语义齐全，键盘可调高度并钳制", async () => {
+    vi.stubGlobal("innerHeight", 800) // max = 400
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ height: 200 } as DOMRect)
+    const csSpy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockReturnValue({ paddingTop: "8px", paddingBottom: "12px" } as CSSStyleDeclaration)
+    try {
+      const w = mount(FilterPreviewView)
+      await flushPromises()
+      // 最小高度 = 组高 110 + 上下 padding 20 = 130
+      Object.defineProperty(w.get(".fp-group").element, "offsetHeight", {
+        value: 110,
+        configurable: true,
+      })
+
+      const handle = w.find(".fp-resize-handle")
+      expect(handle.exists()).toBe(true)
+      expect(handle.attributes("role")).toBe("separator")
+      expect(handle.attributes("tabindex")).toBe("0")
+      expect(handle.attributes("aria-orientation")).toBe("horizontal")
+      expect(handle.attributes("aria-label")).toBe("调节滤镜列表高度")
+
+      const strip = () => w.find("section.fp-strip")
+
+      // ↓：200 - 16 = 184
+      await handle.trigger("keydown", { key: "ArrowDown" })
+      expect(strip().attributes("style")).toContain("height: 184px")
+      expect(handle.attributes("aria-valuenow")).toBe("184")
+
+      // ↑：184 + 16 = 200
+      await handle.trigger("keydown", { key: "ArrowUp" })
+      expect(strip().attributes("style")).toContain("height: 200px")
+
+      // Home：最小实测值 130
+      await handle.trigger("keydown", { key: "Home" })
+      expect(strip().attributes("style")).toContain("height: 130px")
+
+      // End：50vh = 400
+      await handle.trigger("keydown", { key: "End" })
+      expect(strip().attributes("style")).toContain("height: 400px")
+      expect(strip().attributes("style")).toContain("max-height: 50vh")
+    } finally {
+      rectSpy.mockRestore()
+      csSpy.mockRestore()
+      vi.unstubAllGlobals()
+    }
   })
 })
