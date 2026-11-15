@@ -572,8 +572,10 @@ async function renderThumbs() {
 }
 .fp-side {
   flex: none;
-  /* 默认两列：缩略图 96×2 + 列间距 8 + 左右 padding 12×2 = 224px */
-  width: 224px;
+  /* 默认两列：缩略图 96×2 + 列间距 8 = 200，左右 padding 12×2 = 24，
+     另预留 ~24px 给垂直滚动条（overflow:auto 时滚动条占用内容区，
+     不预留会因可用宽度不足 200 而换行成一列），合计 248px */
+  width: 248px;
   max-width: 50vw;
   overflow-y: auto;
   border-right: 1px solid #222;

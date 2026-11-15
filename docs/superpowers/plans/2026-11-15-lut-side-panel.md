@@ -10,7 +10,8 @@
 
 ## Global Constraints
 
-- 侧栏默认宽 120px（96px 缩略图 + 左右 padding 12px×2），`max-width: 50vw`；最小宽实测首个 `.fp-thumb` offsetWidth + 左右 padding，回退 120；最大 `innerWidth/2`。
+- 侧栏默认宽 248px（两列：96×2 + gap 8 + padding 24 + 滚动条预留 ~24），`max-width: 50vw`；最小宽实测首个 `.fp-thumb` offsetWidth + 左右 padding（一列，约 120，回退 120）；最大 `innerWidth/2`。
+- 手柄是 `.fp-body` 的 flex 兄弟项、位于侧栏滚动条右侧（不是 aside 内的 absolute 元素）。详见文末「实施修订」。
 - 互斥：`sideOpen` 与 `stripOpen` 不得同时为真；初始 stripOpen=true、sideOpen=false。
 - 左按钮文案 `◀ 滤镜`（关）/ `▶ 收起`（开）；右按钮文案/样式/`data-test="strip-toggle"` 一字不改。
 - 宽度与模式不持久化；后端零改动；只本地 commit。
@@ -649,7 +650,7 @@ git commit -m "feat(lut): add left-side filter panel with resizable width"
 ## 手动验证清单
 
 1. 工具栏左右两个三角按钮对称，中间操作组居中；点 ◀ 滤镜后侧栏从左出现、底部条消失，点 ▼ 滤镜反之。
-2. 侧栏默认一列宽；拖右缘手柄实时变宽（最多半屏）、变窄到一列停住；触屏不滚页面。
+2. 侧栏默认两列宽；拖右缘手柄实时变宽（最多半屏）、变窄到一列停住；触屏不滚页面。
 3. 键盘聚焦侧栏手柄后 →/← 步进、Home/End 到极值；底部条手柄原键盘行为不受影响。
 4. 侧栏挤压舞台，画布在剩余空间重新居中且不裁剪；切换 LUT、强度、下载功能正常。
 5. 刷新页面回到默认（底部条开、侧栏关、宽度重置）。
@@ -659,3 +660,10 @@ git commit -m "feat(lut): add left-side filter panel with resizable width"
 - **Spec coverage**：§1 三栏（Task 3 Step 5/7，右按钮 data-test 与文案保留）；§2 fp-body 横向 flex + 挤压（Step 4/7，stage min-width:0）；§3 互斥函数（Step 3 toggleSide/toggleStrip，测试覆盖双向切换）；§4 宽度状态/实测最小/50vw/竖手柄/键盘 ARIA（Step 3/4/7，4 个测试）；§5 LutGroupList 去重（Task 2，底部条与侧栏同一组件）；边界表的空分组回退 120、倒挂钳制、触屏、尺寸独立保留均有实现对应。无遗漏。
 - **Placeholder scan**：无 TBD/TODO；三段模板与 CSS 给出完整可粘贴代码和精确 old/new 锚点；命令与用例数（366→371）具体。
 - **Type consistency**：`draggedWidth/clampHeight/RESIZE_STEP` 跨任务签名一致；侧栏状态 `sideOpen/sideWidth/sideMin/sideMax/sideStyle/sideAriaNow/sideDragging` 在模板、脚本、测试中命名统一；LutGroupList 的 props/emit 与两处消费方逐字匹配；`data-test="side-toggle"`/`fp-side-handle`/`fp-side` 选择器三处一致。
+
+## 实施修订（落地后变更，以此为准）
+
+Task 3 的模板/CSS 步骤在落地后做了两处调整，上方历史代码块保留 TDD 过程原貌，当前实现以本节与 spec 修订记录为准：
+
+1. **手柄位置**：`.fp-side-handle` 从 `.fp-side` 内部的 `position:absolute` 元素改为 `.fp-body` 下与 aside 平级的 flex 兄弟项（`flex:none; position:relative; width:6px`），从而位于侧栏滚动条右侧、不压在滚动条轨道上。拖拽 JS 只依赖 clientX 差值，逻辑不变。
+2. **默认宽度**：由一列 120px 改为两列 248px。`overflow-y:auto` 的垂直滚动条（Windows 经典约 17px）会占用内容区，仅按「96×2+gap 8+padding 24=224」取值时 flex 可用宽度不足 200px 会换行成一列，故额外预留约 24px。最小可拖宽度仍是一列的 120px（ensureSideMin），相关测试的 Home=120 断言不变。
