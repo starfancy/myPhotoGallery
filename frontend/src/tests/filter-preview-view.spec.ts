@@ -184,6 +184,81 @@ describe("FilterPreviewView", () => {
     }
   })
 
+  it("工具栏三栏：侧栏按钮存在，初始侧栏隐藏、底部条可见", async () => {
+    const w = mount(FilterPreviewView)
+    await flushPromises()
+    const sideBtn = w.find('[data-test="side-toggle"]')
+    expect(sideBtn.exists()).toBe(true)
+    expect(sideBtn.text()).toContain("◀")
+    // v-show=false：元素在但 display:none
+    expect(w.find("aside.fp-side").attributes("style")).toContain("display: none")
+    expect(w.find("section.fp-strip").attributes("style")).toBeUndefined()
+  })
+
+  it("侧栏与底部条互斥：开侧栏关底部条，开底部条关侧栏", async () => {
+    const w = mount(FilterPreviewView)
+    await flushPromises()
+    await w.get('[data-test="side-toggle"]').trigger("click")
+    await flushPromises()
+    expect(w.find("aside.fp-side").attributes("style") ?? "").not.toContain("display: none")
+    expect(w.find("section.fp-strip").attributes("style")).toContain("display: none")
+
+    await w.get('[data-test="strip-toggle"]').trigger("click")
+    await flushPromises()
+    expect(w.find("section.fp-strip").attributes("style") ?? "").not.toContain("display: none")
+    expect(w.find("aside.fp-side").attributes("style")).toContain("display: none")
+  })
+
+  it("竖向手柄具备 separator ARIA 语义", async () => {
+    const w = mount(FilterPreviewView)
+    await flushPromises()
+    const h = w.find(".fp-side-handle")
+    expect(h.attributes("role")).toBe("separator")
+    expect(h.attributes("aria-orientation")).toBe("vertical")
+    expect(h.attributes("tabindex")).toBe("0")
+    expect(h.attributes("aria-label")).toBe("调节左侧滤镜栏宽度")
+  })
+
+  it("侧栏键盘调宽：→/← 步进、Home 最窄、End 半屏并钳制", async () => {
+    // 宽度钳制基于 innerWidth；用 getter spy 而非 stubGlobal，避免清掉文件级 Image stub
+    const wSpy = vi.spyOn(window, "innerWidth", "get").mockReturnValue(800)
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ width: 200 } as DOMRect)
+    const csSpy = vi
+      .spyOn(window, "getComputedStyle")
+      .mockReturnValue({
+        paddingLeft: "12px", paddingRight: "12px",
+        paddingTop: "8px", paddingBottom: "12px",
+      } as CSSStyleDeclaration)
+    try {
+      const w = mount(FilterPreviewView)
+      await flushPromises()
+      // 最小宽 = 缩略图 96 + 左右 padding 24 = 120
+      Object.defineProperty(w.get(".fp-side .fp-thumb").element, "offsetWidth", {
+        value: 96, configurable: true,
+      })
+      // 先打开侧栏
+      await w.get('[data-test="side-toggle"]').trigger("click")
+      const handle = w.find(".fp-side-handle")
+      const side = () => w.find("aside.fp-side")
+
+      await handle.trigger("keydown", { key: "ArrowRight" })
+      expect(side().attributes("style")).toContain("width: 216px")
+      await handle.trigger("keydown", { key: "ArrowLeft" })
+      expect(side().attributes("style")).toContain("width: 200px")
+      await handle.trigger("keydown", { key: "Home" })
+      expect(side().attributes("style")).toContain("width: 120px")
+      await handle.trigger("keydown", { key: "End" })
+      expect(side().attributes("style")).toContain("width: 400px")
+      expect(side().attributes("style")).toContain("max-width: 50vw")
+    } finally {
+      wSpy.mockRestore()
+      rectSpy.mockRestore()
+      csSpy.mockRestore()
+    }
+  })
+
   it("滤镜条高度手柄：ARIA 语义齐全，键盘可调高度并钳制", async () => {
     vi.stubGlobal("innerHeight", 800) // max = 400
     const rectSpy = vi
@@ -195,8 +270,9 @@ describe("FilterPreviewView", () => {
     try {
       const w = mount(FilterPreviewView)
       await flushPromises()
-      // 最小高度 = 组高 110 + 上下 padding 20 = 130
-      Object.defineProperty(w.get(".fp-group").element, "offsetHeight", {
+      // 最小高度 = 组高 110 + 上下 padding 20 = 130。
+      // 页面现有侧栏/底部条两个 LutGroupList，必须精确定位底部条内的分组
+      Object.defineProperty(w.get("section.fp-strip .fp-group").element, "offsetHeight", {
         value: 110,
         configurable: true,
       })

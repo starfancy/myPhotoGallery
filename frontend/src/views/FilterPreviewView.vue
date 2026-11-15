@@ -1,5 +1,5 @@
 <template>
-  <div class="fp-page" :class="{ 'is-resizing': dragging }">
+  <div class="fp-page" :class="{ 'is-resizing': dragging || sideDragging }">
     <header class="fp-topbar">
       <span class="fp-name">{{ name || (isLocal ? "本地图片（未选择）" : "") }}</span>
       <input ref="fileInputEl" type="file" accept="image/*" @change="onPickLocal" hidden />
@@ -8,43 +8,85 @@
       </button>
     </header>
 
-    <main class="fp-stage">
-      <canvas ref="canvasEl" class="fp-canvas"></canvas>
-      <div v-if="fallbackMsg" class="fp-fallback">{{ fallbackMsg }}</div>
-      <div v-if="isLocal && !rendererReady && !fallbackMsg" class="fp-fallback">
-        从上方"选择本地图片"按钮选一张照片，纯前端处理，不上传服务器
-      </div>
-    </main>
+    <div class="fp-body">
+      <aside
+        v-show="sideOpen"
+        class="fp-side"
+        ref="sideEl"
+        :style="sideStyle"
+      >
+        <div
+          class="fp-side-handle"
+          :class="{ active: sideDragging }"
+          role="separator"
+          tabindex="0"
+          aria-label="调节左侧滤镜栏宽度"
+          aria-orientation="vertical"
+          :aria-valuenow="sideAriaNow"
+          :aria-valuemin="sideMin ?? 0"
+          :aria-valuemax="sideMax"
+          @pointerdown="onSidePointerDown"
+          @pointermove="onSidePointerMove"
+          @pointerup="onSidePointerUp"
+          @pointercancel="onSidePointerUp"
+          @keydown="onSideKeydown"
+        ></div>
+        <LutGroupList :groups="groups" :thumbs="thumbs"
+                      :active-id="activeId" :renderer-ready="rendererReady"
+                      @pick="pick" />
+      </aside>
+      <main class="fp-stage">
+        <canvas ref="canvasEl" class="fp-canvas"></canvas>
+        <div v-if="fallbackMsg" class="fp-fallback">{{ fallbackMsg }}</div>
+        <div v-if="isLocal && !rendererReady && !fallbackMsg" class="fp-fallback">
+          从上方"选择本地图片"按钮选一张照片，纯前端处理，不上传服务器
+        </div>
+      </main>
+    </div>
 
     <section class="fp-controls">
-      <label class="fp-strength">
-        强度
-        <input
-          type="range" min="0" max="100"
-          :value="mixPct"
+      <button
+        type="button"
+        class="fp-side-toggle"
+        :class="{ active: sideOpen }"
+        data-test="side-toggle"
+        :title="sideOpen ? '收起左侧滤镜列表' : '左侧展开滤镜列表'"
+        :aria-label="sideOpen ? '收起左侧滤镜列表' : '左侧展开滤镜列表'"
+        :aria-pressed="sideOpen"
+        @click="toggleSide"
+      >{{ sideOpen ? "▶ 收起" : "◀ 滤镜" }}</button>
+      <div class="fp-controls-center">
+        <label class="fp-strength">
+          强度
+          <input
+            type="range" min="0" max="100"
+            :value="mixPct"
+            :disabled="!rendererReady"
+            @input="onMixInput"
+          />
+          <span>{{ mixPct }}%</span>
+        </label>
+        <button
           :disabled="!rendererReady"
-          @input="onMixInput"
-        />
-        <span>{{ mixPct }}%</span>
-      </label>
-      <button
-        :disabled="!rendererReady"
-        @pointerdown="holdStart"
-        @pointerup="holdEnd"
-        @pointercancel="holdEnd"
-        @pointerleave="holdEnd"
-      >按住看原图</button>
-      <button :disabled="!rendererReady" @click="onDownload">下载 JPEG</button>
-      <button
-        v-if="!isLocal"
-        :disabled="!rendererReady || !imageId || downloadingOriginal"
-        @click="onDownloadOriginal"
-      >{{ downloadingOriginal ? "处理中..." : "下载原尺寸 JPEG" }}</button>
+          @pointerdown="holdStart"
+          @pointerup="holdEnd"
+          @pointercancel="holdEnd"
+          @pointerleave="holdEnd"
+        >按住看原图</button>
+        <button :disabled="!rendererReady" @click="onDownload">下载 JPEG</button>
+        <button
+          v-if="!isLocal"
+          :disabled="!rendererReady || !imageId || downloadingOriginal"
+          @click="onDownloadOriginal"
+        >{{ downloadingOriginal ? "处理中..." : "下载原尺寸 JPEG" }}</button>
+      </div>
       <button
         class="fp-strip-toggle"
+        :class="{ active: stripOpen }"
         :title="stripOpen ? '收起滤镜列表' : '展开滤镜列表'"
         data-test="strip-toggle"
-        @click="stripOpen = !stripOpen"
+        :aria-pressed="stripOpen"
+        @click="toggleStrip"
       >{{ stripOpen ? "▲ 收起" : "▼ 滤镜" }}</button>
     </section>
 
@@ -80,7 +122,13 @@ import LutGroupList, {
   type LutGroup,
 } from "../components/LutGroupList.vue"
 import { LutRenderer } from "../lib/lutRenderer"
-import { clampHeight, draggedHeight, steppedHeight } from "../lib/resize"
+import {
+  RESIZE_STEP,
+  clampHeight,
+  draggedHeight,
+  draggedWidth,
+  steppedHeight,
+} from "../lib/resize"
 import { parseCube } from "../lib/lutParser"
 import type { LutData } from "../lib/lutParser"
 
@@ -100,6 +148,7 @@ const thumbs = ref<Record<string, string>>({})
 const activeId = ref<string | null>(null)
 const mixPct = ref(0)
 const stripOpen = ref(true)
+const sideOpen = ref(false)
 const downloadingOriginal = ref(false)
 
 // ---- 滤镜条可调高度 ----
@@ -186,6 +235,100 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   e.preventDefault()
+}
+
+// ---- 左侧滤镜栏可调宽度 ----
+const sideEl = ref<HTMLElement | null>(null)
+/** null = 未手动调节，沿用 CSS 默认 120px；数字 = 显式像素宽度 */
+const sideWidth = ref<number | null>(null)
+const sideMin = ref<number | null>(null)
+const sideDragging = ref(false)
+const sideMax = computed(() => Math.round(window.innerWidth / 2))
+const sideStyle = computed(() =>
+  sideWidth.value === null
+    ? {}
+    : { width: `${sideWidth.value}px`, maxWidth: "50vw" },
+)
+const sideAriaNow = computed(() =>
+  sideWidth.value === null ? undefined : Math.round(sideWidth.value),
+)
+
+/** 首次交互实测一列缩略图所需最小宽度，只算一次。 */
+function ensureSideMin(): number {
+  if (sideMin.value !== null) return sideMin.value
+  const side = sideEl.value
+  const thumb = side?.querySelector<HTMLElement>(".fp-thumb")
+  if (!side) {
+    sideMin.value = 120
+    return sideMin.value
+  }
+  const cs = getComputedStyle(side)
+  const pl = parseInt(cs.paddingLeft, 10) || 0
+  const pr = parseInt(cs.paddingRight, 10) || 0
+  // 无缩略图时 offsetWidth 取不到，回退默认
+  sideMin.value = thumb ? thumb.offsetWidth + pl + pr : 120
+  return sideMin.value
+}
+
+let dragStartX = 0
+let dragStartW = 0
+
+function onSidePointerDown(e: PointerEvent) {
+  const min = ensureSideMin()
+  const max = sideMax.value
+  dragStartX = e.clientX
+  dragStartW = clampHeight(
+    sideWidth.value ?? sideEl.value!.getBoundingClientRect().width,
+    min,
+    max,
+  )
+  sideWidth.value = dragStartW
+  sideDragging.value = true
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+
+function onSidePointerMove(e: PointerEvent) {
+  if (!sideDragging.value) return
+  sideWidth.value = clampHeight(
+    draggedWidth(dragStartW, dragStartX, e.clientX),
+    ensureSideMin(),
+    sideMax.value,
+  )
+}
+
+function onSidePointerUp(e: PointerEvent) {
+  if (!sideDragging.value) return
+  sideDragging.value = false
+  ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+}
+
+function onSideKeydown(e: KeyboardEvent) {
+  const min = ensureSideMin()
+  const max = sideMax.value
+  const cur =
+    sideWidth.value ?? Math.round(sideEl.value!.getBoundingClientRect().width)
+  if (e.key === "ArrowRight") {
+    sideWidth.value = clampHeight(cur + RESIZE_STEP, min, max)
+  } else if (e.key === "ArrowLeft") {
+    sideWidth.value = clampHeight(cur - RESIZE_STEP, min, max)
+  } else if (e.key === "Home") {
+    sideWidth.value = min
+  } else if (e.key === "End") {
+    sideWidth.value = max
+  } else {
+    return
+  }
+  e.preventDefault()
+}
+
+// ---- 面板互斥状态机：同一时刻只显示侧栏或底部条 ----
+function toggleSide() {
+  if (sideOpen.value) sideOpen.value = false
+  else { sideOpen.value = true; stripOpen.value = false }
+}
+function toggleStrip() {
+  if (stripOpen.value) stripOpen.value = false
+  else { stripOpen.value = true; sideOpen.value = false }
 }
 
 let renderer: LutRenderer | null = null
@@ -422,8 +565,42 @@ async function renderThumbs() {
   border: 1px solid #444; border-radius: 6px; cursor: pointer; font-size: 13px;
 }
 .fp-name { color: #ccc; }
+.fp-body {
+  flex: 1; min-height: 0; display: flex;
+}
+.fp-side {
+  flex: none;
+  width: 120px; /* 默认一列：96px 缩略图 + 左右 12px padding */
+  max-width: 50vw;
+  overflow-y: auto;
+  border-right: 1px solid #222;
+  padding: 8px 12px;
+  position: relative;
+}
+.fp-side-handle {
+  position: absolute;
+  top: 0; bottom: 0; right: 0;
+  width: 6px; /* 热区 */
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.fp-side-handle::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; right: 2px;
+  width: 2px;
+  background: #444;
+}
+.fp-side-handle:hover::after,
+.fp-side-handle:focus-visible::after,
+.fp-side-handle.active::after {
+  background: #3b82f6;
+}
+.fp-side-handle:focus-visible { outline: none; }
 .fp-stage {
-  flex: 1; display: flex; align-items: center; justify-content: center;
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; justify-content: center;
   overflow: hidden; position: relative;
 }
 .fp-canvas {
@@ -437,7 +614,15 @@ async function renderThumbs() {
   display: flex; gap: 16px; align-items: center;
   padding: 10px 16px; border-top: 1px solid #222;
 }
+.fp-side-toggle { margin-right: auto; }
 .fp-strip-toggle { margin-left: auto; }
+.fp-controls-center {
+  display: flex; gap: 16px; align-items: center;
+}
+.fp-side-toggle.active,
+.fp-strip-toggle.active {
+  border-color: #3b82f6;
+}
 .fp-strength {
   display: flex; align-items: center; gap: 8px; font-size: 13px;
 }
