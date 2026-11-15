@@ -26,6 +26,14 @@
 - 多图批量打包 ZIP 下载：流式输出、支持 zip64 大文件，服务端限制单次
   打包数量。
 - 管理与安全事件审计日志：保留期可配置，可在管理后台审计页导出 CSV。
+- 智能标签：完全使用本机模型推理，不访问任何外部服务。CLIP 零样本
+  场景分类采用内置两级提示词体系（9 个一级大类、43 个二级细类，带
+  置信度），YOLO11n 检测照片人数，InsightFace（SCRFD + ArcFace）
+  检测人脸、提取向量并按余弦相似度自动聚类。配套"人物"页
+  （`/people`，人物簇可重命名）、浏览页场景分面筛选（状态写入 URL，
+  同时过滤图片与子文件夹）、搜索的场景 / 日期筛选，以及管理后台的
+  标签分布统计。该功能可选：缺少模型文件时服务照常运行，行为与未
+  启用时完全一致。
 - 浅色 / 深色主题跟随系统设置；手机端 44px 触控目标，支持键盘与屏幕
   阅读器等无障碍访问。
 
@@ -108,6 +116,9 @@ myphoto --config /path/to/config.toml list
 | `[scanner] hash_workers` | 注释状态——源码默认 `min(8, CPU 核数)` | 正整数 | 扫描时计算哈希、读取 EXIF 的工作线程数；机械硬盘或 SMB/NFS 网络盘可调小（如 `2`）。 |
 | `[download] batch_limit` | `100` | `10`–`200`（越界自动钳制） | 单次批量 ZIP 下载的图片数上限，对所有用户生效。 |
 | `[audit] retention_days` | `180` | `0`、`30`、`90`、`180`、`365`（`0` = 永不清理；其他整数钳制到最近的合法值） | 审计日志保留天数；启动时与每日定时任务都会清理过期记录。 |
+| `[tagging] enabled` | `true` | 布尔值 | 智能标签总开关；为 false 时后台扫描器与 `myphoto tag` CLI 都不加载任何模型。 |
+| `[tagging] scan_on_import` | `true` | 布尔值 | 服务端后台扫描器对新增 / 变化图片同步打标；未变化文件不会进入模型。`enabled = false` 或模型缺失时无效。 |
+| `[tagging] models_dir` | `"backend/models"` | 目录路径 | 打标模型所在目录；相对路径相对于 `config.toml` 所在目录解析。见[智能标签（可选）](#智能标签可选)。 |
 
 补充说明：
 
@@ -116,6 +127,101 @@ myphoto --config /path/to/config.toml list
 - 手改配置导致的非法值不会阻止启动：`[download] batch_limit` 与
   `[audit] retention_days` 非法时回退默认或钳制到合法值并打印警告；
   `[scanner] hash_workers` 非法或非正数时回退到源码默认值。
+- 自动生成的配置模板中整个 `[tagging]` 段都是注释状态；在你显式覆盖
+  之前，上表中的默认值直接生效。
+
+## 智能标签（可选）
+
+智能标签完全在本机用三个本地模型分析照片，数据不出本机：
+
+- **场景标签**——CLIP ViT-B/32 零样本分类，对照内置两级提示词体系：
+  9 个一级大类（自然风光、植物花卉、城市建筑、人物、室内家居、食物、
+  宠物动物、交通工具、文档截图）与 43 个二级细类，结果带置信度。
+- **人数检测**——YOLO11n 检测每张照片中的人物数量。
+- **人脸聚类**——SCRFD 检测人脸，ArcFace（`w600k_mbf`）生成 512 维
+  向量，再以贪心余弦相似度把同一个人跨照片聚成簇。簇 ID 稳定
+  （`P001`、……），可在人物页重命名，系统不会自动合并簇。
+
+结果在界面中的入口：
+
+- **人物页**（顶栏"人物"，`/people`）：左侧人物簇列表带人脸缩略图，
+  右侧选中簇的照片按年 / 月分组，并标注所在图库与文件夹。
+- **场景筛选**：浏览工具栏的一级 / 二级下拉，选项按当前文件夹范围的
+  统计生成；筛选状态写入 URL query（`?scene_major=…&scene_minor=…`），
+  同时过滤图片与子文件夹（文件夹卡片显示匹配图片数）。
+- **搜索**支持同一套场景筛选并新增日期区间；关键词变为可选，因此
+  可以只按场景 / 日期做纯筛选。
+- **管理后台概览页**提供标签分布统计面板，按分类展示照片数量。
+
+### 打标时机
+
+- **入库时**——当 `enabled`、`scan_on_import` 均开启且模型就位时，
+  服务端后台扫描器在同一轮扫描中对每张新增 / 变化图片同步打标
+  （未变化文件不会进入模型）。单张失败只记录 `tag_error`，不会中断
+  扫描。注意命令行的 `myphoto rescan` 不挂载打标器、不会跑模型；
+  命令行打标请用 `myphoto tag run`。
+- **存量补打**——用下方 CLI 给已有图库批量打标（也用于失败重试）。
+  支持断点续跑：已打标、未变化的图片自动跳过；`--force` 会对选定
+  范围内的图片全部重打。
+
+```bash
+myphoto tag status                                              # 各图库 tagged/pending/failed 与 "models ready"
+myphoto tag run [--gallery G] [--folder 子路径] [--force]       # 给待打标图片打标，结束后自动增量聚类
+myphoto tag cluster                                             # 对未分配人脸做增量重新聚类
+myphoto tag relabel                                             # 基于已存向量重算场景标签（不跑视觉模型）
+myphoto tag gc [--include-named]                                # 清理孤儿人物簇
+```
+
+### 模型部署要求
+
+Python 依赖随常规的 `pip install -e ".[dev]"` 一并安装（NumPy、
+OpenVINO、onnxruntime、InsightFace、OpenCV、Transformers）。两个
+注意点：**`openvino` 锁定 2024.6.0**——2026.x 版本 API 不兼容；
+**不要安装 `optimum`**，它会连带升级 OpenVINO 破坏环境。
+
+模型权重本身**不进 git**，总计约 **900 MB**。请按下面的确切目录
+结构放到 `[tagging] models_dir` 指向的位置（默认 `backend/models/`，
+相对 `config.toml` 所在目录解析）——打标器启用前会逐个检查这些路径：
+
+```text
+backend/models/
+├── clip-ov/
+│   ├── visual.xml + visual.bin     # CLIP 视觉塔 OpenVINO IR（约 168 MB）
+│   └── text.xml + text.bin         # CLIP 文本塔 OpenVINO IR（约 121 MB）
+├── clip-vit-base-patch32/          # HF tokenizer/processor 配置 + pytorch_model.bin（约 580 MB）
+├── yolo11n.onnx                    # YOLO11n（COCO person 类）ONNX（约 10 MB）
+└── insightface/
+    ├── det_500m.onnx               # SCRFD 500m 人脸检测（约 2.5 MB）
+    └── w600k_mbf.onnx              # ArcFace w600k 人脸识别（约 13 MB）
+```
+
+模型来源：`yolo11n.onnx` 由 Ultralytics YOLO11n 导出 ONNX；
+`clip-ov/` 由 HuggingFace `openai/clip-vit-base-patch32` 转换为
+OpenVINO IR；两个 InsightFace 文件来自官方 `buffalo_l` 模型包。
+
+设备自动选择：OpenVINO 探测到 GPU 就用 GPU（已在 Intel i5-11320H +
+Iris Xe 上验证），否则回退 CPU；人脸检测与识别固定通过 onnxruntime
+跑在 CPU 上，不依赖 CUDA。参考性能（上述 i5 + 核显）：含解码与磁盘
+IO 稳态约 350ms / 张——2923 张图库全量 17 分钟、0 失败（576 张脸
+聚成 269 簇），折合万张约 1 小时；纯 CPU 可用但更慢。模型首次使用
+时才懒加载并常驻内存，启动 web 服务本身不会加载模型。
+
+模型文件缺失时服务照常启动：入库打标随一条日志自动关闭，其他功能
+不受影响。把模型拷贝到位后用下面的命令验证：
+
+```bash
+myphoto tag status     # 所有文件就位后首行输出 "models ready: yes"
+```
+
+想彻底关闭该功能（例如低性能主机），在 `config.toml` 的 `[tagging]`
+段设置 `enabled = false` 即可。更完整的部署流程（镜像源、服务常驻
+等）见 [docs/deployment.md](docs/deployment.md)（中文）。
+
+### 隐私
+
+人脸向量属于生物特征数据，保存在 `<data_dir>/app.db` 中——不要把
+该数据库上传到任何公开位置，备份时同样注意其中包含人脸向量。所有
+推理均在本地完成，程序不会向任何 AI 云服务发起请求。
 
 ## 数据与备份
 
@@ -124,7 +230,7 @@ myphoto --config /path/to/config.toml list
 目录布局，可自行在 `[app]` 中设置 `data_dir = "db"`（本项目自己的开发
 检出就是这样配置的）：
 
-- `<data_dir>/app.db` —— 用户、图库、元数据、审计日志、LUT 启用状态与显示名（需要备份）。
+- `<data_dir>/app.db` —— 用户、图库、元数据、审计日志、LUT 启用状态与显示名、智能标签与图像 / 人脸向量、人物簇（人脸向量属生物特征数据，备份请注意保密；需要备份）。
 - `<data_dir>/.cache/thumbnails/` —— 磁盘缩略图缓存，可完全重建。
 - `<data_dir>/luts/<分组>/*.cube` —— 可选的滤镜 LUT 文件；启用状态与显示名存于 `app.db`，把新 `.cube` 放进对应分组目录后在 admin 页面点"重新扫描"。
 - `config.toml` —— 含 `jwt_secret`（需要备份）。
@@ -165,10 +271,12 @@ cd frontend && pnpm dev
 
 ## 部署
 
-局域网 HTTP（随仓库 Caddyfile）、公网域名 + 自动 HTTPS、进程常驻与
-防火墙说明，见 [docs/deployment.md](docs/deployment.md)（中文）。
+局域网 HTTP（随仓库 Caddyfile）、公网域名 + 自动 HTTPS、进程常驻、
+防火墙说明，以及智能标签模型文件的部署要求，见
+[docs/deployment.md](docs/deployment.md)（中文）。
 
 ## 设计文档
 
 设计规格见 `docs/superpowers/specs/`，各阶段计划见
-`docs/superpowers/plans/`。
+`docs/superpowers/plans/`。智能标签子系统（数据模型、打标管线、
+聚类策略）的设计见 `docs/tags-upgrade-design.md`。

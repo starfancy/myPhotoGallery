@@ -28,6 +28,15 @@ they are.
   server-side per-request cap.
 - Audit log of admin and security events, with configurable retention and CSV
   export from the admin audit page.
+- Smart tagging with fully local models (no external service calls): CLIP
+  zero-shot scene classification on a two-level prompt hierarchy (9 major /
+  43 minor categories, each with a confidence score), YOLO11n person
+  counting, and InsightFace face detection with embedding-based automatic
+  clustering. Includes a People page (`/people`) with renameable person
+  clusters, scene faceted filters in the grid (URL-persisted, applied to
+  both images and subfolders), scene/date filters in search, and a
+  tag-distribution panel on the admin overview. Tagging is optional —
+  without model files the server runs exactly as before.
 - Light/dark theme that follows the OS setting; 44px touch targets on phones
   and keyboard/screen-reader accessibility support.
 
@@ -112,6 +121,9 @@ on the admin Settings page.
 | `[scanner] hash_workers` | commented out — source default `min(8, CPU cores)` | positive integer | Worker threads hashing files and reading EXIF during scans; lower it (e.g. `2`) on mechanical or SMB/NFS drives. |
 | `[download] batch_limit` | `100` | `10`–`200` (out-of-range values are clamped) | Maximum number of images in one batch ZIP, for all users. |
 | `[audit] retention_days` | `180` | `0`, `30`, `90`, `180`, `365` (`0` = keep forever; other integers are clamped to the nearest choice) | Audit log retention; expired rows are purged at startup and on the daily schedule. |
+| `[tagging] enabled` | `true` | boolean | Master switch for smart tagging; when false neither the background scanner nor the `myphoto tag` CLI loads any model. |
+| `[tagging] scan_on_import` | `true` | boolean | The server's background scanner synchronously tags newly added/changed photos; unchanged files never reach the models. No effect when `enabled = false` or model files are absent. |
+| `[tagging] models_dir` | `"backend/models"` | directory path | Directory holding the tagger models; relative paths resolve against the directory containing `config.toml`. See [Smart tagging](#smart-tagging-optional). |
 
 Notes:
 
@@ -121,6 +133,116 @@ Notes:
   `[download] batch_limit` / `[audit] retention_days` values fall back or are
   clamped with a warning, and an invalid/non-positive
   `[scanner] hash_workers` falls back to the source default.
+- The whole `[tagging]` section is commented out in the generated template;
+  the defaults in the table above apply until you override them.
+
+## Smart tagging (optional)
+
+Smart tagging analyzes photos entirely on the host with three local models —
+nothing leaves the machine:
+
+- **Scene tags** — CLIP ViT-B/32 zero-shot classification against a built-in
+  two-level prompt hierarchy: 9 major categories (nature, plants, city,
+  people, interiors, food, animals, vehicles, documents) and 43 minor
+  categories, stored with a confidence score.
+- **Person count** — YOLO11n detects the people in each photo.
+- **Face clustering** — SCRFD detects faces and an ArcFace model
+  (`w600k_mbf`) produces 512-d embeddings; a greedy cosine-similarity pass
+  clusters the same person across photos. Clusters get stable IDs
+  (`P001`, …), can be renamed on the People page, and are not merged
+  automatically.
+
+The results surface across the UI:
+
+- **People page** (`/people`, top-nav entry): cluster list with face
+  thumbnails; each cluster's photos are grouped by year/month and labeled
+  with their gallery and folder.
+- **Scene filter** in the browse toolbar: major/minor dropdowns computed from
+  the current folder's statistics. The selection lives in the URL query
+  (`?scene_major=…&scene_minor=…`) and filters both images and subfolders
+  (folder cards show a matching-photo count).
+- **Search** accepts the same scene filters plus a date range; the keyword
+  becomes optional, so scene/date-only filtering is possible.
+- **Admin overview** shows a tag-distribution panel with per-category counts.
+
+### When tagging runs
+
+- **On import** — when `enabled` and `scan_on_import` are on and the models
+  are in place, the server's background scanner tags each newly added or
+  changed photo synchronously in the same pass (unchanged files never reach
+  the models). A per-photo failure is recorded as `tag_error` and never
+  blocks the scan. Note that the standalone `myphoto rescan` CLI command
+  does not run models — use `myphoto tag run` for command-line tagging.
+- **Batch backfill** — tag an existing library (or retry failures) with the
+  CLI below. Runs are resumable: already-tagged and unchanged photos are
+  skipped; `--force` re-tags everything in the selected scope.
+
+```bash
+myphoto tag status                                              # per-gallery tagged/pending/failed + "models ready"
+myphoto tag run [--gallery G] [--folder SUBPATH] [--force]      # tag pending photos, then auto-cluster faces
+myphoto tag cluster                                             # incremental re-cluster of unassigned faces
+myphoto tag relabel                                             # re-derive scene tags from stored embeddings (no vision model runs)
+myphoto tag gc [--include-named]                                # delete orphaned person clusters
+```
+
+### Model deployment requirements
+
+The Python dependencies install with the normal `pip install -e ".[dev]"`
+(NumPy, OpenVINO, onnxruntime, InsightFace, OpenCV, Transformers). Two
+caveats: **`openvino` is pinned to 2024.6.0** — newer 2026.x releases break
+its API — and do not install `optimum`, which pulls in an incompatible
+OpenVINO.
+
+The model weights themselves are **not tracked by git** (about **900 MB** in
+total). Place them under `[tagging] models_dir` (default `backend/models/`,
+resolved relative to `config.toml`) in this exact layout — the tagger checks
+every path before enabling itself:
+
+```text
+backend/models/
+├── clip-ov/
+│   ├── visual.xml + visual.bin     # CLIP visual tower, OpenVINO IR (~168 MB)
+│   └── text.xml + text.bin         # CLIP text tower, OpenVINO IR (~121 MB)
+├── clip-vit-base-patch32/          # HF tokenizer/processor configs + pytorch_model.bin (~580 MB)
+├── yolo11n.onnx                    # YOLO11n (COCO person class), ONNX (~10 MB)
+└── insightface/
+    ├── det_500m.onnx               # SCRFD 500m face detector (~2.5 MB)
+    └── w600k_mbf.onnx              # ArcFace w600k recognition model (~13 MB)
+```
+
+Provenance: YOLO11n exported from Ultralytics;
+`openai/clip-vit-base-patch32` converted to OpenVINO IR; the two InsightFace
+files come from the official `buffalo_l` pack.
+
+Device selection is automatic: OpenVINO uses a GPU when one is exposed
+(validated on an Intel i5-11320H with Iris Xe) and otherwise falls back to
+CPU; the face detector and recognition model always run on CPU via
+onnxruntime (there is no CUDA dependency). Reference throughput on that
+hardware: about 350 ms per photo including decode and disk IO — a 2,923-photo
+library tagged in 17 minutes with zero failures (576 faces → 269 clusters),
+i.e. roughly an hour per 10k photos; CPU-only works but is slower. Models
+load lazily on first use and stay resident; starting the web server never
+loads them.
+
+If the model files are missing, the server still starts normally: scan-time
+tagging switches off with a log line and every other feature works. After
+copying the files into place, verify with:
+
+```bash
+myphoto tag status     # prints "models ready: yes" once every file is in place
+```
+
+To disable tagging entirely (e.g. on a low-resource host), set
+`enabled = false` in the `[tagging]` section of `config.toml`. The expanded
+deployment walkthrough (mirror setup, package mirror tips) lives in
+[docs/deployment.md](docs/deployment.md) (in Chinese).
+
+### Privacy
+
+Face embeddings are biometric data. They are stored inside
+`<data_dir>/app.db` — never upload that database to a public location, and
+remember its backups contain face vectors. All inference is local; the
+software makes no network calls to any AI service.
 
 ## Data & backups
 
@@ -129,7 +251,7 @@ first run omits this key, so by default it is the project root (the directory
 containing `config.toml`); set `data_dir = "db"` in `[app]` yourself to get a
 `db/` layout (this project's own development checkout does that):
 
-- `<data_dir>/app.db` — users, galleries, metadata, audit log, LUT enable/label/sort metadata (back this up).
+- `<data_dir>/app.db` — users, galleries, metadata, audit log, LUT enable/label/sort metadata, smart tags plus image/face embeddings and person clusters (face embeddings are biometric data — keep backups private; back this up).
 - `<data_dir>/.cache/thumbnails/` — on-disk thumbnail cache; fully rebuildable.
 - `<data_dir>/luts/<group>/*.cube` — optional filter LUT files; metadata (enabled, label, sort_order) lives in `app.db`, add new `.cube` files here and use the admin "rescan" button.
 - `config.toml` — includes `jwt_secret` (back this up).
@@ -175,9 +297,10 @@ cd frontend && pnpm dev
 
 See [docs/deployment.md](docs/deployment.md) (in Chinese) for LAN HTTP with
 the shipped Caddyfile, public-domain HTTPS with automatic certificates,
-process persistence, and firewall notes.
+process persistence, firewall notes, and placing the smart-tag model files.
 
 ## Design documents
 
 See `docs/superpowers/specs/` for design specs and `docs/superpowers/plans/`
-for phase plans.
+for phase plans. The smart-tag subsystem (data model, tagging pipeline,
+clustering) is documented in `docs/tags-upgrade-design.md` (in Chinese).

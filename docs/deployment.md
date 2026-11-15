@@ -240,6 +240,113 @@ Caddy 在各发行版上有官方安装包，安装后通常自带 systemd servi
 
 ---
 
+## 智能标签模型部署（可选）
+
+智能标签（CLIP 场景分类 / YOLO 人数检测 / InsightFace 人脸聚类）完全
+在本机推理，但模型文件**不随 git 分发**，需要单独部署。不部署也不
+影响相册的其他功能：服务照常启动，后台扫描自动跳过打标并打印一条
+`tagging models not available` 日志。功能与 CLI 的完整说明见
+[README.zh-CN.md 的「智能标签」章节](../README.zh-CN.md#智能标签可选)。
+
+### 1. Python 依赖
+
+打标依赖已写入 `pyproject.toml`，随 `pip install -e ".[dev]"` 一并
+安装（openvino、onnxruntime、insightface、opencv-python、
+transformers、numpy）。三个注意点：
+
+- **openvino 锁定 2024.6.0**：2026.x 版本 API 不兼容，不要手动升级。
+- **不要安装 optimum**：它会连带升级 openvino，破坏运行环境。
+- 国内网络拉取大 wheel 超时时，改用阿里镜像：
+
+  ```bash
+  pip install -e ".[dev]" -i https://mirrors.aliyun.com/pypi/simple/
+  ```
+
+### 2. 模型文件目录布局
+
+模型总计约 **900 MB**，放到 `config.toml` 中 `[tagging].models_dir`
+指向的目录（默认 `backend/models/`，相对路径相对配置文件所在目录
+解析）。目录结构必须与下方一致——程序启用打标前会逐个检查文件是否
+就位：
+
+```text
+backend/models/
+├── clip-ov/
+│   ├── visual.xml + visual.bin     # CLIP 视觉塔 OpenVINO IR（约 168 MB）
+│   └── text.xml + text.bin         # CLIP 文本塔 OpenVINO IR（约 121 MB）
+├── clip-vit-base-patch32/          # HF tokenizer/processor 配置 + pytorch_model.bin（约 580 MB）
+├── yolo11n.onnx                    # YOLO11n（COCO person 类）ONNX（约 10 MB）
+└── insightface/
+    ├── det_500m.onnx               # SCRFD 500m 人脸检测（约 2.5 MB）
+    └── w600k_mbf.onnx              # ArcFace w600k 人脸识别（约 13 MB）
+```
+
+文件来源：`yolo11n.onnx` 由 Ultralytics YOLO11n 导出 ONNX；
+`clip-ov/` 由 HuggingFace `openai/clip-vit-base-patch32` 转换为
+OpenVINO IR（visual / text 两个塔），`clip-vit-base-patch32/` 保留
+HF tokenizer / processor 配置与原始 PyTorch 权重；两个 InsightFace
+文件来自官方 `buffalo_l` 模型包。仓库不提供下载脚本，也不托管模型
+文件，请自行获取 / 转换后按上述结构拷贝。
+
+### 3. 验证与开关
+
+模型放好后，用 CLI 验证（只检查文件，不加载模型）：
+
+```bash
+myphoto tag status
+# 首行输出 "models ready: yes" 即全部就位；NO 时按提示检查目录路径
+```
+
+`config.toml` 的 `[tagging]` 段在首次生成的模板里是注释状态，默认值
+即如下，通常无需修改：
+
+```toml
+[tagging]
+enabled = true            # 总开关；false 时扫描器与 CLI 都不打标
+scan_on_import = true     # 后台扫描时对新增/变化图片同步打标
+models_dir = "backend/models"
+```
+
+低性能主机想彻底关闭该功能，设 `enabled = false` 即可，其余服务
+不受影响。
+
+### 4. 硬件与性能
+
+- 设备自动选择：OpenVINO 探测到 GPU 就用 GPU（已在 Intel
+  i5-11320H + Iris Xe 核显上验证），否则回退 CPU；人脸检测与识别
+  固定走 onnxruntime 的 CPU provider，**不依赖 CUDA / NVIDIA 显卡**。
+- 参考性能（上述 i5 + 核显）：含解码与磁盘 IO 稳态约 350ms / 张，
+  2923 张全量 17 分钟、0 失败（576 张脸聚成 269 簇），折合万张
+  约 1 小时；纯 CPU 可用但更慢，请预留更宽裕的时间窗。
+- 模型在首次打标时懒加载并常驻内存，web 服务启动阶段不加载模型，
+  因此缺模型不会拖慢启动。
+
+### 5. 存量图库打标
+
+新图入库时由 `myphoto serve` 的后台扫描器自动打标；存量图片用 CLI
+批量补打，支持断点续跑（已打标、未变化的自动跳过，历史失败默认
+跳过、加 `--force` 才重试）：
+
+```bash
+myphoto tag run --gallery "我的照片"            # 打完自动增量聚类
+myphoto tag run --gallery G --folder "旅行/成都"  # 只打某个子文件夹
+myphoto tag run --gallery G --force              # 模型升级后强制重打
+myphoto tag cluster                              # 仅对未分配人脸重新聚类
+myphoto tag relabel                              # 用已存向量秒级重算场景标签
+myphoto tag gc                                   # 清理 --force 重打后的孤儿人物簇
+```
+
+注意：命令行 `myphoto rescan` 不挂载打标器，不会触发模型；命令行
+场景的打标统一走 `myphoto tag run`。
+
+### 6. 隐私
+
+`app.db` 中的 `face_embeddings` 表保存人脸生物特征向量，不要把数据
+库上传到任何公开位置，做异地备份时同样注意保密。全部推理离线完成，
+程序不会向任何 AI 云服务发起请求。
+
+---
+
 ## 备份与升级
 
 - 备份（`<data_dir>/app.db`，默认为项目根目录下的 `app.db`，加上
