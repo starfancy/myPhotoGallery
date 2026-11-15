@@ -25,6 +25,9 @@
  *     skip-link 白字 on primary(浅) = 5.17 ✓ / primary(深) = 5.17 ✓
  */
 :root {
+  /* 告知 UA 本页支持的配色方案：原生滚动条等 UA 控件不消费下方颜色
+     令牌，只有声明 color-scheme 后，深色模式才会渲染深色原生控件。 */
+  color-scheme: light;
   --color-base: 250 250 250;
   --color-surface: 255 255 255;
   --color-surface-2: 244 244 245;
@@ -64,6 +67,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --color-base: 10 10 10;
     --color-surface: 23 23 23;
     --color-surface-2: 38 38 38;
