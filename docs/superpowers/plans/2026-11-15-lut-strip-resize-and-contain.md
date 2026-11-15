@@ -13,7 +13,7 @@
 - 缩略图窗格保持 88×58、列宽保持 96px，只把 `object-fit: cover` 改为 `contain`。
 - 高度钳制：最小 = 第一个 `.fp-group` 实测 offsetHeight + strip 上下 padding（无分组回退 120px）；最大 = `window.innerHeight / 2`。
 - 键盘步进常量 `RESIZE_STEP = 16`；↑ 增高、↓ 降低、Home 最小、End 最大。
-- 显式高度内联样式必须同时给 `height` 与 `maxHeight: "50vh"`，否则会被 CSS 默认 `max-height:280px` 钳回去。
+- 显式高度内联样式必须同时给 `height` 与 `maxHeight: "50vh"`，否则会被 CSS 默认 `max-height:126px` 钳回去。
 - 高度不持久化、不进 URL；收起/展开按钮行为不变；后端零改动。
 - 只本地 commit，不 push。
 - 测试命令：`cd frontend && pnpm test resize` / `pnpm test filter-preview`；全量 `pnpm test && pnpm build`
@@ -387,8 +387,9 @@ function onKeydown(e: KeyboardEvent) {
   position: relative; /* 手柄绝对定位的参照 */
   border-top: 1px solid #222;
   padding: 8px 16px 12px;
-  /* 两行缩略图 + 分组标题 + group 间距：约 280px；小屏不超过半屏 */
-  max-height: min(280px, 50vh);
+  /* 默认只露一行：padding 20 + 组标题 ~20 + 缩略图按钮 ~86 ≈ 126px；
+     小屏用 50vh 兜底（初版为 280px 两行，2026-11-15 调整为一行） */
+  max-height: min(126px, 50vh);
   overflow-y: auto;
 }
 .fp-resize-handle {

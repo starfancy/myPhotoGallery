@@ -114,7 +114,7 @@ const stripHeight = ref<number | null>(null)
 const minHeight = ref<number | null>(null)
 const dragging = ref(false)
 const maxHeight = computed(() => Math.round(window.innerHeight / 2))
-// 显式高度必须同时覆盖 CSS 默认的 max-height:280px，否则 >280 的拖拽结果被钳回去
+// 显式高度必须同时覆盖 CSS 默认的 max-height:126px，否则 >126 的拖拽结果被钳回去
 const stripStyle = computed(() =>
   stripHeight.value === null
     ? {}
@@ -204,8 +204,9 @@ function onKeydown(e: KeyboardEvent) {
 ```css
 .fp-strip {
   position: relative; /* 手柄绝对定位的参照 */
-  /* 保留现有 border-top / padding / overflow-y:auto；默认 max-height 改为 */
-  max-height: min(280px, 50vh);
+  /* 保留现有 border-top / padding / overflow-y:auto；
+     默认 max-height 只露一行缩略图（padding 20 + 组标题 ~20 + 按钮 ~86 ≈ 126px） */
+  max-height: min(126px, 50vh);
 }
 .fp-resize-handle {
   position: absolute;
@@ -239,6 +240,12 @@ function onKeydown(e: KeyboardEvent) {
 显式高度生效时，`.fp-strip` 的 `height` 由内联样式给定、`overflow-y: auto`
 负责内部滚动；默认态（未拖拽过）行为与现状完全一致。收起（v-show=false）
 同时隐藏手柄，重新展开恢复已调高度。
+
+## 修订记录
+
+- 2026-11-15：滤镜条默认 `max-height` 由初版的 `min(280px, 50vh)`（两行）
+  调整为 `min(126px, 50vh)`，默认只显示一行缩略图，其余在区内滚动；
+  拖拽手柄的最小/最大钳制与内联 height 接管逻辑不变。
 
 ## 边界与错误处理
 
