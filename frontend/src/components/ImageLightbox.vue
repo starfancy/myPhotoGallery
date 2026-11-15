@@ -751,6 +751,7 @@ function open() {
         isButton: false,
         tagName: "span",
         className: "pswp__location-label",
+        appendTo: "wrapper",
         onInit: (el) => {
           locationEl = el
           updateLocationLabel()
@@ -954,18 +955,25 @@ watch(
   white-space: nowrap;
 }
 
-/* 搜索结果态：文件名右侧的所在目录，弱化一档 */
+/* 搜索/人物灯箱专属：路径标注底部居中（仅传入 locationResolver 时才注册）。
+   bottom 44px 抬高一档，避开左下拍摄时间与右下缩放比例两个贴底胶囊。 */
 .pswp__location-label {
-  color: rgba(255, 255, 255, 0.75);
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  max-width: min(70vw, calc(100vw - 200px));
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
   font-size: 13px;
-  line-height: 1;
-  margin-inline-start: 10px;
-  align-self: center;
-  max-width: 40vw;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+  user-select: none;
 }
 
 /* ---- 右下角显示比例 ---- */

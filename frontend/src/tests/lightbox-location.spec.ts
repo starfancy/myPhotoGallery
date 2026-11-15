@@ -11,6 +11,7 @@ interface UIRegistration {
   name: string
   ariaLabel?: string
   isButton?: boolean
+  appendTo?: string
   onInit?: (el: HTMLElement) => void
   onClick?: () => void
 }
@@ -90,6 +91,9 @@ describe("ImageLightbox location hook", () => {
     const label = findEl("location-label")
     expect(label).toBeDefined()
     expect(label!.isButton).toBe(false)
+    // 路径标注挂到全屏 wrapper 做底部居中；文件名标签维持顶部栏注册
+    expect(label!.appendTo).toBe("wrapper")
+    expect(findEl("filename-label")?.appendTo).toBeUndefined()
 
     const btn = findEl("view-in-folder")
     expect(btn).toBeDefined()
