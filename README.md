@@ -124,6 +124,7 @@ on the admin Settings page.
 | `[tagging] enabled` | `true` | boolean | Master switch for smart tagging; when false neither the background scanner nor the `myphoto tag` CLI loads any model. |
 | `[tagging] scan_on_import` | `true` | boolean | The server's background scanner synchronously tags newly added/changed photos; unchanged files never reach the models. No effect when `enabled = false` or model files are absent. |
 | `[tagging] models_dir` | `"backend/models"` | directory path | Directory holding the tagger models; relative paths resolve against the directory containing `config.toml`. See [Smart tagging](#smart-tagging-optional). |
+| `[tagging] device` | `"auto"` | `auto` / `cpu` / `cuda` | Inference backend selection. `auto` uses ONNX Runtime CUDA when `onnxruntime-gpu` is installed, otherwise the OpenVINO plan; an explicit `cuda` that is unavailable disables tagging with a clear error instead of silently falling back. |
 
 Notes:
 
@@ -206,8 +207,10 @@ every path before enabling itself:
 ```text
 backend/models/
 ├── clip-ov/
-│   ├── visual.xml + visual.bin     # CLIP visual tower, OpenVINO IR (~168 MB)
-│   └── text.xml + text.bin         # CLIP text tower, OpenVINO IR (~121 MB)
+│   ├── visual.xml + visual.bin     # CLIP visual tower, OpenVINO IR (~168 MB; OpenVINO plan)
+│   └── text.xml + text.bin         # CLIP text tower, OpenVINO IR (~121 MB; both plans)
+├── clip-onnx/
+│   └── visual.onnx                 # CLIP visual tower ONNX (~350 MB; CUDA plan only, via scripts/export_clip_onnx.py)
 ├── clip-vit-base-patch32/          # HF tokenizer/processor configs + pytorch_model.bin (~580 MB)
 ├── yolo11n.onnx                    # YOLO11n (COCO person class), ONNX (~10 MB)
 └── insightface/
@@ -221,12 +224,15 @@ files come from the official InsightFace model zoo (same source as the
 `buffalo_l` pack). Their licenses differ — see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Device selection is automatic: OpenVINO uses a GPU when one is exposed
-(validated on an Intel i5-11320H with Iris Xe) and otherwise falls back to
-CPU; the face detector and recognition model always run on CPU via
-onnxruntime. There is no CUDA execution path today: on an NVIDIA-only host
-(e.g. an RTX 3060 machine without an Intel iGPU) every model runs on CPU and
-the NVIDIA GPU stays unused. Reference throughput on that
+Two backend plans are selected via `[tagging] device` (default `auto`).
+Without CUDA, the OpenVINO plan runs CLIP/YOLO on an Intel GPU when one is
+exposed (validated on an Intel i5-11320H with Iris Xe) and otherwise on
+CPU, with the face models on ONNX Runtime CPU. With `onnxruntime-gpu`
+installed and a CUDA-capable NVIDIA GPU, the CUDA plan runs all four models
+through `CUDAExecutionProvider` (with CPU fallback); this requires the extra
+`clip-onnx/visual.onnx` export — see [docs/deployment.md](docs/deployment.md)
+for the package swap (`onnxruntime` and `onnxruntime-gpu` are mutually
+exclusive), CUDA/cuDNN prerequisites, and verification steps. Reference throughput on that
 hardware: about 350 ms per photo including decode and disk IO — a 2,923-photo
 library tagged in 17 minutes with zero failures (576 faces → 269 clusters),
 i.e. roughly an hour per 10k photos; CPU-only works but is slower. Models

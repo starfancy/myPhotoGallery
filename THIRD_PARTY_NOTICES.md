@@ -56,7 +56,8 @@ MIT 更严格（见第 1 节）。
 | Click | BSD-3-Clause | CLI 框架 |
 | NumPy | BSD-3-Clause | 张量运算 |
 | OpenVINO（锁定 2024.6.0） | Apache-2.0 | CLIP / YOLO 推理运行时 |
-| onnxruntime | MIT | 人脸识别模型推理运行时 |
+| onnxruntime / onnxruntime-gpu | MIT（两包互斥，二选一安装） | 人脸模型推理运行时；gpu 版另承担 cuda 计划下全部四个模型的推理 |
+| CUDA Toolkit / cuDNN（运行时库，使用者自行安装） | NVIDIA EULA（本项目不重新分发其二进制） | onnxruntime-gpu 的 CUDAExecutionProvider 前置依赖 |
 | InsightFace（Python 包） | MIT（仅代码；模型条款见第 1 节） | SCRFD 检测与人脸对齐 |
 | opencv-python | Apache-2.0 | NMS 等图像处理 |
 | Transformers | Apache-2.0 | CLIPProcessor 分词 / 预处理 |

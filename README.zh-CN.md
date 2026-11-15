@@ -119,6 +119,7 @@ myphoto --config /path/to/config.toml list
 | `[tagging] enabled` | `true` | 布尔值 | 智能标签总开关；为 false 时后台扫描器与 `myphoto tag` CLI 都不加载任何模型。 |
 | `[tagging] scan_on_import` | `true` | 布尔值 | 服务端后台扫描器对新增 / 变化图片同步打标；未变化文件不会进入模型。`enabled = false` 或模型缺失时无效。 |
 | `[tagging] models_dir` | `"backend/models"` | 目录路径 | 打标模型所在目录；相对路径相对于 `config.toml` 所在目录解析。见[智能标签（可选）](#智能标签可选)。 |
+| `[tagging] device` | `"auto"` | `auto` / `cpu` / `cuda` | 推理后端选择。`auto` 在安装了 onnxruntime-gpu 时走 ORT CUDA，否则走 OpenVINO 计划；显式写 `cuda` 但环境不具备时打标禁用并明确报错，不静默回退。 |
 
 补充说明：
 
@@ -191,8 +192,10 @@ Transformers 会在 import 时打印 `PyTorch was not found …` 的 advisory
 ```text
 backend/models/
 ├── clip-ov/
-│   ├── visual.xml + visual.bin     # CLIP 视觉塔 OpenVINO IR（约 168 MB）
-│   └── text.xml + text.bin         # CLIP 文本塔 OpenVINO IR（约 121 MB）
+│   ├── visual.xml + visual.bin     # CLIP 视觉塔 OpenVINO IR（约 168 MB；openvino 计划需要）
+│   └── text.xml + text.bin         # CLIP 文本塔 OpenVINO IR（约 121 MB；两个计划都需要）
+├── clip-onnx/
+│   └── visual.onnx                 # CLIP 视觉塔 ONNX（约 350 MB；仅 cuda 计划需要，scripts/ 脚本导出）
 ├── clip-vit-base-patch32/          # HF tokenizer/processor 配置 + pytorch_model.bin（约 580 MB）
 ├── yolo11n.onnx                    # YOLO11n（COCO person 类）ONNX（约 10 MB）
 └── insightface/
@@ -206,11 +209,13 @@ OpenVINO IR；两个 InsightFace 文件来自 InsightFace 官方模型库
 （与 buffalo 系列模型包同源）。三者许可证各不相同，见
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-设备自动选择：OpenVINO 探测到 GPU 就用 GPU（已在 Intel i5-11320H +
-Iris Xe 上验证），否则回退 CPU；人脸检测与识别固定通过 onnxruntime
-跑在 CPU 上。当前**没有 CUDA 执行路径**：在只有 N 卡的主机上（例如
-RTX 3060 且无 Intel 核显），所有模型都跑 CPU，NVIDIA 显卡不会被
-调用。参考性能（上述 i5 + 核显）：含解码与磁盘
+两套加载计划由 `[tagging] device` 切换（默认 `auto` 自动探测）。无
+CUDA 时走 openvino 计划：CLIP / YOLO 经 OpenVINO 探测到 Intel GPU 就
+用 GPU（已在 i5-11320H + Iris Xe 上验证），否则回退 CPU，人脸两个
+模型走 onnxruntime CPU。安装 onnxruntime-gpu 且具备 NVIDIA CUDA 环境
+时可走 cuda 计划：四个模型全部经 `CUDAExecutionProvider` 推理（带 CPU
+回退），但需要额外导出 `clip-onnx/visual.onnx`；包互斥安装、CUDA /
+cuDNN 前置与验证步骤见 [docs/deployment.md](docs/deployment.md)。参考性能（上述 i5 + 核显）：含解码与磁盘
 IO 稳态约 350ms / 张——2923 张图库全量 17 分钟、0 失败（576 张脸
 聚成 269 簇），折合万张约 1 小时；纯 CPU 可用但更慢。模型首次使用
 时才懒加载并常驻内存，启动 web 服务本身不会加载模型。

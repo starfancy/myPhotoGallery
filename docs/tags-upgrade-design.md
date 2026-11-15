@@ -365,6 +365,12 @@ def get_inference_backend():
     return "openvino-cpu"
 ```
 
+> **2026-11 实现状态**：已落地为 `[tagging].device = auto|cpu|cuda`
+> 两套加载计划——cuda 计划四个模型全走 ONNX Runtime GPU（CLIP visual
+> 需额外的 `clip-onnx/visual.onnx`，由 `scripts/export_clip_onnx.py`
+> 导出），openvino 计划即本节原路径；详见
+> `docs/superpowers/specs/2026-11-15-tagger-cuda-execution-provider-design.md`。
+
 ## 7. 实施阶段
 
 ### Phase 1：DB 迁移 + 打标管线（后端）✅ 已完成（2026-11）

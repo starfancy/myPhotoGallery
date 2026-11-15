@@ -269,9 +269,44 @@ transformers、numpy）。注意点：
   pip install -e ".[dev]" -i https://mirrors.aliyun.com/pypi/simple/
   ```
 
-### 2. 模型文件目录布局
+### 2. CUDA 加速（NVIDIA 显卡，可选）
 
-模型总计约 **900 MB**，放到 `config.toml` 中 `[tagging].models_dir`
+默认安装的 onnxruntime 只含 CPU provider，即使在 NVIDIA 主机上打标也
+全部跑 CPU。需要 CUDA 加速时按下述步骤切换：
+
+- **互斥安装 GPU 版 ORT**（`onnxruntime` 与 `onnxruntime-gpu` 两个包
+  不能共存，顺序不能反）：
+
+  ```bash
+  pip uninstall onnxruntime
+  pip install onnxruntime-gpu
+  ```
+
+- **系统前置**：NVIDIA 驱动、CUDA 12.x、cuDNN 9。insightface 2.1 内置
+  `preload_dlls()`，会自动发现 pip 环境中的 CUDA / cuDNN 运行库，通常
+  无需手工配置 PATH。
+- **启用配置**：`config.toml` 的 `[tagging]` 段设 `device = "cuda"`；
+  保持默认 `auto` 时，探测到 `CUDAExecutionProvider` 也会自动启用。
+- **额外模型文件**：cuda 计划需要 `backend/models/clip-onnx/visual.onnx`
+  （约 350MB，不进 git）。在任一装了 CPU 版 torch 的机器上执行
+  `python scripts/export_clip_onnx.py --models-dir backend/models` 导出，
+  再随其他模型一起拷贝到 NVIDIA 主机；OpenVINO 主机不需要该文件。
+- cuda 计划下四个模型全部走 ORT GPU；CLIP text 塔始终留在 OpenVINO
+  CPU——它只在启动时预计算一次提示词向量，不影响单张打标耗时。
+- **验证**：`myphoto tag status` 应打印
+  `inference backend: cuda (ONNX Runtime GPU)`，且打标加载日志列出各
+  会话的实际 providers。
+- **显式 `device = "cuda"` 但环境不具备时**：web 服务照常启动、打标
+  禁用并写 warning 日志；CLI `tag run` / `tag relabel` 直接报错，消息
+  含 onnxruntime-gpu 安装提示。
+- 想退回 CPU：`pip uninstall onnxruntime-gpu && pip install onnxruntime`，
+  或把配置改为 `device = "cpu"`（无需卸载 GPU 包，强制所有 ORT 会话走
+  CPU provider）。
+
+### 3. 模型文件目录布局
+
+模型总计约 **900 MB**（cuda 计划另需约 350MB 的 visual.onnx），放到
+`config.toml` 中 `[tagging].models_dir`
 指向的目录（默认 `backend/models/`，相对路径相对配置文件所在目录
 解析）。目录结构必须与下方一致——程序启用打标前会逐个检查文件是否
 就位：
@@ -279,8 +314,10 @@ transformers、numpy）。注意点：
 ```text
 backend/models/
 ├── clip-ov/
-│   ├── visual.xml + visual.bin     # CLIP 视觉塔 OpenVINO IR（约 168 MB）
-│   └── text.xml + text.bin         # CLIP 文本塔 OpenVINO IR（约 121 MB）
+│   ├── visual.xml + visual.bin     # CLIP 视觉塔 OpenVINO IR（约 168 MB；openvino 计划需要）
+│   └── text.xml + text.bin         # CLIP 文本塔 OpenVINO IR（约 121 MB；两个计划都需要）
+├── clip-onnx/
+│   └── visual.onnx                 # CLIP 视觉塔 ONNX（约 350 MB；仅 cuda 计划需要，导出脚本生成）
 ├── clip-vit-base-patch32/          # HF tokenizer/processor 配置 + pytorch_model.bin（约 580 MB）
 ├── yolo11n.onnx                    # YOLO11n（COCO person 类）ONNX（约 10 MB）
 └── insightface/
@@ -301,7 +338,7 @@ HF tokenizer / processor 配置与原始 PyTorch 权重；两个 InsightFace
 > CLIP 为 MIT。完整条款与商用授权方式见
 > [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
 
-### 3. 验证与开关
+### 4. 验证与开关
 
 模型放好后，用 CLI 验证（只检查文件，不加载模型）：
 
@@ -318,28 +355,30 @@ myphoto tag status
 enabled = true            # 总开关；false 时扫描器与 CLI 都不打标
 scan_on_import = true     # 后台扫描时对新增/变化图片同步打标
 models_dir = "backend/models"
+# device = "auto"         # auto | cpu | cuda；cuda 需 onnxruntime-gpu，见第 2 节
 ```
 
 低性能主机想彻底关闭该功能，设 `enabled = false` 即可，其余服务
 不受影响。
 
-### 4. 硬件与性能
+### 5. 硬件与性能
 
-- 设备自动选择：OpenVINO 探测到 GPU 就用 GPU（已在 Intel
-  i5-11320H + Iris Xe 核显上验证），否则回退 CPU；人脸检测与识别
-  固定走 onnxruntime 的 CPU provider，**不依赖 CUDA / NVIDIA 显卡**。
-- **NVIDIA 显卡（如 RTX 3060）当前不会被调用**：pip 版 OpenVINO 只
-  带 Intel 设备插件，在 N 卡主机上回退 CPU；onnxruntime 也固定使用
-  CPU provider。即 N 卡主机上打标功能完全可用，但全部模型跑在 CPU
-  上、速度较慢。启用 CUDA 需要改造打标后端（onnxruntime-gpu +
-  CUDAExecutionProvider，CLIP 还需额外导出 ONNX），属未实现的规划项。
-- 参考性能（上述 i5 + 核显）：含解码与磁盘 IO 稳态约 350ms / 张，
-  2923 张全量 17 分钟、0 失败（576 张脸聚成 269 簇），折合万张
-  约 1 小时；纯 CPU 可用但更慢，请预留更宽裕的时间窗。
+- 两套加载计划按 `[tagging].device` 切换（默认 auto 自动探测）：
+  - **openvino 计划**（无 CUDA 时的默认）：CLIP / YOLO 走 OpenVINO，
+    探测到 Intel GPU 就用 GPU（已在 i5-11320H + Iris Xe 核显上验证），
+    否则回退 CPU；人脸两个模型走 onnxruntime CPU provider。
+  - **cuda 计划**（安装 onnxruntime-gpu 且探测到 CUDA EP）：四个模型
+    全部走 onnxruntime 的 CUDAExecutionProvider（带 CPU 回退），适配
+    RTX 3060 等 NVIDIA 主机，配置方法见第 2 节。
+- 参考性能（上述 i5 + 核显，openvino 计划）：含解码与磁盘 IO 稳态约
+  350ms / 张，2923 张全量 17 分钟、0 失败（576 张脸聚成 269 簇），
+  折合万张约 1 小时。其中人脸段（512px 样本、暖缓存）SCRFD 检测
+  约 15ms、每张脸 ArcFace 约 8ms。cuda 计划的加速比依显卡而异，请在
+  目标主机实测。
 - 模型在首次打标时懒加载并常驻内存，web 服务启动阶段不加载模型，
   因此缺模型不会拖慢启动。
 
-### 5. 存量图库打标
+### 6. 存量图库打标
 
 新图入库时由 `myphoto serve` 的后台扫描器自动打标；存量图片用 CLI
 批量补打，支持断点续跑（已打标、未变化的自动跳过，历史失败默认
@@ -357,7 +396,7 @@ myphoto tag gc                                   # 清理 --force 重打后的�
 注意：命令行 `myphoto rescan` 不挂载打标器，不会触发模型；命令行
 场景的打标统一走 `myphoto tag run`。
 
-### 6. 隐私
+### 7. 隐私
 
 `app.db` 中的 `face_embeddings` 表保存人脸生物特征向量，不要把数据
 库上传到任何公开位置，做异地备份时同样注意保密。全部推理离线完成，
