@@ -49,15 +49,20 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
             print(f"[myphoto] initial admin created. username=admin password={pw}", flush=True)
         # 智能打标（tags upgrade Phase 1）：enabled && scan_on_import && 模型就位
         # 才把 Tagger 传给 Scanner；否则 None → 扫描行为与打标前完全一致。
+        # 智能打标：enabled && scan_on_import && 模型/后端就位才传给 Scanner；
+        # 显式 cuda 不可用或缺模型时 tagger=None，打标禁用但服务正常启动。
         tagger = None
         if cfg.tagging_enabled and cfg.tagging_scan_on_import:
             from myphoto.tagger import Tagger
 
-            candidate = Tagger(resolve_models_dir(cfg, config_file))
+            candidate = Tagger(
+                resolve_models_dir(cfg, config_file),
+                device=cfg.tagging_device,
+            )
             if candidate.available():
                 tagger = candidate
             else:
-                log.info("tagging models not available; scan-time tagging disabled")
+                log.warning("tagging disabled: %s", candidate.unavailable_reason())
         scanner = Scanner(sm, hash_workers=cfg.scanner_hash_workers, tagger=tagger)
         await scanner.start()
         async with sm() as session:

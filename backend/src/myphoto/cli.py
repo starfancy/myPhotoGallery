@@ -301,14 +301,19 @@ def reset_password(ctx, username, password):
 # ---------- 智能标签（tags upgrade Phase 1） ----------
 
 
-def _build_tagger(cfg, config_path: str | None):
-    """按 config 构造 Tagger；未启用 / 模型未就位 → None（调用方决定如何提示）。"""
+def _build_tagger(cfg, config_path: str | None) -> tuple:
+    """返回 (tagger, reason)：成功 (tagger, None)，不可用 (None, 中文原因)。"""
     if not cfg.tagging_enabled:
-        return None
+        return None, "[tagging].enabled=false，智能标签已关闭"
     from myphoto.tagger import Tagger
 
-    tagger = Tagger(resolve_models_dir(cfg, resolve_config_path(config_path)))
-    return tagger if tagger.available() else None
+    tagger = Tagger(
+        resolve_models_dir(cfg, resolve_config_path(config_path)),
+        device=cfg.tagging_device,
+    )
+    if tagger.available():
+        return tagger, None
+    return None, tagger.unavailable_reason() or "tagger models missing"
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -368,8 +373,25 @@ def tag_status_cmd(ctx, gallery):
                 rows = [r for r in rows if r["gallery"] == gallery]
                 if not rows:
                     raise click.ClickException(f"gallery '{gallery}' not found")
-            ready = _build_tagger(cfg, ctx.obj["config_path"]) is not None
-            click.echo(f"models ready: {'yes' if ready else 'NO（拷贝模型到 [tagging].models_dir 后可用）'}")
+            # status 命令无论模型是否就位都展示解析出的后端计划（Tagger 构造
+            # 只做文件检查、不加载模型，零重负载），便于排查配置问题。
+            from myphoto.tagger import Tagger
+
+            if not cfg.tagging_enabled:
+                click.echo("models ready: NO（[tagging].enabled=false，智能标签已关闭）")
+            else:
+                diag = Tagger(
+                    resolve_models_dir(cfg, resolve_config_path(ctx.obj["config_path"])),
+                    device=cfg.tagging_device,
+                )
+                if diag.backend_plan == "cuda":
+                    click.echo("inference backend: cuda (ONNX Runtime GPU)")
+                else:
+                    click.echo("inference backend: openvino (Intel GPU/CPU auto)")
+                if diag.available():
+                    click.echo("models ready: yes")
+                else:
+                    click.echo(f"models ready: NO（{diag.unavailable_reason()}）")
             click.echo(f"{'gallery':20s} {'total':>7s} {'tagged':>7s} {'pending':>8s} {'failed':>7s}")
             click.echo("-" * 55)
             for r in rows:
@@ -394,12 +416,9 @@ def tag_run_cmd(ctx, gallery, folder, force):
     async def _run_it():
         engine, sm, cfg = await _bootstrap(ctx.obj["config_path"])
         try:
-            tagger = _build_tagger(cfg, ctx.obj["config_path"])
+            tagger, reason = _build_tagger(cfg, ctx.obj["config_path"])
             if tagger is None:
-                raise click.ClickException(
-                    "tagger 不可用：[tagging].enabled=false 或模型未就位"
-                    f"（期望目录 {resolve_models_dir(cfg, resolve_config_path(ctx.obj['config_path']))}）"
-                )
+                raise click.ClickException(f"tagger 不可用：{reason}")
             from myphoto.tagging_jobs import cluster_faces, tag_images
 
             async with sm() as s:
@@ -464,11 +483,9 @@ def tag_relabel_cmd(ctx):
     async def _run_it():
         engine, sm, cfg = await _bootstrap(ctx.obj["config_path"])
         try:
-            tagger = _build_tagger(cfg, ctx.obj["config_path"])
+            tagger, reason = _build_tagger(cfg, ctx.obj["config_path"])
             if tagger is None:
-                raise click.ClickException(
-                    "tagger 不可用：[tagging].enabled=false 或模型未就位"
-                )
+                raise click.ClickException(f"tagger 不可用：{reason}")
             from myphoto.tagging_jobs import relabel
 
             n = await relabel(sm, tagger, progress_cb=_make_progress_echo())

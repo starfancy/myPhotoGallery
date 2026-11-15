@@ -33,3 +33,17 @@ def test_build_app_honors_explicit_relative_data_dir(tmp_path):
         db = tmp_path / "db" / "app.db"
         assert db.exists(), f"expected db at {db}"
         assert app.state.config.data_dir == str((tmp_path / "db").resolve())
+
+
+def test_lifespan_survives_explicit_cuda_unavailable(tmp_path, monkeypatch):
+    import onnxruntime as ort
+    monkeypatch.setattr(ort, "get_available_providers", lambda: ["CPUExecutionProvider"])
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n'
+        '[tagging]\ndevice = "cuda"\n',
+        encoding="utf-8",
+    )
+    app = build_app(config_path=str(cfg_path))
+    with TestClient(app):  # 不抛异常即通过：打标禁用、服务照常启动
+        assert (tmp_path / "app.db").exists()

@@ -457,3 +457,39 @@ def test_cli_tag_run_friendly_error_when_models_missing(tmp_path):
     r = runner.invoke(cli, ["--config", str(cfg), "tag", "run"])
     assert r.exit_code != 0
     assert "tagger 不可用" in r.output
+
+
+def test_cli_tag_status_reports_backend_line(tmp_path):
+    photos = tmp_path / "photos"
+    _jpg(photos / "a.jpg")
+    cfg = tmp_path / "config.toml"
+    runner = CliRunner()
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "Home"])
+    runner.invoke(cli, ["--config", str(cfg), "add-root", "Home", "R", str(photos.resolve())])
+    runner.invoke(cli, ["--config", str(cfg), "rescan"])
+
+    r = runner.invoke(cli, ["--config", str(cfg), "tag", "status"])
+    assert r.exit_code == 0, r.output
+    assert "inference backend" in r.output
+
+
+def test_cli_tag_run_explicit_cuda_unavailable_has_hint(tmp_path, monkeypatch):
+    photos = tmp_path / "photos"
+    _jpg(photos / "a.jpg")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n'
+        '[tagging]\ndevice = "cuda"\n',
+        encoding="utf-8",
+    )
+    import onnxruntime as ort
+    monkeypatch.setattr(ort, "get_available_providers", lambda: ["CPUExecutionProvider"])
+
+    runner = CliRunner()
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "Home"])
+    runner.invoke(cli, ["--config", str(cfg), "add-root", "Home", "R", str(photos.resolve())])
+    runner.invoke(cli, ["--config", str(cfg), "rescan"])
+    r = runner.invoke(cli, ["--config", str(cfg), "tag", "run"])
+    assert r.exit_code != 0
+    assert "CUDAExecutionProvider" in r.output
+    assert "onnxruntime-gpu" in r.output
