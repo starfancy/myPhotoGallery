@@ -53,6 +53,7 @@ class AppConfig:
     tagging_enabled: bool          # 总开关；false 时 scanner/CLI 都不打标
     tagging_models_dir: str        # 模型目录；相对路径相对 config.toml 所在目录解析
     tagging_scan_on_import: bool    # 扫描时对新变图片同步打标（设计 §3.1；不变文件不受影响）
+    tagging_device: str             # "auto" | "cpu" | "cuda"；非法值回退 auto
 
 
 _DEFAULT_TEMPLATE = """\
@@ -97,6 +98,7 @@ retention_days = 180
 # enabled = true
 # scan_on_import = true
 # models_dir = "backend/models"
+# device = "auto"        # auto | cpu | cuda；cuda 需安装 onnxruntime-gpu
 """
 
 
@@ -176,6 +178,13 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
     tagging_enabled = _as_bool(tagging_section.get("enabled"), True)
     tagging_scan_on_import = _as_bool(tagging_section.get("scan_on_import"), True)
     tagging_models_dir = str(tagging_section.get("models_dir") or "backend/models")
+    tagging_device_raw = str(tagging_section.get("device") or "auto").strip().lower()
+    if tagging_device_raw not in ("auto", "cpu", "cuda"):
+        log.warning(
+            "[tagging].device=%r 非法（合法值 auto|cpu|cuda），回退 auto",
+            tagging_device_raw,
+        )
+        tagging_device_raw = "auto"
 
     # ---- data_dir resolution ----
     raw = app_section.get("data_dir")
@@ -208,6 +217,7 @@ def load_or_init(path: Union[str, Path]) -> AppConfig:
         tagging_enabled=tagging_enabled,
         tagging_models_dir=tagging_models_dir,
         tagging_scan_on_import=tagging_scan_on_import,
+        tagging_device=tagging_device_raw,
     )
 
 

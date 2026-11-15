@@ -202,3 +202,38 @@ def test_default_template_contains_scanner_section(tmp_path):
     assert "scanner" in data
     assert data["scanner"].get("hash_workers") is None
     assert load_or_init(p).scanner_hash_workers is None
+
+
+# ---------- [tagging].device ----------
+
+_SECRET = '[app]\njwt_secret="secret-value-of-sufficient-length-xxxxx"\n'
+
+
+def test_tagging_device_defaults_to_auto(tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text(_SECRET, encoding="utf-8")
+    assert load_or_init(p).tagging_device == "auto"
+
+
+def test_tagging_device_reads_three_valid_values(tmp_path):
+    for value in ("auto", "cpu", "cuda"):
+        p = tmp_path / "config.toml"
+        p.write_text(_SECRET + f"[tagging]\ndevice = {value!r}\n", encoding="utf-8")
+        assert load_or_init(p).tagging_device == value
+
+
+def test_tagging_device_unknown_value_falls_back_to_auto(tmp_path, caplog):
+    p = tmp_path / "config.toml"
+    p.write_text(_SECRET + '[tagging]\ndevice = "tpu"\n', encoding="utf-8")
+    with caplog.at_level("WARNING"):
+        cfg = load_or_init(p)
+    assert cfg.tagging_device == "auto"
+    assert "device" in caplog.text.lower()
+
+
+def test_default_template_contains_tagging_device_hint(tmp_path):
+    p = tmp_path / "config.toml"
+    load_or_init(p)
+    text = p.read_text(encoding="utf-8")
+    assert "[tagging]" in text
+    assert "device" in text
