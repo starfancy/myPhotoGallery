@@ -19,6 +19,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image as PILImage
 
+from myphoto.inference import BackendUnavailable, resolve_backend
+
 log = logging.getLogger("myphoto.tagger")
 
 # 模型版本戳：写入 images.tag_model_version / image_embeddings.model_version /
@@ -164,17 +166,40 @@ class Tagger:
     并发进来时由 ``_lock`` 串行化推理（机械硬盘场景设计上就是单线程 IO）。
     """
 
-    def __init__(self, models_dir: str | Path, backend: str = "auto"):
+    def __init__(self, models_dir: str | Path, device: str = "auto", available=None):
+        """available 仅测试注入；生产传 None 由 inference 模块查 ORT。
+
+        构造不加载模型、不抛 BackendUnavailable：显式 cuda 不可用时记录
+        原因并兜底 openvino 计划，调用方经 unavailable_reason()/available()
+        决定是否启用，保证 web 服务永远能启动。ORT providers 在构造时一次性
+        算好（注入 available 时同样生效），_ensure_loaded 直接复用，不再
+        重新探测——这样无 GPU 机器也能注入 provider 列表走 cuda 计划代码。
+        """
+        from myphoto.inference import select_ort_providers
+
         self.models_dir = Path(models_dir)
-        self.backend = backend
+        self.device = device
         self._lock = threading.Lock()
         self._loaded = False
+        self._init_error: str | None = None
+        try:
+            self.backend_plan = resolve_backend(device, available)
+        except BackendUnavailable as exc:
+            self._init_error = str(exc)
+            self.backend_plan = "openvino"
+        # 人脸两个 ORT 会话两计划都要；cuda 计划的 CLIP/YOLO ORT 会话也用它
+        if self.backend_plan == "cuda":
+            self._ort_providers = select_ort_providers(device, available)
+        else:
+            self._ort_providers = ["CPUExecutionProvider"]
         # 运行时填充（懒加载后才有）
         self._clip_proc = None
-        self._clip_visual = None
-        self._clip_text_emb = None  # (N_prompts, 512) L2 归一化
+        self._clip_visual = None          # openvino 计划：编译模型
+        self._clip_visual_ort = None      # cuda 计划：ORT 会话
+        self._clip_text_emb = None        # (N_prompts, 512) L2 归一化
         self._flat_prompts: list[tuple[str, str, str]] = []
-        self._yolo_compiled = None
+        self._yolo_compiled = None        # openvino 计划
+        self._yolo_ort = None             # cuda 计划
         self._yolo_input = None
         self._scrfd = None
         self._recog = None
@@ -183,18 +208,32 @@ class Tagger:
 
     def expected_paths(self) -> dict[str, Path]:
         md = self.models_dir
-        return {
-            "clip_visual_xml": md / "clip-ov" / "visual.xml",
-            "clip_text_xml": md / "clip-ov" / "text.xml",
+        paths = {
             "clip_tokenizer": md / "clip-vit-base-patch32",
             "yolo_onnx": md / "yolo11n.onnx",
             "face_det_onnx": md / "insightface" / "det_500m.onnx",
             "face_rec_onnx": md / "insightface" / "w600k_mbf.onnx",
+            # text 塔两计划共用，始终走 OpenVINO CPU
+            "clip_text_xml": md / "clip-ov" / "text.xml",
         }
+        if self.backend_plan == "cuda":
+            paths["clip_visual_onnx"] = md / "clip-onnx" / "visual.onnx"
+        else:
+            paths["clip_visual_xml"] = md / "clip-ov" / "visual.xml"
+        return paths
+
+    def unavailable_reason(self) -> str | None:
+        """None = 可用；否则返回中文原因（配置/缺文件），供 CLI 与启动日志。"""
+        if self._init_error is not None:
+            return self._init_error
+        missing = [str(p) for p in self.expected_paths().values() if not p.exists()]
+        if missing:
+            return f"tagger models missing: {missing}"
+        return None
 
     def available(self) -> bool:
-        """所有模型文件就位？不加载模型，只查文件。"""
-        return all(p.exists() for p in self.expected_paths().values())
+        """配置后端可用且所有模型文件就位？不加载模型，只查文件。"""
+        return self.unavailable_reason() is None
 
     # ---------- 懒加载 ----------
 
