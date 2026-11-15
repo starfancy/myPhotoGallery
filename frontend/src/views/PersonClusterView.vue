@@ -1,11 +1,14 @@
 <script setup lang="ts">
 /** 人物簇页（tags Phase 3 §4.4）：左侧簇列表（按照片数降序），右侧选中簇
  *  的照片按年/月分组，组内使用与图库一致的 justified 网格。点击簇名可重命名。 */
-import { onMounted, ref, watch } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
+import { useRouter } from "vue-router"
 import AppHeader from "../components/AppHeader.vue"
 import JustifiedGrid from "../components/JustifiedGrid.vue"
-import { apiGet, apiPut } from "../api"
+import ImageLightbox from "../components/ImageLightbox.vue"
+import { apiDelete, apiGet, apiPut, HttpError } from "../api"
 import type { ImageRow } from "../stores/browse"
+import { encodePathSegments } from "../utils/path"
 
 interface Cluster {
   cluster_id: string
@@ -28,6 +31,7 @@ const loading = ref(false)
 const renaming = ref(false)
 const renameInput = ref("")
 const loadError = ref("")
+const router = useRouter()
 
 /** 信息开关：缩略图文件名 + 所在图库/文件夹位置；偏好独立于图库页持久化。 */
 const SHOW_INFO_KEY = "people.grid.showInfo"
@@ -83,11 +87,61 @@ function groupTitle(g: Group) {
   return `${g.year}年${g.month}月`
 }
 
-/** 位置文本：网格角标与（后续）灯箱标注共用；根目录图片只显示图库名。
+/** 位置文本：网格角标与灯箱标注共用；根目录图片只显示图库名。
  *  共享组件的函数类型以 ImageRow 为参数，内部收窄访问扩展字段。 */
 function locationText(it: ImageRow): string {
   const c = it as ClusterImage
   return c.folder_path ? `${c.gallery_name}/${c.folder_path}` : c.gallery_name
+}
+
+/** 全簇图片按分组顺序拍平：灯箱以此作为完整图片集，翻页可跨年/月组。 */
+const flatImages = computed(() => groups.value.flatMap((g) => g.images))
+
+/** 灯箱当前起点图片 id；null = 关闭。状态刻意不进 URL（人物页无图片路由）。 */
+const lightboxId = ref<number | null>(null)
+
+function openLightbox(id: number) {
+  lightboxId.value = id
+}
+
+/** 灯箱「在所在文件夹中查看」：数据自带 gallery_id/root_id，跨图库也能跳回。 */
+function onViewInFolder(row: ImageRow) {
+  const it = row as ClusterImage
+  const suffix = encodePathSegments(it.folder_path)
+  router.push(
+    suffix
+      ? `/galleries/${it.gallery_id}/r/${it.root_id}/${suffix}`
+      : `/galleries/${it.gallery_id}/r/${it.root_id}`,
+  )
+}
+
+/** 网格三点/右键菜单删除：确认后走统一图片删除接口（灯箱内删除由其自行发请求）。 */
+async function onGridMenuAction(id: number, action: "delete") {
+  if (action !== "delete") return
+  const image = flatImages.value.find((it) => it.id === id)
+  if (!image) return
+  if (!window.confirm(`确定将「${image.filename}」移入回收站？\n\n30 天内可从「回收站」恢复。`)) return
+  try {
+    await apiDelete(`/api/images/${id}`)
+  } catch (err) {
+    const m = err instanceof HttpError ? err.message : "删除失败"
+    window.alert(`删除失败：${m}`)
+    return
+  }
+  await onImageDeleted(id)
+}
+
+/** 删除成功统一收尾：本地摘除、关灯箱、刷新左栏簇计数；当前簇被删空则切走。 */
+async function onImageDeleted(id: number) {
+  groups.value = groups.value
+    .map((g) => ({ ...g, images: g.images.filter((it) => it.id !== id) }))
+    .filter((g) => g.images.length > 0)
+  lightboxId.value = null
+  await loadClusters()
+  if (!clusters.value.some((c) => c.cluster_id === selectedId.value)) {
+    if (clusters.value.length) await selectCluster(clusters.value[0].cluster_id)
+    else groups.value = []
+  }
 }
 
 onMounted(loadClusters)
@@ -192,10 +246,21 @@ onMounted(loadClusters)
               :items="g.images"
               :show-filename="showInfo"
               :badge-for="showInfo ? locationText : undefined"
+              @open="openLightbox"
+              @menu-action="onGridMenuAction"
             />
           </div>
         </section>
       </div>
     </main>
+    <ImageLightbox
+      v-if="lightboxId !== null && flatImages.some((it) => it.id === lightboxId)"
+      :items="flatImages"
+      :start-id="lightboxId"
+      :location-resolver="locationText"
+      @close="lightboxId = null"
+      @deleted="onImageDeleted"
+      @view-in-folder="onViewInFolder"
+    />
   </div>
 </template>

@@ -134,4 +134,75 @@ describe("PersonClusterView", () => {
     ;({ w } = await mountView({ preserveStorage: true }))
     expect(w.findAll(".lb-cell-filename").length).toBe(3)
   })
+
+  /** 打开第一张缩略图对应的灯箱（PhotoCell 内无 aria-label 的主按钮）。 */
+  async function openFirstCellLightbox(
+    w: Awaited<ReturnType<typeof mountView>>["w"],
+  ) {
+    const cellBtn = w.findAll(".lb-grid-cell button")
+      .find((b) => !b.attributes("aria-label"))!
+    await cellBtn.trigger("click")
+    await flushPromises()
+    return w.findComponent(LightboxStub)
+  }
+
+  it("点缩略图开灯箱：items 为全簇拍平列表、startId 为所点图片", async () => {
+    const { w } = await mountView()
+    const lb = await openFirstCellLightbox(w)
+    expect(lb.exists()).toBe(true)
+    const ids = (lb.props("items") as Array<{ id: number }>).map((it) => it.id)
+    expect(ids).toEqual([11, 12, 13])
+    expect(lb.props("startId")).toBe(11)
+  })
+
+  it("locationResolver：子目录返回图库/路径，根目录只返回图库名", async () => {
+    const { w } = await mountView()
+    const lb = await openFirstCellLightbox(w)
+    const resolver = lb.props("locationResolver") as (it: typeof IMG_11) => string
+    expect(resolver(IMG_11)).toBe("家庭相册/2024/旅行")
+    expect(resolver(IMG_12)).toBe("家庭相册")
+  })
+
+  it("viewInFolder 跳到对应图库/根/文件夹，根目录路径无尾斜杠", async () => {
+    const { w, router } = await mountView()
+    const lb = await openFirstCellLightbox(w)
+    lb.vm.$emit("viewInFolder", IMG_11)
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe(
+      "/galleries/7/r/9/2024/%E6%97%85%E8%A1%8C",
+    )
+    lb.vm.$emit("viewInFolder", IMG_12)
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe("/galleries/7/r/9")
+  })
+
+  it("网格菜单删除：确认后调 DELETE、本地摘除图片并重拉簇列表", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    const { w, fetchFn } = await mountView()
+    const menuBtn = w.findAll(".lb-cell-menu-btn")[0]
+    await menuBtn.trigger("click")
+    await flushPromises()
+    await w.get(".lb-cell-menu-item").trigger("click")
+    await flushPromises()
+    const calls = fetchFn.mock.calls as unknown as Array<[string, RequestInit?]>
+    expect(calls.some(
+      ([u, init]) => init?.method === "DELETE" && u.includes("/api/images/11"),
+    )).toBe(true)
+    expect(w.findAll("img").some((im) => im.attributes("alt") === "a.jpg")).toBe(false)
+    // 初始 1 次簇列表 + 删除收尾再拉 1 次（images 路径不以 bare clusters 结尾）
+    const clusterCalls = calls.filter(([u]) => u.endsWith("/api/tags/clusters"))
+    expect(clusterCalls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("灯箱 deleted 事件：摘除图片并关闭灯箱", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    const { w } = await mountView()
+    let lb = await openFirstCellLightbox(w)
+    expect(lb.exists()).toBe(true)
+    lb.vm.$emit("deleted", 11)
+    await flushPromises()
+    lb = w.findComponent(LightboxStub)
+    expect(lb.exists()).toBe(false)
+    expect(w.findAll("img").some((im) => im.attributes("alt") === "a.jpg")).toBe(false)
+  })
 })
