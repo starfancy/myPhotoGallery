@@ -1,0 +1,137 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { defineComponent } from "vue"
+import { flushPromises, mount } from "@vue/test-utils"
+import { createMemoryHistory, createRouter } from "vue-router"
+import { createPinia, setActivePinia } from "pinia"
+import PersonClusterView from "../views/PersonClusterView.vue"
+import JustifiedGrid from "../components/JustifiedGrid.vue"
+import { useAuthStore } from "../stores/auth"
+
+beforeAll(() => {
+  // jsdom 缺 ResizeObserver（JustifiedGrid 排版依赖）
+  vi.stubGlobal("ResizeObserver", class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  })
+})
+
+const CLUSTERS = [
+  { cluster_id: "P001", display_name: "张三", sample_face_id: null, image_count: 3 },
+]
+
+const IMG_11 = {
+  id: 11, filename: "a.jpg", width: 400, height: 300, sha1: "s11",
+  taken_at: 1709251200, size_bytes: 100, mtime: 1700000000, is_raw: false,
+  scene_major: null, scene_minor: null,
+  gallery_id: 7, root_id: 9, gallery_name: "家庭相册", folder_path: "2024/旅行",
+}
+const IMG_12 = {
+  ...IMG_11, id: 12, filename: "b.jpg", sha1: "s12", folder_path: "",
+}
+const IMG_13 = {
+  ...IMG_11, id: 13, filename: "c.jpg", sha1: "s13", taken_at: null, folder_path: "",
+}
+
+const GROUP_RESPONSE = {
+  total: 3,
+  groups: [
+    { year: 2024, month: 3, images: [IMG_11, IMG_12] },
+    { year: 0, month: 0, images: [IMG_13] },
+  ],
+}
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  })
+}
+
+// 视图在 Task 3 才挂载真灯箱；桩提前注册，未匹配时无副作用
+const LightboxStub = defineComponent({
+  name: "ImageLightbox",
+  props: ["items", "startId", "locationResolver"],
+  emits: ["close", "change", "deleted", "viewInFolder"],
+  template: `<div class="lb-stub" />`,
+})
+
+async function mountView(opts: { preserveStorage?: boolean } = {}) {
+  const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(input)
+    const method = init?.method ?? "GET"
+    if (method === "DELETE" && u.includes("/api/images/")) {
+      return new Response(null, { status: 204 })
+    }
+    if (u.includes("/api/tags/clusters/P001/images")) return json(GROUP_RESPONSE)
+    if (u.includes("/api/tags/clusters")) return json(CLUSTERS)
+    return json({ error: { code: "not_found", message: "x" } }, 404)
+  })
+  vi.stubGlobal("fetch", fetchFn)
+  setActivePinia(createPinia())
+  const auth = useAuthStore()
+  auth.$patch({
+    user: { id: 1, username: "u", role: "admin", access_scope: "lan_only" },
+  })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: "/people", component: { template: "<div/>" } },
+      { path: "/galleries", component: { template: "<div/>" } },
+      { path: "/galleries/:gid/r/:rid/:path(.*)*", component: { template: "<div/>" } },
+    ],
+  })
+  await router.push("/people")
+  // 默认每次挂载给干净的 localStorage；持久化用例需要预置值时传 preserveStorage
+  if (!opts.preserveStorage) localStorage.clear()
+  const w = mount(PersonClusterView, {
+    global: { plugins: [router], stubs: { ImageLightbox: LightboxStub } },
+  })
+  await flushPromises()
+  await flushPromises()
+  return { w, router, fetchFn }
+}
+
+describe("PersonClusterView", () => {
+  beforeEach(() => {
+    // unstub 会清掉 beforeAll 的 ResizeObserver 桩，必须立刻重建，
+    // 否则 JustifiedGrid 挂载时 new ResizeObserver 抛错（同 browse-search 模式）
+    vi.unstubAllGlobals()
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    localStorage.clear()
+  })
+
+  it("按年/月组渲染 justified 网格，默认不显示文件名与位置角标", async () => {
+    const { w } = await mountView()
+    expect(w.findAllComponents(JustifiedGrid).length).toBe(2)
+    expect(w.text()).toContain("2024年3月")
+    expect(w.text()).toContain("未知日期")
+    expect(w.findAll("img").some((im) => im.attributes("alt") === "a.jpg")).toBe(true)
+    expect(w.findAll(".lb-cell-filename").length).toBe(0)
+    expect(w.findAll(".lb-cell-badge").length).toBe(0)
+  })
+
+  it("信息开关：显示文件名与位置角标，文本区分根目录/子目录并持久化", async () => {
+    let { w } = await mountView()
+    const toggle = w.get('button[aria-label="缩略图上显示文件名与所在位置"]')
+    await toggle.trigger("click")
+    await flushPromises()
+    expect(w.findAll(".lb-cell-filename").length).toBe(3)
+    const badges = w.findAll(".lb-cell-badge").map((b) => b.text()).sort()
+    expect(badges).toEqual(
+      ["家庭相册", "家庭相册", "家庭相册/2024/旅行"].sort(),
+    )
+    expect(localStorage.getItem("people.grid.showInfo")).toBe("1")
+    // 再点一次关闭
+    await toggle.trigger("click")
+    expect(w.findAll(".lb-cell-badge").length).toBe(0)
+    // 重新挂载：localStorage 中的开启态被恢复
+    localStorage.setItem("people.grid.showInfo", "1")
+    ;({ w } = await mountView({ preserveStorage: true }))
+    expect(w.findAll(".lb-cell-filename").length).toBe(3)
+  })
+})

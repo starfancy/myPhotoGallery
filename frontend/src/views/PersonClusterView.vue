@@ -1,9 +1,11 @@
 <script setup lang="ts">
 /** 人物簇页（tags Phase 3 §4.4）：左侧簇列表（按照片数降序），右侧选中簇
- *  的照片按年/月分组。点击簇名可重命名。 */
-import { onMounted, ref } from "vue"
+ *  的照片按年/月分组，组内使用与图库一致的 justified 网格。点击簇名可重命名。 */
+import { onMounted, ref, watch } from "vue"
 import AppHeader from "../components/AppHeader.vue"
+import JustifiedGrid from "../components/JustifiedGrid.vue"
 import { apiGet, apiPut } from "../api"
+import type { ImageRow } from "../stores/browse"
 
 interface Cluster {
   cluster_id: string
@@ -11,13 +13,11 @@ interface Cluster {
   sample_face_id: number | null
   image_count: number
 }
-interface ClusterImage {
-  id: number
-  filename: string
-  width: number | null
-  height: number | null
-  sha1: string
-  taken_at: number | null
+interface ClusterImage extends ImageRow {
+  gallery_id: number
+  root_id: number
+  gallery_name: string
+  folder_path: string
 }
 interface Group { year: number; month: number; images: ClusterImage[] }
 
@@ -28,6 +28,11 @@ const loading = ref(false)
 const renaming = ref(false)
 const renameInput = ref("")
 const loadError = ref("")
+
+/** 信息开关：缩略图文件名 + 所在图库/文件夹位置；偏好独立于图库页持久化。 */
+const SHOW_INFO_KEY = "people.grid.showInfo"
+const showInfo = ref(localStorage.getItem(SHOW_INFO_KEY) === "1")
+watch(showInfo, (v) => localStorage.setItem(SHOW_INFO_KEY, v ? "1" : "0"))
 
 async function loadClusters() {
   loadError.value = ""
@@ -78,6 +83,13 @@ function groupTitle(g: Group) {
   return `${g.year}年${g.month}月`
 }
 
+/** 位置文本：网格角标与（后续）灯箱标注共用；根目录图片只显示图库名。
+ *  共享组件的函数类型以 ImageRow 为参数，内部收窄访问扩展字段。 */
+function locationText(it: ImageRow): string {
+  const c = it as ClusterImage
+  return c.folder_path ? `${c.gallery_name}/${c.folder_path}` : c.gallery_name
+}
+
 onMounted(loadClusters)
 </script>
 
@@ -122,7 +134,7 @@ onMounted(loadClusters)
           </button>
         </aside>
 
-        <!-- 右：照片按年/月分组 -->
+        <!-- 右：照片按年/月分组，组内与图库同款 justified 网格 -->
         <section class="min-w-0 flex-1">
           <div v-if="selectedId" class="mb-2 flex items-center gap-2">
             <h2 class="text-sm font-medium text-ink">
@@ -153,24 +165,34 @@ onMounted(loadClusters)
                 取消
               </button>
             </form>
+            <button type="button"
+                    class="ml-auto flex min-h-11 min-w-11 items-center justify-center rounded px-1.5 py-1"
+                    :class="showInfo
+                            ? 'bg-surface-3 text-ink'
+                            : 'text-ink-2 hover:text-ink'"
+                    title="缩略图上显示文件名与所在位置"
+                    aria-label="缩略图上显示文件名与所在位置"
+                    :aria-pressed="showInfo"
+                    @click="showInfo = !showInfo">
+              <!-- 图片卡片 + 底部文字行（与图库文件名开关同款图标） -->
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+                   stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
+                   aria-hidden="true">
+                <rect x="1.5" y="1.5" width="13" height="13" rx="1.5" />
+                <path d="M5 11h6" />
+              </svg>
+            </button>
           </div>
 
           <div v-if="loading" class="text-sm text-ink-2" role="status">加载中...</div>
           <div v-else-if="groups.length === 0" class="text-sm text-ink-2">该簇暂无照片</div>
           <div v-for="g in groups" :key="`${g.year}-${g.month}`" class="mb-4">
             <h3 class="mb-1.5 text-xs font-medium text-ink-2">{{ groupTitle(g) }}</h3>
-            <div class="flex flex-wrap gap-1.5">
-              <img
-                v-for="img in g.images"
-                :key="img.id"
-                :src="`/api/thumb/${img.sha1}?size=400`"
-                :srcset="`/api/thumb/${img.sha1}?size=200 200w, /api/thumb/${img.sha1}?size=400 400w`"
-                sizes="112px"
-                :alt="img.filename"
-                class="h-28 rounded object-cover"
-                loading="lazy"
-              />
-            </div>
+            <JustifiedGrid
+              :items="g.images"
+              :show-filename="showInfo"
+              :badge-for="showInfo ? locationText : undefined"
+            />
           </div>
         </section>
       </div>
