@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from PIL import Image as PILImage
 from sqlalchemy import case, delete, func, or_, select, update
 
 from myphoto.models import (
@@ -26,6 +25,8 @@ from myphoto.models import (
     Image,
     ImageEmbedding,
 )
+from myphoto.formats import classify
+from myphoto.imaging import load_pil_image
 from myphoto.tagger import FACE_MODEL_VERSION, TAG_MODEL_VERSION, TagResult
 
 log = logging.getLogger("myphoto.tagging_jobs")
@@ -97,7 +98,8 @@ def _pending_query(gallery_id: int | None, folder: str | None, force: bool):
 
 
 def _decode_and_tag(tagger, path: Path) -> TagResult:
-    with PILImage.open(path) as im:
+    # 统一解码：RAW（.orf 等）走 rawpy，普通图 PIL+EXIF 转正，与缩略图同入口
+    with load_pil_image(path, is_raw=classify(path.name) == "raw") as im:
         return tagger.tag(im)
 
 

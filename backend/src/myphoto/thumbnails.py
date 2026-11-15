@@ -4,15 +4,12 @@ import asyncio
 import logging
 from pathlib import Path
 
-from PIL import Image as PILImage, ImageOps, UnidentifiedImageError
+from PIL import Image as PILImage
+
+# 导入即注册 HEIF opener，并拿到统一解码入口（普通图/RAW、EXIF 转正逻辑唯一来源）
+from myphoto.imaging import ImageDecodeError, load_pil_image
 
 log = logging.getLogger("myphoto.thumbnails")
-
-try:
-    import pillow_heif  # type: ignore
-    pillow_heif.register_heif_opener()
-except Exception:
-    pass
 
 ALLOWED_SIZES: frozenset[int] = frozenset({200, 400, 1600})
 
@@ -42,47 +39,10 @@ class ThumbnailGenerator:
 
 def _render_thumb(source: str, size: int, out: Path, is_raw: bool) -> None:
     try:
-        if is_raw:
-            _render_raw(source, size, out)
-        else:
-            _render_regular(source, size, out)
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        # 解码逻辑与打标完全共用 myphoto.imaging（RAW 内嵌预览/demosaic、EXIF 转正）
+        image = load_pil_image(source, is_raw)
+    except ImageDecodeError as exc:
         raise ThumbnailError(str(exc)) from exc
-
-
-def _render_regular(source: str, size: int, out: Path) -> None:
-    with PILImage.open(source) as im:
-        # 相机直出 JPEG/HEIC 的像素按传感器方向存储（传感器通常为横版），
-        # 竖拍仅靠 EXIF Orientation 标签标记；Pillow 不会自动旋转。必须先
-        # 按标签转正再缩放——转出的 JPEG 不带 EXIF，浏览器也无法补救。
-        # （Photoshop 等后期软件导出时已把旋转烘焙进像素、Orientation=1，
-        # 不受影响。）
-        im = ImageOps.exif_transpose(im)
-        if im.mode not in ("RGB", "L"):
-            im = im.convert("RGB")
-        im.thumbnail((size, size), PILImage.Resampling.LANCZOS)
-        im.save(out, "JPEG", quality=85, optimize=True)
-
-
-def _render_raw(source: str, size: int, out: Path) -> None:
-    import rawpy
-    try:
-        with rawpy.imread(source) as raw:
-            try:
-                thumb = raw.extract_thumb()
-                if thumb.format.name == "JPEG":
-                    from io import BytesIO
-                    with PILImage.open(BytesIO(thumb.data)) as im:
-                        # 内嵌预览 JPEG 同样带 EXIF Orientation，需先转正
-                        im = ImageOps.exif_transpose(im)
-                        im.thumbnail((size, size), PILImage.Resampling.LANCZOS)
-                        im.save(out, "JPEG", quality=85, optimize=True)
-                    return
-            except Exception:
-                pass
-            rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=False, output_bps=8)
-            im = PILImage.fromarray(rgb)
-            im.thumbnail((size, size), PILImage.Resampling.LANCZOS)
-            im.save(out, "JPEG", quality=85, optimize=True)
-    except Exception as exc:
-        raise ThumbnailError(f"RAW render failed: {exc}") from exc
+    with image:
+        image.thumbnail((size, size), PILImage.Resampling.LANCZOS)
+        image.save(out, "JPEG", quality=85, optimize=True)

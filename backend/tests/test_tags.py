@@ -86,6 +86,27 @@ def _jpg(path: Path, w: int = 40, h: int = 30) -> None:
     PILImage.new("RGB", (w, h), (10, 20, 30)).save(path, "JPEG")
 
 
+def test_decode_and_tag_routes_by_extension(tmp_path, monkeypatch):
+    """普通图与 RAW 走统一解码入口，is_raw 由扩展名判定。"""
+    from myphoto.tagging_jobs import _decode_and_tag
+
+    calls: list[tuple[str, bool]] = []
+
+    def fake_load(path, is_raw):
+        calls.append((Path(path).name, is_raw))
+        return PILImage.new("RGB", (32, 24))
+
+    monkeypatch.setattr("myphoto.tagging_jobs.load_pil_image", fake_load)
+    raw = tmp_path / "shot.ORF"
+    jpg = tmp_path / "shot.jpg"
+    raw.write_bytes(b"x")
+    _jpg(jpg)
+
+    _decode_and_tag(FakeTagger(), raw)
+    _decode_and_tag(FakeTagger(), jpg)
+    assert calls == [("shot.ORF", True), ("shot.jpg", False)]
+
+
 @pytest.fixture
 async def env(tmp_path):
     engine = await make_engine("sqlite+aiosqlite:///:memory:")

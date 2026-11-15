@@ -35,12 +35,9 @@ _SCAN_BATCH_SIZE = 200
 # config.toml) overrides this; see Scanner.__init__.
 _HASH_WORKERS = min(8, (os.cpu_count() or 4))
 
-try:
-    import pillow_heif  # type: ignore[import-not-found]
-
-    pillow_heif.register_heif_opener()
-except Exception:  # pragma: no cover - optional decoder registration
-    pass
+# HEIF/HEIC opener 统一在 myphoto.imaging 注册（缩略图与打标共用）；
+# 本模块 PILImage.open 读 EXIF 同样依赖它，导入即完成注册。
+import myphoto.imaging  # noqa: F401  pylint: disable=unused-import
 
 
 # EXIF tag ID → 输出字典中使用的名字。GPSInfo (0x8825) 单独处理：其值
