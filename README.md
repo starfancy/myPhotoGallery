@@ -168,6 +168,13 @@ The results surface across the UI:
 
 ### When tagging runs
 
+Tagging and thumbnail generation share one decoder: regular images
+(JPEG/PNG/HEIC, …) go through Pillow with EXIF orientation correction,
+while RAW files (`.orf`, `.cr2`, `.nef`, `.arw`, …) go through rawpy —
+the camera's embedded JPEG preview is used when present, with a full
+demosaic fallback. Models always receive the oriented, full-resolution
+RGB image and downsample internally.
+
 - **On import** — when `enabled` and `scan_on_import` are on and the models
   are in place, the server's background scanner tags each newly added or
   changed photo synchronously in the same pass (unchanged files never reach

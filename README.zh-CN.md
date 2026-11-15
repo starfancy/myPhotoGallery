@@ -156,6 +156,11 @@ myphoto --config /path/to/config.toml list
 
 ### 打标时机
 
+打标与缩略图生成共用同一套图像解码入口：普通图（JPEG/PNG/HEIC 等）
+经 Pillow 解码并按 EXIF Orientation 自动转正；RAW（.orf/.cr2/.nef/.arw
+等）经 rawpy 解码，优先用相机内嵌 JPEG 预览、缺失时全量 demosaic。
+模型始终吃转正后的全分辨率 RGB 图，各自内部再降采样。
+
 - **入库时**——当 `enabled`、`scan_on_import` 均开启且模型就位时，
   服务端后台扫描器在同一轮扫描中对每张新增 / 变化图片同步打标
   （未变化文件不会进入模型）。单张失败只记录 `tag_error`，不会中断

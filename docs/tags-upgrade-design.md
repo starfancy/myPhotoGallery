@@ -294,6 +294,13 @@ tagging_jobs 全程不调用 ThumbnailGenerator。
 ### 6.2 打标流程（同步，全尺寸原图 + 内存内各模型自行降采样）
 
 > 2026-11 落地实现，已取代初稿的"400px 中间层"方案。
+>
+> **2026-11 解码统一更新**：像素解码收敛到 `myphoto/imaging.py` 的
+> `load_pil_image(path, is_raw)`，缩略图生成与打标共用同一入口——RAW
+> （.orf/.cr2/.nef 等）走 rawpy（内嵌 JPEG 预览优先、demosaic 兜底），
+> 普通图走 Pillow 并统一做 EXIF Orientation 转正与 RGB 转换，HEIF opener
+> 全项目只注册一次。此前打标对 RAW 必失败（写 tag_error）且不做转正，
+> 均已修复；转正对存量标签的影响需 `myphoto tag run --force` 重打才生效。
 
 ```
 对每张图打标时（PIL 打开原图，全分辨率，仅在内存）：
