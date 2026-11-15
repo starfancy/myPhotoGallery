@@ -70,6 +70,24 @@
 sticky 的滚动容器是页面视口（与 AdminAudit 同一模式）；flex 父容器在右侧内容
 更高时为 sticky 提供移动空间，右侧内容短、本页无需滚动时布局与现状完全一致。
 
+### 修订（2026-11-15）：深色模式原生滚动条适配
+
+手测发现：深色模式下新滚动条仍渲染为浏览器默认浅色。
+
+根因：项目的深色主题仅靠 [base.css](../../../frontend/src/styles/base.css)
+的 `@media (prefers-color-scheme: dark)` 切换 CSS 变量令牌，而**浏览器原生
+滚动条不消费 CSS 变量**，其配色由 CSS `color-scheme` 属性决定；全项目此前未声明
+该属性，UA 只渲染默认浅色控件。这是全站性问题——既有的 4 处 `overflow-y-auto`
+滚动区（DirectoryChooser、AdminUsers、FilterPreviewView、ImageLightbox）
+在深色模式下同样不适配，并非本页独有。
+
+修复（根因层，一处生效全站）：在 [base.css](../../../frontend/src/styles/base.css)
+的 `:root` 声明 `color-scheme: light`，深色媒体查询块内声明
+`color-scheme: dark`，与令牌结构镜像。UA 据此把所有原生滚动条（及其他未被作者
+显式设色的 UA 控件）按当前主题渲染。项目所有控件均显式指定了 `bg-*` 颜色，
+作者声明优先，控件视觉不受影响；这不引入任何自定义滚动条代码，与「使用浏览器
+原生滚动条」的约定一致。
+
 ## 边界与行为
 
 | 情况 | 行为 |
@@ -86,7 +104,8 @@ sticky 的滚动容器是页面视口（与 AdminAudit 同一模式）；flex �
   人物页当前亦无组件测试。
 - 验证手段：`vue-tsc` 类型检查 + 前端构建通过；现有 vitest 套件保持全绿；
   浏览器中以足够多簇的真实库手动确认三种情况（少簇无条、多簇独立滚动、
-  右栏滚动时左栏吸顶），并检查浅/深两套主题。
+  右栏滚动时左栏吸顶），并检查浅/深两套主题——深色模式下原生滚动条必须渲染为
+  深色（`color-scheme` 修复），浅色模式视觉与改动前一致。
 
 ## YAGNI 记录
 

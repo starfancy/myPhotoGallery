@@ -95,7 +95,11 @@ onMounted(loadClusters)
       </div>
       <div v-else class="flex gap-4">
         <!-- 左：簇列表 -->
-        <aside class="w-56 shrink-0 space-y-1">
+        <aside
+          class="w-56 shrink-0 space-y-1 overflow-y-auto
+                 sticky top-[81px] md:top-[65px]
+                 max-h-[calc(100vh-93px)] md:max-h-[calc(100vh-77px)]"
+        >
           <button
             v-for="c in clusters"
             :key="c.cluster_id"
