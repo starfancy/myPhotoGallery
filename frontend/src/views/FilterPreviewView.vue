@@ -465,8 +465,9 @@ async function renderThumbs() {
   position: relative; /* 手柄绝对定位的参照 */
   border-top: 1px solid #222;
   padding: 8px 16px 12px;
-  /* 两行缩略图 + 分组标题 + group 间距：约 280px；小屏不超过半屏 */
-  max-height: min(280px, 50vh);
+  /* 默认只露一行：padding 20 + 组标题 ~20 + 缩略图按钮 ~86 ≈ 126px；
+     拖拽手柄后由内联 height 接管，小屏用 50vh 兜底 */
+  max-height: min(126px, 50vh);
   overflow-y: auto;
 }
 .fp-resize-handle {
