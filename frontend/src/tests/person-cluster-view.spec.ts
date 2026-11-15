@@ -115,24 +115,36 @@ describe("PersonClusterView", () => {
     expect(w.findAll(".lb-cell-badge").length).toBe(0)
   })
 
-  it("信息开关：显示文件名与位置角标，文本区分根目录/子目录并持久化", async () => {
+  it("文件名开关：独立控制文件名叠加层并持久化", async () => {
     let { w } = await mountView()
-    const toggle = w.get('button[aria-label="缩略图上显示文件名与所在位置"]')
+    const toggle = w.get('button[aria-label="缩略图上显示文件名"]')
     await toggle.trigger("click")
     await flushPromises()
     expect(w.findAll(".lb-cell-filename").length).toBe(3)
+    // 文件名开关不影响位置角标
+    expect(w.findAll(".lb-cell-badge").length).toBe(0)
+    expect(localStorage.getItem("people.grid.showFilenames")).toBe("1")
+    // 重新挂载：localStorage 中的开启态被恢复
+    ;({ w } = await mountView({ preserveStorage: true }))
+    expect(w.findAll(".lb-cell-filename").length).toBe(3)
+  })
+
+  it("位置开关：独立控制路径角标，文本区分根目录/子目录并持久化", async () => {
+    let { w } = await mountView()
+    const toggle = w.get('button[aria-label="缩略图上显示所在位置"]')
+    await toggle.trigger("click")
+    await flushPromises()
+    expect(w.findAll(".lb-cell-badge").length).toBe(3)
+    // 位置开关不影响文件名层
+    expect(w.findAll(".lb-cell-filename").length).toBe(0)
     const badges = w.findAll(".lb-cell-badge").map((b) => b.text()).sort()
     expect(badges).toEqual(
       ["家庭相册", "家庭相册", "家庭相册/2024/旅行"].sort(),
     )
-    expect(localStorage.getItem("people.grid.showInfo")).toBe("1")
-    // 再点一次关闭
-    await toggle.trigger("click")
-    expect(w.findAll(".lb-cell-badge").length).toBe(0)
+    expect(localStorage.getItem("people.grid.showLocation")).toBe("1")
     // 重新挂载：localStorage 中的开启态被恢复
-    localStorage.setItem("people.grid.showInfo", "1")
     ;({ w } = await mountView({ preserveStorage: true }))
-    expect(w.findAll(".lb-cell-filename").length).toBe(3)
+    expect(w.findAll(".lb-cell-badge").length).toBe(3)
   })
 
   /** 打开第一张缩略图对应的灯箱（PhotoCell 内无 aria-label 的主按钮）。 */

@@ -33,10 +33,15 @@ const renameInput = ref("")
 const loadError = ref("")
 const router = useRouter()
 
-/** 信息开关：缩略图文件名 + 所在图库/文件夹位置；偏好独立于图库页持久化。 */
-const SHOW_INFO_KEY = "people.grid.showInfo"
-const showInfo = ref(localStorage.getItem(SHOW_INFO_KEY) === "1")
-watch(showInfo, (v) => localStorage.setItem(SHOW_INFO_KEY, v ? "1" : "0"))
+/** 文件名开关：偏好独立持久化，默认关。 */
+const SHOW_FILENAMES_KEY = "people.grid.showFilenames"
+const showFilenames = ref(localStorage.getItem(SHOW_FILENAMES_KEY) === "1")
+watch(showFilenames, (v) => localStorage.setItem(SHOW_FILENAMES_KEY, v ? "1" : "0"))
+
+/** 所在位置开关：默认关。 */
+const SHOW_LOCATION_KEY = "people.grid.showLocation"
+const showLocation = ref(localStorage.getItem(SHOW_LOCATION_KEY) === "1")
+watch(showLocation, (v) => localStorage.setItem(SHOW_LOCATION_KEY, v ? "1" : "0"))
 
 async function loadClusters() {
   loadError.value = ""
@@ -221,19 +226,35 @@ onMounted(loadClusters)
             </form>
             <button type="button"
                     class="ml-auto flex min-h-11 min-w-11 items-center justify-center rounded px-1.5 py-1"
-                    :class="showInfo
+                    :class="showFilenames
                             ? 'bg-surface-3 text-ink'
                             : 'text-ink-2 hover:text-ink'"
-                    title="缩略图上显示文件名与所在位置"
-                    aria-label="缩略图上显示文件名与所在位置"
-                    :aria-pressed="showInfo"
-                    @click="showInfo = !showInfo">
+                    title="缩略图上显示文件名"
+                    aria-label="缩略图上显示文件名"
+                    :aria-pressed="showFilenames"
+                    @click="showFilenames = !showFilenames">
               <!-- 图片卡片 + 底部文字行（与图库文件名开关同款图标） -->
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
                    stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
                    aria-hidden="true">
                 <rect x="1.5" y="1.5" width="13" height="13" rx="1.5" />
                 <path d="M5 11h6" />
+              </svg>
+            </button>
+            <button type="button"
+                    class="flex min-h-11 min-w-11 items-center justify-center rounded px-1.5 py-1"
+                    :class="showLocation
+                            ? 'bg-surface-3 text-ink'
+                            : 'text-ink-2 hover:text-ink'"
+                    title="缩略图上显示所在位置"
+                    aria-label="缩略图上显示所在位置"
+                    :aria-pressed="showLocation"
+                    @click="showLocation = !showLocation">
+              <!-- 文件夹（与灯箱「在所在文件夹中查看」同款 feather folder 图标，缩到 16px） -->
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                   stroke-linejoin="round" aria-hidden="true">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
               </svg>
             </button>
           </div>
@@ -244,8 +265,8 @@ onMounted(loadClusters)
             <h3 class="mb-1.5 text-xs font-medium text-ink-2">{{ groupTitle(g) }}</h3>
             <JustifiedGrid
               :items="g.images"
-              :show-filename="showInfo"
-              :badge-for="showInfo ? locationText : undefined"
+              :show-filename="showFilenames"
+              :badge-for="showLocation ? locationText : undefined"
               @open="openLightbox"
               @menu-action="onGridMenuAction"
             />
