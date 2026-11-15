@@ -212,7 +212,9 @@ backend/models/
 
 Provenance: YOLO11n exported from Ultralytics;
 `openai/clip-vit-base-patch32` converted to OpenVINO IR; the two InsightFace
-files come from the official `buffalo_l` pack.
+files come from the official InsightFace model zoo (same source as the
+`buffalo_l` pack). Their licenses differ — see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Device selection is automatic: OpenVINO uses a GPU when one is exposed
 (validated on an Intel i5-11320H with Iris Xe) and otherwise falls back to
@@ -298,6 +300,16 @@ cd frontend && pnpm dev
 See [docs/deployment.md](docs/deployment.md) (in Chinese) for LAN HTTP with
 the shipped Caddyfile, public-domain HTTPS with automatic certificates,
 process persistence, firewall notes, and placing the smart-tag model files.
+
+## License
+
+This project's own code is released under the MIT License — see
+[LICENSE](LICENSE). The smart-tag model weights are not tracked in git and
+ship under their own, more restrictive licenses: notably **AGPL-3.0** for
+YOLO11n and a **non-commercial research-only** term for the InsightFace
+pretrained models (CLIP itself is MIT). Before redistributing the app or
+using it commercially, read [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+(in Chinese) for the full component and model license list.
 
 ## Design documents
 

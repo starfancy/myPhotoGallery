@@ -285,8 +285,14 @@ backend/models/
 `clip-ov/` 由 HuggingFace `openai/clip-vit-base-patch32` 转换为
 OpenVINO IR（visual / text 两个塔），`clip-vit-base-patch32/` 保留
 HF tokenizer / processor 配置与原始 PyTorch 权重；两个 InsightFace
-文件来自官方 `buffalo_l` 模型包。仓库不提供下载脚本，也不托管模型
-文件，请自行获取 / 转换后按上述结构拷贝。
+文件来自 InsightFace 官方模型库（与 buffalo 系列模型包同源）。仓库
+不提供下载脚本，也不托管模型文件，请自行获取 / 转换后按上述结构
+拷贝。
+
+> **许可证提示**：模型权重的许可证独立于本项目的 MIT 许可证——
+> YOLO11n 为 AGPL-3.0，InsightFace 预训练模型仅限非商业研究用途，
+> CLIP 为 MIT。完整条款与商用授权方式见
+> [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
 
 ### 3. 验证与开关
 

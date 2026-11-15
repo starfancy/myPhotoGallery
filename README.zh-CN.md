@@ -197,7 +197,9 @@ backend/models/
 
 模型来源：`yolo11n.onnx` 由 Ultralytics YOLO11n 导出 ONNX；
 `clip-ov/` 由 HuggingFace `openai/clip-vit-base-patch32` 转换为
-OpenVINO IR；两个 InsightFace 文件来自官方 `buffalo_l` 模型包。
+OpenVINO IR；两个 InsightFace 文件来自 InsightFace 官方模型库
+（与 buffalo 系列模型包同源）。三者许可证各不相同，见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 设备自动选择：OpenVINO 探测到 GPU 就用 GPU（已在 Intel i5-11320H +
 Iris Xe 上验证），否则回退 CPU；人脸检测与识别固定通过 onnxruntime
@@ -274,6 +276,15 @@ cd frontend && pnpm dev
 局域网 HTTP（随仓库 Caddyfile）、公网域名 + 自动 HTTPS、进程常驻、
 防火墙说明，以及智能标签模型文件的部署要求，见
 [docs/deployment.md](docs/deployment.md)（中文）。
+
+## 许可证
+
+本项目自有代码以 MIT 许可证发布，见 [LICENSE](LICENSE)。智能标签的模型
+权重不随 git 分发，且带有各自更严格的许可证：尤其注意 YOLO11n 为
+**AGPL-3.0**、InsightFace 预训练模型**仅限非商业研究用途**（CLIP 本身为
+MIT）。重新分发本应用或商用前，请先阅读
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中的完整组件与模型
+许可证清单。
 
 ## 设计文档
 
