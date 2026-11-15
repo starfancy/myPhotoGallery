@@ -26,6 +26,24 @@
           </button>
         </template>
         <div class="ml-auto flex flex-wrap items-center gap-1.5">
+          <button type="button"
+                  class="flex min-h-11 min-w-11 items-center justify-center rounded px-1.5 py-1"
+                  :class="(searchPanelOpen || hasSearchCondition)
+                          ? 'bg-surface-3 text-ink'
+                          : 'text-ink-2 hover:text-ink'"
+                  :title="searchPanelOpen ? '收起搜索' : '展开搜索'"
+                  :aria-label="searchPanelOpen ? '收起搜索' : '展开搜索'"
+                  :aria-expanded="searchPanelOpen"
+                  aria-controls="search-panel"
+                  @click="searchPanelOpen = !searchPanelOpen">
+            <!-- 放大镜（feather search，16px） -->
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
           <SceneFilter
             :major="sceneMajor"
             :minor="sceneMinor"
@@ -34,19 +52,6 @@
             :path="effectivePath"
             @update:major="onSceneMajor"
             @update:minor="onSceneMinor"
-          />
-          <DateRangeFilter
-            :date-from="dateFrom"
-            :date-to="dateTo"
-            @update:date-from="onDateFrom"
-            @update:date-to="onDateTo"
-          />
-          <SearchBox
-            :model-value="searchQ"
-            :scope-all="scopeAll"
-            :is-root="path === ''"
-            @update:model-value="onSearchQuery"
-            @update:scope-all="onScopeAll"
           />
           <GridLayoutSwitch v-model="gridLayout" />
           <button type="button"
@@ -84,6 +89,25 @@
             </svg>
           </button>
         </div>
+      </div>
+
+      <!-- 搜索折叠面板：默认收起；URL 带 q/日期条件时自动展开 -->
+      <div v-if="searchPanelOpen"
+           id="search-panel"
+           class="mb-2 flex flex-wrap items-center gap-2 rounded bg-surface-2/60 p-2">
+        <DateRangeFilter
+          :date-from="dateFrom"
+          :date-to="dateTo"
+          @update:date-from="onDateFrom"
+          @update:date-to="onDateTo"
+        />
+        <SearchBox
+          :model-value="searchQ"
+          :scope-all="scopeAll"
+          :is-root="path === ''"
+          @update:model-value="onSearchQuery"
+          @update:scope-all="onScopeAll"
+        />
       </div>
 
       <template v-if="!searchQ">
@@ -350,6 +374,17 @@ const hasScene = computed(() => sceneMajor.value !== "" || sceneMinor.value !== 
 const dateFrom = computed(() => String(route.query.date_from ?? ""))
 const dateTo = computed(() => String(route.query.date_to ?? ""))
 const hasDate = computed(() => dateFrom.value !== "" || dateTo.value !== "")
+/** URL 中存在搜索词或日期条件（scope 不算：它只能由面板内勾选产生）。 */
+const hasSearchCondition = computed(
+  () => Boolean(searchQ.value) || hasDate.value,
+)
+/** 挂载时按 URL 条件初始化：带条件进入自动展开，否则默认折叠。 */
+const searchPanelOpen = ref(hasSearchCondition.value)
+// 条件从无到有（输入搜索词、选日期、前进后退到带条件路由）自动展开；
+// 条件清空或手动折叠都不强制关闭，用户可自由开关。
+watch(hasSearchCondition, (v) => {
+  if (v) searchPanelOpen.value = true
+})
 /** 搜索态勾选“整个 root”时有效路径是 root 根；SceneFilter 按此范围统计 */
 const effectivePath = computed(() =>
   searchQ.value && scopeAll.value ? "" : path.value,

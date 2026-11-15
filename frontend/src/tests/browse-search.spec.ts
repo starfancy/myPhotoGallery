@@ -110,6 +110,8 @@ describe("BrowseView 搜索态", () => {
   it("输入搜索词：防抖后写入路由 query 并进入搜索态", async () => {
     vi.useFakeTimers()
     const { w, router } = await mountAt("/galleries/1/r/1")
+    await w.get('button[aria-label="展开搜索"]').trigger("click")
+    await flushPromises()
     const input = w.get('input[aria-label="搜索"]')
     await input.setValue("abc")
     expect(router.currentRoute.value.query.q).toBeUndefined()
@@ -268,5 +270,43 @@ describe("BrowseView 搜索态", () => {
 
     expect(imageCallCount()).toBe(0)
     expect(w.findComponent(SearchResults).props("path")).toBe("")
+  })
+
+  it("无搜索条件时搜索面板默认折叠", async () => {
+    const { w } = await mountAt("/galleries/1/r/1")
+    expect(w.find("#search-panel").exists()).toBe(false)
+    expect(w.find('input[aria-label="搜索"]').exists()).toBe(false)
+    expect(w.find('input[aria-label="起始日期"]').exists()).toBe(false)
+    const btn = w.get('button[aria-label="展开搜索"]')
+    expect(btn.attributes("aria-expanded")).toBe("false")
+    expect(btn.attributes("aria-controls")).toBe("search-panel")
+  })
+
+  it("点击搜索按钮展开面板，再次点击折叠", async () => {
+    const { w } = await mountAt("/galleries/1/r/1")
+    await w.get('button[aria-label="展开搜索"]').trigger("click")
+    await flushPromises()
+    expect(w.find("#search-panel").exists()).toBe(true)
+    expect(w.find('input[aria-label="搜索"]').exists()).toBe(true)
+    expect(w.findAll('input[type="date"]').length).toBe(2)
+    expect(w.get('button[aria-label="收起搜索"]').attributes("aria-expanded")).toBe("true")
+
+    await w.get('button[aria-label="收起搜索"]').trigger("click")
+    await flushPromises()
+    expect(w.find("#search-panel").exists()).toBe(false)
+    expect(w.find('input[aria-label="搜索"]').exists()).toBe(false)
+  })
+
+  it("带 q 进入时面板自动展开并回显搜索词", async () => {
+    const { w } = await mountAt("/galleries/1/r/1?q=abc")
+    expect(w.find("#search-panel").exists()).toBe(true)
+    expect((w.get('input[aria-label="搜索"]').element as HTMLInputElement).value).toBe("abc")
+  })
+
+  it("带日期条件进入时面板自动展开", async () => {
+    const { w } = await mountAt("/galleries/1/r/1?date_from=2024-01-01")
+    expect(w.find("#search-panel").exists()).toBe(true)
+    expect((w.get('input[aria-label="起始日期"]').element as HTMLInputElement).value)
+      .toBe("2024-01-01")
   })
 })
