@@ -75,26 +75,58 @@ def _bytes_to_emb(raw: bytes) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.float32)
 
 
-def _pending_query(gallery_id: int | None, folder: str | None, force: bool):
+def _folder_like(folder: str) -> str:
+    """文件夹前缀转义为 LIKE 模式（%/_ 转义防误命中）。"""
+    prefix = folder.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"{prefix}/%"
+
+
+def _pending_query(
+    gallery_id: int | None,
+    folder: str | None,
+    force: bool,
+    retry_failed: bool = False,
+):
     """构造待打标查询（不执行；调用方在自己的 session 里跑，保证对象绑定）。
 
     默认模式：``tagged_at IS NULL OR tagged_sha1 != sha1``，且跳过历史失败
     （tag_error IS NOT NULL，§8.4 防 corrupt 图死循环）。
-    force 模式：范围内全部重打。
+    retry_failed 模式：只选历史失败项（tag_error IS NOT NULL）。
+    force 模式：范围内全部重打（调用方需保证不与 retry_failed 同用）。
     """
     q = select(Image).join(GalleryRoot, Image.root_id == GalleryRoot.id)
     if gallery_id is not None:
         q = q.where(GalleryRoot.gallery_id == gallery_id)
     if folder:
-        # 文件夹前缀：folder/ 下所有文件。LIKE 转义 %/_ 防误命中。
-        prefix = folder.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        q = q.where(Image.relative_path.like(f"{prefix}/%", escape="\\"))
-    if not force:
+        q = q.where(Image.relative_path.like(_folder_like(folder), escape="\\"))
+    if retry_failed:
+        q = q.where(Image.tag_error.is_not(None))
+    elif not force:
         q = q.where(
             or_(Image.tagged_at.is_(None), Image.tagged_sha1 != Image.sha1),
             Image.tag_error.is_(None),
         )
     return q
+
+
+async def count_failed(
+    sm,
+    gallery_id: int | None = None,
+    folder: str | None = None,
+) -> int:
+    """统计范围内历史失败（tag_error 非空）图片数，供零结果提示。"""
+    q = (
+        select(func.count())
+        .select_from(Image)
+        .join(GalleryRoot, Image.root_id == GalleryRoot.id)
+    )
+    if gallery_id is not None:
+        q = q.where(GalleryRoot.gallery_id == gallery_id)
+    if folder:
+        q = q.where(Image.relative_path.like(_folder_like(folder), escape="\\"))
+    q = q.where(Image.tag_error.is_not(None))
+    async with sm() as s:
+        return int((await s.execute(q)).scalar_one())
 
 
 def _decode_and_tag(tagger, path: Path) -> TagResult:
@@ -110,6 +142,7 @@ async def tag_images(
     gallery_id: int | None = None,
     folder: str | None = None,
     force: bool = False,
+    retry_failed: bool = False,
     progress_cb=None,
 ) -> TagRunStats:
     """逐张打标主循环。tagger 为 None 时抛 RuntimeError（调用方应先检查）。
@@ -126,7 +159,9 @@ async def tag_images(
     dirty = 0
 
     async with sm() as s:
-        images = (await s.execute(_pending_query(gallery_id, folder, force))).scalars().all()
+        images = (
+            await s.execute(_pending_query(gallery_id, folder, force, retry_failed))
+        ).scalars().all()
         stats.total = len(images)
         roots = {
             r.id: r.absolute_path

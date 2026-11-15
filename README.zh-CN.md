@@ -172,7 +172,8 @@ myphoto --config /path/to/config.toml list
 
 ```bash
 myphoto tag status                                              # 各图库 tagged/pending/failed 与 "models ready"
-myphoto tag run [--gallery G] [--folder 子路径] [--force]       # 给待打标图片打标，结束后自动增量聚类
+myphoto tag run [--gallery G] [--folder 子路径] [--force] [--retry-failed]  # 给待打标图片打标，结束后自动增量聚类
+#   --retry-failed 只重试历史失败项（tag_error 非空），与 --force 互斥；普通 run 默认跳过失败项
 myphoto tag cluster                                             # 对未分配人脸做增量重新聚类
 myphoto tag relabel                                             # 基于已存向量重算场景标签（不跑视觉模型）
 myphoto tag gc [--include-named]                                # 清理孤儿人物簇

@@ -409,31 +409,47 @@ def tag_status_cmd(ctx, gallery):
 @click.option("--gallery", default=None, help="指定图库（默认全部）")
 @click.option("--folder", default=None, help="图库内文件夹前缀，如 '旅行-OLD/成都'")
 @click.option("--force", is_flag=True, default=False, help="强制重打（含已打标与历史失败）")
+@click.option(
+    "--retry-failed", is_flag=True, default=False,
+    help="只重试历史失败项（tag_error 非空）；与 --force 互斥",
+)
 @click.pass_context
-def tag_run_cmd(ctx, gallery, folder, force):
+def tag_run_cmd(ctx, gallery, folder, force, retry_failed):
     """给待打标图片打标；结束后自动增量聚类。"""
 
     async def _run_it():
+        if force and retry_failed:
+            raise click.ClickException("--force 与 --retry-failed 互斥：--force 已包含历史失败项")
         engine, sm, cfg = await _bootstrap(ctx.obj["config_path"])
         try:
             tagger, reason = _build_tagger(cfg, ctx.obj["config_path"])
             if tagger is None:
                 raise click.ClickException(f"tagger 不可用：{reason}")
-            from myphoto.tagging_jobs import cluster_faces, tag_images
+            from myphoto.tagging_jobs import cluster_faces, count_failed, tag_images
 
             async with sm() as s:
                 gallery_id = await _gallery_id_by_name(s, gallery) if gallery else None
 
-            click.echo(f"tagging (force={force}) ...")
+            click.echo(
+                f"tagging (force={force}, retry_failed={retry_failed}) ..."
+            )
             stats = await tag_images(
                 sm, tagger,
-                gallery_id=gallery_id, folder=folder, force=force,
+                gallery_id=gallery_id, folder=folder,
+                force=force, retry_failed=retry_failed,
                 progress_cb=_make_progress_echo(),
             )
             click.echo(
                 f"tagged={stats.tagged} failed={stats.failed} "
                 f"missing={stats.skipped_missing} (scanned={stats.total})"
             )
+            if stats.total == 0:
+                n_failed = await count_failed(sm, gallery_id, folder)
+                if n_failed:
+                    click.echo(
+                        f"提示：范围内有 {n_failed} 张历史失败图片被默认跳过；"
+                        "重试失败项用 --retry-failed，全量重打用 --force"
+                    )
             cs = await cluster_faces(sm, progress_cb=_make_progress_echo())
             click.echo(f"clustered: assigned={cs.assigned} new_clusters={cs.new_clusters}")
 
@@ -443,7 +459,8 @@ def tag_run_cmd(ctx, gallery, folder, force):
                     target=f"gallery:{gallery or 'all'}",
                     detail=(
                         f"tagged={stats.tagged} failed={stats.failed} "
-                        f"missing={stats.skipped_missing} force={int(force)}"
+                        f"missing={stats.skipped_missing} force={int(force)} "
+                        f"retry_failed={int(retry_failed)}"
                     ),
                 )
                 await s.commit()

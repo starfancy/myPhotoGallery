@@ -187,7 +187,8 @@ RGB image and downsample internally.
 
 ```bash
 myphoto tag status                                              # per-gallery tagged/pending/failed + "models ready"
-myphoto tag run [--gallery G] [--folder SUBPATH] [--force]      # tag pending photos, then auto-cluster faces
+myphoto tag run [--gallery G] [--folder SUBPATH] [--force] [--retry-failed]  # tag pending photos, then auto-cluster;
+#   --retry-failed retries only past failures (tag_error set), mutually exclusive with --force
 myphoto tag cluster                                             # incremental re-cluster of unassigned faces
 myphoto tag relabel                                             # re-derive scene tags from stored embeddings (no vision model runs)
 myphoto tag gc [--include-named]                                # delete orphaned person clusters

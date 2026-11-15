@@ -135,8 +135,11 @@ myphoto tag run --gallery "我的照片"
 # 给指定图库下某个文件夹打标
 myphoto tag run --gallery "我的照片" --folder "旅行-OLD/成都"
 
-# 强制重打（模型升级时用）
+# 强制重打（模型升级时用，范围内全部重打）
 myphoto tag run --gallery "我的照片" --force
+
+# 只重试历史失败项（tag_error 非空），与 --force 互斥（2026-11 新增）
+myphoto tag run --gallery "我的照片" --retry-failed
 
 # 打标完成后重新聚簇
 myphoto tag cluster

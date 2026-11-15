@@ -416,16 +416,20 @@ models_dir = "backend/models"
 
 新图入库时由 `myphoto serve` 的后台扫描器自动打标；存量图片用 CLI
 批量补打，支持断点续跑（已打标、未变化的自动跳过，历史失败默认
-跳过、加 `--force` 才重试）：
+跳过，可用 `--retry-failed` 只重试失败项、或 `--force` 全量重打）：
 
 ```bash
 myphoto tag run --gallery "我的照片"            # 打完自动增量聚类
 myphoto tag run --gallery G --folder "旅行/成都"  # 只打某个子文件夹
-myphoto tag run --gallery G --force              # 模型升级后强制重打
+myphoto tag run --gallery G --retry-failed       # 只重试历史失败项（如修复解码器后的 RAW）
+myphoto tag run --gallery G --force              # 模型升级后强制重打（含成功项）
 myphoto tag cluster                              # 仅对未分配人脸重新聚类
 myphoto tag relabel                              # 用已存向量秒级重算场景标签
 myphoto tag gc                                   # 清理 --force 重打后的孤儿人物簇
 ```
+
+普通 run 没有可处理图片（scanned=0）而范围内存在失败项时，命令会
+直接打印 `--retry-failed` 提示，避免误判为命令失效。
 
 注意：命令行 `myphoto rescan` 不挂载打标器，不会触发模型；命令行
 场景的打标统一走 `myphoto tag run`。

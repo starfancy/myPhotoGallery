@@ -239,6 +239,28 @@ async def test_tag_images_skips_history_failed_until_force(env):
         assert img.tag_error is None
 
 
+async def test_tag_images_retry_failed_only_picks_error_rows(env):
+    from myphoto.tagging_jobs import tag_images
+
+    root_dir, sm, root_id, _gallery_id = env
+    _jpg(root_dir / "ok.jpg")
+    _jpg(root_dir / "broken.jpg")
+    _jpg(root_dir / "fresh.jpg")
+    await _add_image(sm, root_id, "ok.jpg", sha1="s1")  # 已成功（默认跑一次）
+    await tag_images(sm, FakeTagger())
+    await _add_image(sm, root_id, "broken.jpg", sha1="s2", tag_error="RAW decode failed")
+    fresh_id = await _add_image(sm, root_id, "fresh.jpg", sha1="s3")  # 从未打标
+
+    stats = await tag_images(sm, FakeTagger(), retry_failed=True)
+    assert stats.total == 1 and stats.tagged == 1
+
+    async with sm() as s:
+        broken = (await s.execute(select(Image).where(Image.filename == "broken.jpg"))).scalar_one()
+        fresh = await s.get(Image, fresh_id)
+        assert broken.tag_error is None and broken.tagged_at is not None
+        assert fresh.tagged_at is None  # 未打标的不在 retry-failed 范围
+
+
 async def test_tag_images_hash_changed_retags_but_unchanged_skips(env):
     from myphoto.tagging_jobs import tag_images
 
@@ -492,6 +514,43 @@ def test_cli_tag_status_reports_backend_line(tmp_path):
     r = runner.invoke(cli, ["--config", str(cfg), "tag", "status"])
     assert r.exit_code == 0, r.output
     assert "inference backend" in r.output
+
+
+def test_cli_tag_run_force_and_retry_failed_are_mutually_exclusive(tmp_path):
+    photos = tmp_path / "photos"
+    _jpg(photos / "a.jpg")
+    cfg = tmp_path / "config.toml"
+    runner = CliRunner()
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "Home"])
+    runner.invoke(cli, ["--config", str(cfg), "add-root", "Home", "R", str(photos.resolve())])
+
+    r = runner.invoke(cli, ["--config", str(cfg), "tag", "run", "--force", "--retry-failed"])
+    assert r.exit_code != 0
+    assert "retry-failed" in r.output or "互斥" in r.output
+
+
+def test_cli_tag_run_zero_result_hints_retry_failed(tmp_path, monkeypatch):
+    photos = tmp_path / "photos"
+    _jpg(photos / "a.jpg")
+    cfg = tmp_path / "config.toml"
+    runner = CliRunner()
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "Home"])
+    runner.invoke(cli, ["--config", str(cfg), "add-root", "Home", "R", str(photos.resolve())])
+    runner.invoke(cli, ["--config", str(cfg), "rescan"])
+    # 无模型文件的 tmp 环境：注入 FakeTagger 让命令走到主循环
+    import myphoto.cli as cli_mod
+    monkeypatch.setattr(cli_mod, "_build_tagger", lambda cfg_, cp: (FakeTagger(), None))
+    # 手工把唯一图片置为历史失败
+    import sqlite3
+    con = sqlite3.connect(tmp_path / "app.db")
+    con.execute("UPDATE images SET tag_error = 'RAW decode failed'")
+    con.commit()
+    con.close()
+
+    r = runner.invoke(cli, ["--config", str(cfg), "tag", "run"])
+    assert r.exit_code == 0, r.output
+    assert "scanned=0" in r.output
+    assert "retry-failed" in r.output
 
 
 def test_cli_tag_run_explicit_cuda_unavailable_has_hint(tmp_path, monkeypatch):
