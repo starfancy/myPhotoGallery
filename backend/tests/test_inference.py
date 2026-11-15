@@ -2,7 +2,12 @@
 
 import pytest
 
-from myphoto.inference import BackendUnavailable, resolve_backend, select_ort_providers
+from myphoto.inference import (
+    BackendUnavailable,
+    preload_cuda_dlls,
+    resolve_backend,
+    select_ort_providers,
+)
 
 CPU = ["CPUExecutionProvider"]
 CUDA = ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -49,3 +54,9 @@ def test_resolve_backend_mappings():
 def test_resolve_backend_explicit_cuda_missing_raises():
     with pytest.raises(BackendUnavailable):
         resolve_backend("cuda", ["CPUExecutionProvider"])
+
+
+def test_preload_cuda_dlls_ignores_missing_libraries():
+    # 本机（CI/无 GPU）没有 CUDA/cuDNN DLL：ORT 约定缺失库忽略而非报错，
+    # 调用必须安全返回；老版本 ORT 无 preload_dlls API 时同样静默跳过。
+    preload_cuda_dlls()

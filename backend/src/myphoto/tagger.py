@@ -261,6 +261,13 @@ class Tagger:
         md = self.models_dir
         core = Core()
         is_cuda = self.backend_plan == "cuda"
+        if is_cuda:
+            # 显式传 providers 建会话不会触发 ORT 内部的 DLL 预加载，必须
+            # 自己先调一次：从 pip nvidia-* 包等位置加载 CUDA/cuDNN，否则
+            # 会在首个 Conv 算子报 cudnn64_9.dll LoadLibrary failed (error 2)
+            from myphoto.inference import preload_cuda_dlls
+
+            preload_cuda_dlls()
         log.info(
             "tagger loading models from %s (backend_plan=%s)", md, self.backend_plan,
         )

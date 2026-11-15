@@ -55,6 +55,22 @@ def select_ort_providers(
     return [_CUDA_EP, _CPU_EP] if has_cuda else [_CPU_EP]
 
 
+def preload_cuda_dlls() -> None:
+    """建 ORT CUDA 会话前预加载 CUDA/cuDNN DLL（Windows/Linux）。
+
+    显式传 providers 建会话不会触发 ORT/insightface 内部的默认预加载，
+    因此 cuda 计划必须自己调一次：它会从 pip 的 nvidia-* 包目录
+    （site-packages/nvidia/*/bin）、PyTorch 自带库目录及系统 PATH 查找
+    CUDA 12.x / cuDNN 9.x。ORT 约定缺失的 cuDNN 库只忽略、不报错；
+    老版本 ORT 没有该 API 时静默跳过。
+    """
+    import onnxruntime as ort
+
+    preload = getattr(ort, "preload_dlls", None)
+    if callable(preload):
+        preload()
+
+
 def resolve_backend(
     device: str,
     available: Sequence[str] | None = None,

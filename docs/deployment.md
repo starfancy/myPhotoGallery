@@ -282,9 +282,27 @@ transformers、numpy）。注意点：
   pip install onnxruntime-gpu
   ```
 
-- **系统前置**：NVIDIA 驱动、CUDA 12.x、cuDNN 9。insightface 2.1 内置
-  `preload_dlls()`，会自动发现 pip 环境中的 CUDA / cuDNN 运行库，通常
-  无需手工配置 PATH。
+- **系统前置**：NVIDIA 驱动与 CUDA 12.x 运行库（cudart、cuBLAS）。
+  cuDNN 9 推荐直接装 pip 包，无需手工配 PATH：
+
+  ```bash
+  pip install nvidia-cudnn-cu12
+  ```
+
+  它把 `cudnn64_9.dll` 等装入 `site-packages/nvidia/cudnn/bin/`；打标器
+  在创建 CUDA 会话前会调用 ORT 的 `preload_dlls()` 自动从该目录加载
+  （显式指定 providers 时 ORT 不会自己预加载，所以这一步由程序完成）。
+  也可以从 NVIDIA 官网安装系统级 cuDNN 9 并把其 `bin` 目录加入 PATH。
+  若主机连 CUDA 运行库都是 pip 方式管理的，按需再装
+  `nvidia-cublas-cu12`、`nvidia-cuda-runtime-cu12`。
+- **常见报错排查**：
+
+  - `LoadLibrary failed for cudnn64_9.dll with error 2`：找不到 cuDNN 9
+    （error 2 = 文件不存在）。按上面装 `nvidia-cudnn-cu12` 即可；装完
+    仍报错时确认该包与 onnxruntime-gpu 在同一个虚拟环境内。
+  - 启动日志的 `4 Memcpy nodes are added to the graph ... for
+    CUDAExecutionProvider` 只是提示（CPU/GPU 间拷贝节点），batch=1 的
+    打标场景可忽略，不影响正确性。
 - **启用配置**：`config.toml` 的 `[tagging]` 段设 `device = "cuda"`；
   保持默认 `auto` 时，探测到 `CUDAExecutionProvider` 也会自动启用。
 - **额外模型文件**：cuda 计划需要 `backend/models/clip-onnx/visual.onnx`
