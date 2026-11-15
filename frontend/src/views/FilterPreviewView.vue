@@ -65,21 +65,9 @@
         @pointercancel="onPointerUp"
         @keydown="onKeydown"
       ></div>
-      <div v-for="g in groups" :key="g.group" class="fp-group">
-        <div class="fp-group-label">{{ groupLabel(g.group) }}</div>
-        <div class="fp-group-items">
-          <button
-            v-for="f in g.items" :key="f.slug"
-            class="fp-thumb" :class="{ active: f.slug === activeId }"
-            :disabled="!rendererReady"
-            :title="f.label"
-            @click="pick({ id: f.slug, label: f.label, slug: f.slug })"
-          >
-            <img v-if="thumbs[f.slug]" :src="thumbs[f.slug]" :alt="f.label" />
-            <span class="fp-thumb-label">{{ f.label }}</span>
-          </button>
-        </div>
-      </div>
+      <LutGroupList :groups="groups" :thumbs="thumbs"
+                    :active-id="activeId" :renderer-ready="rendererReady"
+                    @pick="pick" />
     </section>
   </div>
 </template>
@@ -87,15 +75,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue"
 import { useRoute } from "vue-router"
+import LutGroupList, {
+  type FilterEntry,
+  type LutGroup,
+} from "../components/LutGroupList.vue"
 import { LutRenderer } from "../lib/lutRenderer"
 import { clampHeight, draggedHeight, steppedHeight } from "../lib/resize"
 import { parseCube } from "../lib/lutParser"
 import type { LutData } from "../lib/lutParser"
-import { groupLabel } from "../lib/lutGroups"
-
-interface FilterEntry { id: string; label: string; slug: string }
-interface LutEntry { slug: string; label: string; sort_order: number }
-interface LutGroup { group: string; items: LutEntry[] }
 
 const route = useRoute()
 const isLocal = route.query.local === "1"
@@ -387,7 +374,7 @@ onMounted(async () => {
 
 /** 离屏小 canvas + 独立第二个 LutRenderer 渲小样。
  *  buffer 按源图宽高比拟合进 192×128 盒内（等比缩放，不拉伸），
- *  显示端 .fp-thumb img 的 object-fit:cover 再做居中裁剪；
+ *  显示端 .fp-thumb img 的 object-fit:contain 完整居中显示；
  *  本地模式 onMounted 时 lastImg 还是 null，由 onPickLocal 选图后补调。 */
 async function renderThumbs() {
   if (cancelled || !renderer || !lastImg) return
@@ -493,28 +480,4 @@ async function renderThumbs() {
 .fp-resize-handle:focus-visible { outline: none; }
 /* 拖拽期间禁止选中文本（在根节点切类，避免 :has 兼容问题） */
 .fp-page.is-resizing { user-select: none; }
-.fp-group { margin-bottom: 10px; }
-.fp-group:last-child { margin-bottom: 0; }
-.fp-group-label {
-  font-size: 12px; color: #999; margin-bottom: 6px;
-}
-.fp-group-items {
-  display: flex; flex-wrap: wrap; gap: 8px;
-}
-.fp-thumb {
-  /* 固定列宽：缩略图与下方名称严格按列对齐 */
-  width: 96px;
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  background: transparent; border: 2px solid transparent;
-  padding: 4px; cursor: pointer; border-radius: 6px;
-}
-.fp-thumb.active { border-color: #3b82f6; }
-.fp-thumb img {
-  width: 88px; height: 58px; object-fit: contain; border-radius: 4px;
-  background: #333; display: block;
-}
-.fp-thumb-label {
-  font-size: 11px; color: #ccc; text-align: center;
-  width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
 </style>
