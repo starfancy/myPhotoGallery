@@ -293,6 +293,9 @@ transformers、numpy）。注意点：
   在创建 CUDA 会话前会调用 ORT 的 `preload_dlls()` 自动从该目录加载
   （显式指定 providers 时 ORT 不会自己预加载，所以这一步由程序完成）。
   也可以从 NVIDIA 官网安装系统级 cuDNN 9 并把其 `bin` 目录加入 PATH。
+  注意 **CUDA Toolkit 不包含 cuDNN**，二者是官网的两个独立下载项；
+  若 CUDA EP 已能初始化（日志出现 Memcpy nodes）而只报
+  `cudnn64_9.dll` 缺失，说明 Toolkit / CUDA 运行库已就位，仅缺 cuDNN。
   若主机连 CUDA 运行库都是 pip 方式管理的，按需再装
   `nvidia-cublas-cu12`、`nvidia-cuda-runtime-cu12`。
 - **常见报错排查**：
