@@ -15,26 +15,28 @@
         ref="sideEl"
         :style="sideStyle"
       >
-        <div
-          class="fp-side-handle"
-          :class="{ active: sideDragging }"
-          role="separator"
-          tabindex="0"
-          aria-label="调节左侧滤镜栏宽度"
-          aria-orientation="vertical"
-          :aria-valuenow="sideAriaNow"
-          :aria-valuemin="sideMin ?? 0"
-          :aria-valuemax="sideMax"
-          @pointerdown="onSidePointerDown"
-          @pointermove="onSidePointerMove"
-          @pointerup="onSidePointerUp"
-          @pointercancel="onSidePointerUp"
-          @keydown="onSideKeydown"
-        ></div>
         <LutGroupList :groups="groups" :thumbs="thumbs"
                       :active-id="activeId" :renderer-ready="rendererReady"
                       @pick="pick" />
       </aside>
+      <!-- 手柄作为 flex 兄弟项放在滚动容器外，位于滚动条右侧而非压在轨道上 -->
+      <div
+        v-show="sideOpen"
+        class="fp-side-handle"
+        :class="{ active: sideDragging }"
+        role="separator"
+        tabindex="0"
+        aria-label="调节左侧滤镜栏宽度"
+        aria-orientation="vertical"
+        :aria-valuenow="sideAriaNow"
+        :aria-valuemin="sideMin ?? 0"
+        :aria-valuemax="sideMax"
+        @pointerdown="onSidePointerDown"
+        @pointermove="onSidePointerMove"
+        @pointerup="onSidePointerUp"
+        @pointercancel="onSidePointerUp"
+        @keydown="onSideKeydown"
+      ></div>
       <main class="fp-stage">
         <canvas ref="canvasEl" class="fp-canvas"></canvas>
         <div v-if="fallbackMsg" class="fp-fallback">{{ fallbackMsg }}</div>
@@ -570,25 +572,25 @@ async function renderThumbs() {
 }
 .fp-side {
   flex: none;
-  width: 120px; /* 默认一列：96px 缩略图 + 左右 12px padding */
+  /* 默认两列：缩略图 96×2 + 列间距 8 + 左右 padding 12×2 = 224px */
+  width: 224px;
   max-width: 50vw;
   overflow-y: auto;
   border-right: 1px solid #222;
   padding: 8px 12px;
-  position: relative;
 }
+/* 手柄是 .fp-body 的 flex 兄弟项，位于侧栏滚动条右侧，不遮挡轨道 */
 .fp-side-handle {
-  position: absolute;
-  top: 0; bottom: 0; right: 0;
+  flex: none;
+  position: relative;
   width: 6px; /* 热区 */
   cursor: col-resize;
   touch-action: none;
-  z-index: 2;
 }
 .fp-side-handle::after {
   content: "";
   position: absolute;
-  top: 0; bottom: 0; right: 2px;
+  top: 0; bottom: 0; left: 2px;
   width: 2px;
   background: #444;
 }
