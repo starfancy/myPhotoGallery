@@ -238,18 +238,17 @@ class Tagger:
     # ---------- 懒加载 ----------
 
     def _resolve_device(self, core) -> str:
-        if self.backend == "openvino-cpu":
+        # openvino 计划内部的 Intel GPU/CPU 探测；device="cpu" 显式强制 CPU
+        if self.device == "cpu":
             return "CPU"
-        if self.backend == "openvino-gpu":
-            return "GPU"
         return "GPU" if "GPU" in core.available_devices else "CPU"
 
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
-        if not self.available():
-            missing = [str(p) for p in self.expected_paths().values() if not p.exists()]
-            raise RuntimeError(f"tagger models missing: {missing}")
+        reason = self.unavailable_reason()
+        if reason is not None:
+            raise RuntimeError(reason)
 
         from openvino.runtime import Core  # heavy import
         # 本项目只用 CLIPProcessor 的 PIL/numpy 预处理路径，不实例化任何 HF
@@ -261,20 +260,17 @@ class Tagger:
 
         md = self.models_dir
         core = Core()
-        device = self._resolve_device(core)
-        log.info("tagger loading models from %s on device %s", md, device)
-
-        # CLIP：visual 上加速设备，text 在 CPU（原型验证的最优布局）
-        self._clip_visual = core.compile_model(
-            str(md / "clip-ov" / "visual.xml"), device,
+        is_cuda = self.backend_plan == "cuda"
+        log.info(
+            "tagger loading models from %s (backend_plan=%s)", md, self.backend_plan,
         )
-        text_compiled = core.compile_model(str(md / "clip-ov" / "text.xml"), "CPU")
+
+        # ---- CLIP：processor 与 text 塔两计划共用；visual 按计划分后端 ----
         self._clip_proc = CLIPProcessor.from_pretrained(str(md / "clip-vit-base-patch32"))
-
-        # 预计算全部提示词的文本向量（只算一次）
         self._flat_prompts = flatten_prompts()
-        import numpy as np
 
+        # text 塔始终 OpenVINO CPU：只在加载时预计算一次提示词向量，不进单张热路径
+        text_compiled = core.compile_model(str(md / "clip-ov" / "text.xml"), "CPU")
         tok = self._clip_proc(
             text=[p[2] for p in self._flat_prompts],
             padding="max_length", max_length=77, truncation=True, return_tensors="np",
@@ -286,30 +282,83 @@ class Tagger:
         text_emb = next(iter(out.values()))
         self._clip_text_emb = text_emb / np.linalg.norm(text_emb, axis=-1, keepdims=True)
 
-        # YOLO11n：OpenVINO 直接吃 ONNX
-        yolo_model = core.read_model(str(md / "yolo11n.onnx"))
-        compiled = core.compile_model(yolo_model, device)
-        self._yolo_compiled = compiled
-        self._yolo_input = compiled.inputs[0]
+        if is_cuda:
+            import onnxruntime as ort
 
-        # InsightFace：SCRFD 检测（CPU）+ ArcFace 识别（onnxruntime CPU）
+            self._clip_visual_ort = ort.InferenceSession(
+                str(md / "clip-onnx" / "visual.onnx"), providers=list(self._ort_providers),
+            )
+            log.info("clip visual ORT providers=%s", self._clip_visual_ort.get_providers())
+            device = "ORT"
+        else:
+            device = self._resolve_device(core)
+            self._clip_visual = core.compile_model(str(md / "clip-ov" / "visual.xml"), device)
+
+        # ---- YOLO11n：cuda 计划走 ORT，否则 OpenVINO ----
+        if is_cuda:
+            import onnxruntime as ort
+
+            self._yolo_ort = ort.InferenceSession(
+                str(md / "yolo11n.onnx"), providers=list(self._ort_providers),
+            )
+            self._yolo_input = self._yolo_ort.get_inputs()[0].name
+            log.info("yolo ORT providers=%s", self._yolo_ort.get_providers())
+        else:
+            yolo_model = core.read_model(str(md / "yolo11n.onnx"))
+            compiled = core.compile_model(yolo_model, device)
+            self._yolo_compiled = compiled
+            self._yolo_input = compiled.inputs[0]
+
+        # ---- InsightFace：SCRFD 检测 + ArcFace 识别 ----
         import onnxruntime as ort
         from insightface.model_zoo import SCRFD
 
-        self._scrfd = SCRFD(str(md / "insightface" / "det_500m.onnx"))
-        self._scrfd.prepare(ctx_id=-1, input_size=(640, 640))
-        self._recog = ort.InferenceSession(
-            str(md / "insightface" / "w600k_mbf.onnx"),
-            providers=["CPUExecutionProvider"],
-        )
+        if is_cuda:
+            scrfd_session = ort.InferenceSession(
+                str(md / "insightface" / "det_500m.onnx"), providers=list(self._ort_providers),
+            )
+            self._scrfd = SCRFD(str(md / "insightface" / "det_500m.onnx"), session=scrfd_session)
+            # 2.1 源码：仅 ctx_id<0 才 set_providers(CPU)；ctx_id=0 保留注入会话的 provider
+            self._scrfd.prepare(ctx_id=0, input_size=(640, 640))
+            self._recog = ort.InferenceSession(
+                str(md / "insightface" / "w600k_mbf.onnx"), providers=list(self._ort_providers),
+            )
+            log.info(
+                "face providers=%s; scrfd session=%s; recog=%s",
+                self._ort_providers, scrfd_session.get_providers(), self._recog.get_providers(),
+            )
+        else:
+            # 显式注入 CPU 会话：不依赖 SCRFD 内部 get_default_providers()，
+            # 否则装了 onnxruntime-gpu 的机器上即使 device=cpu 也会被库选到 CUDA
+            cpu_session = ort.InferenceSession(
+                str(md / "insightface" / "det_500m.onnx"),
+                providers=["CPUExecutionProvider"],
+            )
+            self._scrfd = SCRFD(str(md / "insightface" / "det_500m.onnx"), session=cpu_session)
+            self._scrfd.prepare(ctx_id=-1, input_size=(640, 640))
+            self._recog = ort.InferenceSession(
+                str(md / "insightface" / "w600k_mbf.onnx"),
+                providers=["CPUExecutionProvider"],
+            )
 
         # warmup：避免第一张图付编译/分配开销
         dummy_img = np.zeros((1, 3, 224, 224), dtype=np.float32)
-        _ = self._clip_visual({self._clip_visual.inputs[0]: dummy_img})
-        _ = self._yolo_compiled({self._yolo_input: np.zeros((1, 3, 640, 640), dtype=np.float32)})
+        if is_cuda:
+            self._clip_visual_ort.run(
+                None, {self._clip_visual_ort.get_inputs()[0].name: dummy_img},
+            )
+            self._yolo_ort.run(
+                None, {self._yolo_input: np.zeros((1, 3, 640, 640), dtype=np.float32)},
+            )
+        else:
+            _ = self._clip_visual({self._clip_visual.inputs[0]: dummy_img})
+            _ = self._yolo_compiled({self._yolo_input: np.zeros((1, 3, 640, 640), dtype=np.float32)})
 
         self._loaded = True
-        log.info("tagger models loaded (%d prompts, device=%s)", len(self._flat_prompts), device)
+        log.info(
+            "tagger models loaded (%d prompts, backend_plan=%s, device=%s)",
+            len(self._flat_prompts), self.backend_plan, device,
+        )
 
     # ---------- 推理 ----------
 
@@ -341,22 +390,32 @@ class Tagger:
 
     def _clip_scene(self, rgb: PILImage.Image) -> tuple[str, str, float, np.ndarray]:
         x = self._clip_proc(images=rgb, return_tensors="np")
-        out = self._clip_visual(
-            {self._clip_visual.inputs[0]: x["pixel_values"].astype(np.float32)}
-        )
-        img_emb = next(iter(out.values()))
+        pixel_values = x["pixel_values"].astype(np.float32)
+        if self.backend_plan == "cuda":
+            img_emb = self._clip_visual_ort.run(
+                None, {self._clip_visual_ort.get_inputs()[0].name: pixel_values},
+            )[0]
+        else:
+            out = self._clip_visual({self._clip_visual.inputs[0]: pixel_values})
+            img_emb = next(iter(out.values()))
         img_emb = img_emb / np.linalg.norm(img_emb, axis=-1, keepdims=True)
         sims = (img_emb @ self._clip_text_emb.T).squeeze(0)
         major, minor, conf = classify_scene(sims, self._flat_prompts)
         return major, minor, float(conf), img_emb.reshape(-1)
+
+    def _yolo_infer(self, arr: np.ndarray) -> np.ndarray:
+        """单张 letterbox 批次 (1,3,640,640) → (84,8400)，两后端输出同构。"""
+        if self.backend_plan == "cuda":
+            return self._yolo_ort.run(None, {self._yolo_input: arr})[0][0]
+        out = self._yolo_compiled({self._yolo_input: arr})
+        return next(iter(out.values()))[0]
 
     def _count_persons(self, rgb: PILImage.Image) -> tuple[int, list[tuple[int, int, int, int]]]:
         """YOLO person 检测 + NMS；返回 (人数, 原图坐标 person 框)。"""
         import cv2
 
         arr, scale, left, top = _letterbox(rgb, 640)
-        out = self._yolo_compiled({self._yolo_input: arr})
-        preds = next(iter(out.values()))[0]  # (84, 8400)
+        preds = self._yolo_infer(arr)  # (84, 8400)
         boxes = preds[:4, :]
         scores_all = preds[4:, :]
         cls_ids = scores_all.argmax(axis=0)
