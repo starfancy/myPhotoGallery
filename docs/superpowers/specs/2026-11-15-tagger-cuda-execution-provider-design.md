@@ -103,9 +103,13 @@ Tagger 构造时调用 `resolve_backend` 记住计划（`self._backend`），
 
 - 新增期望文件 `clip-onnx/visual.onnx`
 - cuda 计划：要求三个既有 ONNX + `clip-onnx/visual.onnx` +
-  tokenizer 目录；**不要求** `clip-ov/*.xml`
+  tokenizer 目录 + `clip-ov/text.xml`（text 塔两计划共用，始终走
+  OpenVINO CPU）；**不要求** `clip-ov/visual.xml`
 - cpu/auto(无 CUDA) 计划：与现状一致（`clip-ov` 两个 xml + tokenizer +
   三个 ONNX），不要求 visual.onnx
+- ORT providers 在 Tagger 构造时一次性决策并保存（测试可注入
+  `available`），加载阶段直接复用，使无 GPU 环境也能走 cuda 计划代码
+  路径做功能验证（ORT 对不可用 EP 自动回退 CPU 并告警）
 - 门控仍是纯文件检查、不加载模型，`myphoto tag status` 语义不变
 
 ### 5.2 各模型会话
