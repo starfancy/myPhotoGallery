@@ -181,29 +181,55 @@ myphoto tag gc [--include-named]                                # 清理孤儿�
 
 ### 模型部署要求
 
-Python 依赖随常规的 `pip install -e ".[dev]"` 一并安装（NumPy、
-OpenVINO、onnxruntime、InsightFace、OpenCV、Transformers）。三个
-注意点：**`openvino` 锁定 2024.6.0**——2026.x 版本 API 不兼容；
-**不要安装 `optimum`**，它会连带升级 OpenVINO 破坏环境；**故意不
-依赖 PyTorch**——推理全部走 OpenVINO / onnxruntime，Transformers 只
-承担 `CLIPProcessor` 的 PIL/numpy 预处理。无 torch 环境下
-Transformers 会在 import 时打印 `PyTorch was not found …` 的 advisory
-警告，不影响运行，tagger 已自动抑制该提示，不要为消除警告去装 torch
-（CUDA 版 wheel 达数 GB）。
+智能打标的推理后端由 `[tagging] device` 选择，配置值有三档：
+`auto`（默认，自动探测）、`cpu`、`cuda`，底层对应两套加载计划，
+适用场景如下：
 
-模型权重本身**不进 git**，总计约 **900 MB**。请按下面的确切目录
-结构放到 `[tagging] models_dir` 指向的位置（默认 `backend/models/`，
-相对 `config.toml` 所在目录解析）——打标器启用前会逐个检查这些路径：
+- **openvino 计划——无 NVIDIA 显卡时的默认选择。** `auto` 探测不到
+  CUDA、或显式设为 `cpu` 时走这套：CLIP 视觉塔与 YOLO 经 OpenVINO
+  推理，内部再探测 Intel 核显——有核显用 GPU、否则回退 CPU（已在
+  i5-11320H + Iris Xe 上验证）；两个人脸模型走 onnxruntime CPU。
+  纯 CPU 也能跑，只是更慢。参考性能（上述 i5 + 核显，含解码与磁盘
+  IO 的稳态值）：约 350ms / 张——2923 张图库全量 17 分钟、0 失败
+  （576 张脸聚成 269 簇），折合万张约 1 小时。
+- **cuda 计划——有 NVIDIA 显卡时的加速选择。** 安装 onnxruntime-gpu
+  且 CUDA 环境就位后，`auto` 探测到 `CUDAExecutionProvider` 会自动
+  选用，也可显式设 `device = "cuda"`：CLIP 视觉塔、YOLO、两个人脸
+  模型共四个热路径模型全部经 `CUDAExecutionProvider` 推理（带 CPU
+  回退）。CLIP 文本塔不在单张热路径上，两套计划下都只在模型加载时
+  经 OpenVINO CPU 预计算一次提示词向量。显式 `cuda` 但环境不可用时，
+  启动日志会给出安装提示、打标禁用而服务照常启动。ORT 包互斥安装、
+  CUDA / cuDNN 前置与验证步骤见 [docs/deployment.md](docs/deployment.md)。
+
+各计划的模型配置要求如下。模型权重本身**不进 git**，放到
+`[tagging] models_dir` 指向的位置
+（默认 `backend/models/`，相对 `config.toml` 所在目录解析）。打标器
+启用前会逐个检查本计划所需的路径，缺任意一个都会在日志中列明：
+
+- **两套计划共用（约 730 MB）**：
+  - `clip-ov/text.xml` + `text.bin`——CLIP 文本塔 OpenVINO IR，约 121 MB
+  - `clip-vit-base-patch32/`——HF tokenizer/processor 配置（含随快照
+    一起的 `pytorch_model.bin`，运行时不加载），约 580 MB
+  - `yolo11n.onnx`——YOLO11n（COCO person 类），约 10 MB
+  - `insightface/det_500m.onnx`——SCRFD 500m 人脸检测，约 2.5 MB
+  - `insightface/w600k_mbf.onnx`——ArcFace 人脸识别，约 13 MB
+- **openvino 计划额外需要**：`clip-ov/visual.xml` + `visual.bin`
+  （CLIP 视觉塔 OpenVINO IR，约 168 MB），全套合计约 **900 MB**。
+- **cuda 计划额外需要**：`clip-onnx/visual.onnx`（CLIP 视觉塔 ONNX，
+  约 350 MB，由 [scripts/export_clip_onnx.py](scripts/export_clip_onnx.py)
+  导出），全套合计约 **1.1 GB**。
+
+完整目录结构如下（打标器即按此布局检查）：
 
 ```text
 backend/models/
 ├── clip-ov/
-│   ├── visual.xml + visual.bin     # CLIP 视觉塔 OpenVINO IR（约 168 MB；openvino 计划需要）
-│   └── text.xml + text.bin         # CLIP 文本塔 OpenVINO IR（约 121 MB；两个计划都需要）
+│   ├── visual.xml + visual.bin     # CLIP 视觉塔 OpenVINO IR（约 168 MB；openvino 计划）
+│   └── text.xml + text.bin         # CLIP 文本塔 OpenVINO IR（约 121 MB；两计划共用）
 ├── clip-onnx/
-│   └── visual.onnx                 # CLIP 视觉塔 ONNX（约 350 MB；仅 cuda 计划需要，scripts/ 脚本导出）
+│   └── visual.onnx                 # CLIP 视觉塔 ONNX（约 350 MB；cuda 计划，scripts/ 导出）
 ├── clip-vit-base-patch32/          # HF tokenizer/processor 配置 + pytorch_model.bin（约 580 MB）
-├── yolo11n.onnx                    # YOLO11n（COCO person 类）ONNX（约 10 MB）
+├── yolo11n.onnx                    # YOLO11n ONNX（约 10 MB）
 └── insightface/
     ├── det_500m.onnx               # SCRFD 500m 人脸检测（约 2.5 MB）
     └── w600k_mbf.onnx              # ArcFace w600k 人脸识别（约 13 MB）
@@ -215,27 +241,25 @@ OpenVINO IR；两个 InsightFace 文件来自 InsightFace 官方模型库
 （与 buffalo 系列模型包同源）。三者许可证各不相同，见
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-两套加载计划由 `[tagging] device` 切换（默认 `auto` 自动探测）。无
-CUDA 时走 openvino 计划：CLIP / YOLO 经 OpenVINO 探测到 Intel GPU 就
-用 GPU（已在 i5-11320H + Iris Xe 上验证），否则回退 CPU，人脸两个
-模型走 onnxruntime CPU。安装 onnxruntime-gpu 且具备 NVIDIA CUDA 环境
-时可走 cuda 计划：四个模型全部经 `CUDAExecutionProvider` 推理（带 CPU
-回退），但需要额外导出 `clip-onnx/visual.onnx`；包互斥安装、CUDA /
-cuDNN 前置与验证步骤见 [docs/deployment.md](docs/deployment.md)。参考性能（上述 i5 + 核显）：含解码与磁盘
-IO 稳态约 350ms / 张——2923 张图库全量 17 分钟、0 失败（576 张脸
-聚成 269 簇），折合万张约 1 小时；纯 CPU 可用但更慢。模型首次使用
-时才懒加载并常驻内存，启动 web 服务本身不会加载模型。
+注意事项：
 
-模型文件缺失时服务照常启动：入库打标随一条日志自动关闭，其他功能
-不受影响。把模型拷贝到位后用下面的命令验证：
-
-```bash
-myphoto tag status     # 所有文件就位后首行输出 "models ready: yes"
-```
-
-想彻底关闭该功能（例如低性能主机），在 `config.toml` 的 `[tagging]`
-段设置 `enabled = false` 即可。更完整的部署流程（镜像源、服务常驻
-等）见 [docs/deployment.md](docs/deployment.md)（中文）。
+- Python 依赖随常规的 `pip install -e ".[dev]"` 一并安装（NumPy、
+  OpenVINO、onnxruntime、InsightFace、OpenCV、Transformers）。
+  **`openvino` 锁定 2024.6.0**——2026.x 版本 API 不兼容；**不要安装
+  `optimum`**——它会连带升级 OpenVINO 破坏环境。
+- **故意不依赖 PyTorch**：推理全部走 OpenVINO / onnxruntime，
+  Transformers 只承担 `CLIPProcessor` 的 PIL/numpy 预处理。无 torch
+  环境下 Transformers 会在 import 时打印 `PyTorch was not found …`
+  的 advisory 警告，不影响运行且 tagger 已自动抑制，不要为消除警告
+  去装 torch（CUDA 版 wheel 达数 GB）。
+- 模型**懒加载**：首次打标时才载入并常驻内存，启动 web 服务本身
+  不会加载模型。
+- 模型文件缺失时服务照常启动：入库打标随一条日志自动关闭，其他
+  功能不受影响。文件拷贝到位后执行 `myphoto tag status` 验证——
+  本计划所需文件全部就位时首行输出 `models ready: yes`。
+- 想彻底关闭该功能（例如低性能主机），在 `config.toml` 的 `[tagging]`
+  段设置 `enabled = false` 即可。更完整的部署流程（镜像源、服务常驻、
+  CUDA 加速环境搭建等）见 [docs/deployment.md](docs/deployment.md)（中文）。
 
 ### 隐私
 

@@ -196,21 +196,53 @@ myphoto tag gc [--include-named]                                # delete orphane
 
 ### Model deployment requirements
 
-The Python dependencies install with the normal `pip install -e ".[dev]"`
-(NumPy, OpenVINO, onnxruntime, InsightFace, OpenCV, Transformers). Two
-caveats: **`openvino` is pinned to 2024.6.0** — newer 2026.x releases break
-its API — and do not install `optimum`, which pulls in an incompatible
-OpenVINO. PyTorch is intentionally **not** a dependency: inference runs on
-OpenVINO/onnxruntime and Transformers is used only for `CLIPProcessor`
-(PIL/numpy preprocessing). On a torch-free host Transformers prints an
-advisory `PyTorch was not found …` warning at import — it is harmless, the
-tagger suppresses it automatically, and installing torch (a multi-GB CUDA
-wheel) just to silence it is unnecessary.
+The inference backend is selected by `[tagging] device`, which accepts three
+values — `auto` (default, auto-detect), `cpu`, and `cuda` — mapping to two
+loading plans, each for a different scenario:
 
-The model weights themselves are **not tracked by git** (about **900 MB** in
-total). Place them under `[tagging] models_dir` (default `backend/models/`,
-resolved relative to `config.toml`) in this exact layout — the tagger checks
-every path before enabling itself:
+- **OpenVINO plan — the default when no NVIDIA GPU is present.** It is used
+  when `auto` finds no CUDA or when `device = "cpu"` is set explicitly: the
+  CLIP visual tower and YOLO run on OpenVINO, which itself probes for an
+  Intel integrated GPU (GPU when available, CPU otherwise; validated on an
+  Intel i5-11320H with Iris Xe), while the two face models run on ONNX
+  Runtime CPU. CPU-only works, just more slowly. Reference throughput on
+  that hardware: about 350 ms per photo including decode and disk IO — a
+  2,923-photo library tagged in 17 minutes with zero failures (576 faces →
+  269 clusters), i.e. roughly an hour per 10k photos.
+- **CUDA plan — the accelerated option for NVIDIA GPUs.** Once
+  `onnxruntime-gpu` is installed and a CUDA environment is in place, `auto`
+  selects this plan when it detects `CUDAExecutionProvider`, or set
+  `device = "cuda"` explicitly. The four hot-path models — the CLIP visual
+  tower, YOLO, and the two face models — all run through
+  `CUDAExecutionProvider` (with CPU fallback). The CLIP text tower is not on
+  the per-photo hot path: under both plans it runs once on OpenVINO CPU at
+  load time to precompute prompt embeddings. If `cuda` is requested but
+  unavailable, startup logs explain how to fix the environment; tagging
+  stays disabled while the server itself starts normally. The mutually
+  exclusive ORT package swap, CUDA/cuDNN prerequisites, and verification
+  steps are documented in [docs/deployment.md](docs/deployment.md).
+
+Model requirements per plan. The weights themselves are **not tracked by
+git**. Place them under `[tagging] models_dir` (default `backend/models/`,
+resolved relative to `config.toml`). Before enabling tagging, the tagger
+checks every path required by the selected plan and logs any missing one:
+
+- **Shared by both plans (~730 MB):**
+  - `clip-ov/text.xml` + `text.bin` — CLIP text tower, OpenVINO IR, ~121 MB
+  - `clip-vit-base-patch32/` — HF tokenizer/processor configs (includes the
+    `pytorch_model.bin` shipped with the snapshot; not loaded at runtime), ~580 MB
+  - `yolo11n.onnx` — YOLO11n (COCO person class), ~10 MB
+  - `insightface/det_500m.onnx` — SCRFD 500m face detector, ~2.5 MB
+  - `insightface/w600k_mbf.onnx` — ArcFace recognition model, ~13 MB
+- **Additionally required by the OpenVINO plan:** `clip-ov/visual.xml` +
+  `visual.bin` (CLIP visual tower, OpenVINO IR, ~168 MB) — about **900 MB**
+  in total.
+- **Additionally required by the CUDA plan:** `clip-onnx/visual.onnx`
+  (CLIP visual tower ONNX, ~350 MB, exported via
+  [scripts/export_clip_onnx.py](scripts/export_clip_onnx.py)) — about
+  **1.1 GB** in total.
+
+The full layout looks like this (the tagger checks exactly these paths):
 
 ```text
 backend/models/
@@ -232,33 +264,30 @@ files come from the official InsightFace model zoo (same source as the
 `buffalo_l` pack). Their licenses differ — see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Two backend plans are selected via `[tagging] device` (default `auto`).
-Without CUDA, the OpenVINO plan runs CLIP/YOLO on an Intel GPU when one is
-exposed (validated on an Intel i5-11320H with Iris Xe) and otherwise on
-CPU, with the face models on ONNX Runtime CPU. With `onnxruntime-gpu`
-installed and a CUDA-capable NVIDIA GPU, the CUDA plan runs all four models
-through `CUDAExecutionProvider` (with CPU fallback); this requires the extra
-`clip-onnx/visual.onnx` export — see [docs/deployment.md](docs/deployment.md)
-for the package swap (`onnxruntime` and `onnxruntime-gpu` are mutually
-exclusive), CUDA/cuDNN prerequisites, and verification steps. Reference throughput on that
-hardware: about 350 ms per photo including decode and disk IO — a 2,923-photo
-library tagged in 17 minutes with zero failures (576 faces → 269 clusters),
-i.e. roughly an hour per 10k photos; CPU-only works but is slower. Models
-load lazily on first use and stay resident; starting the web server never
-loads them.
+Notes:
 
-If the model files are missing, the server still starts normally: scan-time
-tagging switches off with a log line and every other feature works. After
-copying the files into place, verify with:
-
-```bash
-myphoto tag status     # prints "models ready: yes" once every file is in place
-```
-
-To disable tagging entirely (e.g. on a low-resource host), set
-`enabled = false` in the `[tagging]` section of `config.toml`. The expanded
-deployment walkthrough (mirror setup, package mirror tips) lives in
-[docs/deployment.md](docs/deployment.md) (in Chinese).
+- The Python dependencies install with the normal
+  `pip install -e ".[dev]"` (NumPy, OpenVINO, onnxruntime, InsightFace,
+  OpenCV, Transformers). **`openvino` is pinned to 2024.6.0** — newer
+  2026.x releases break its API — and do not install `optimum`, which pulls
+  in an incompatible OpenVINO.
+- PyTorch is intentionally **not** a dependency: inference runs on
+  OpenVINO/onnxruntime and Transformers is used only for `CLIPProcessor`
+  (PIL/numpy preprocessing). On a torch-free host Transformers prints an
+  advisory `PyTorch was not found …` warning at import — it is harmless, the
+  tagger suppresses it automatically, and installing torch (a multi-GB CUDA
+  wheel) just to silence it is unnecessary.
+- Models **load lazily** on first use and stay resident; starting the web
+  server never loads them.
+- If the model files are missing, the server still starts normally: scan-time
+  tagging switches off with a log line and every other feature works. After
+  copying the files into place, run `myphoto tag status` to verify — it
+  prints `models ready: yes` on its first line once every file required by
+  the selected plan is in place.
+- To disable tagging entirely (e.g. on a low-resource host), set
+  `enabled = false` in the `[tagging]` section of `config.toml`. The expanded
+  deployment walkthrough (mirror setup, package mirror tips, CUDA setup)
+  lives in [docs/deployment.md](docs/deployment.md) (in Chinese).
 
 ### Privacy
 
