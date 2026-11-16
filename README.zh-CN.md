@@ -196,8 +196,12 @@ myphoto tag gc [--include-named]                                # 清理孤儿�
   且 CUDA 环境就位后，`auto` 探测到 `CUDAExecutionProvider` 会自动
   选用，也可显式设 `device = "cuda"`：CLIP 视觉塔、YOLO、两个人脸
   模型共四个热路径模型全部经 `CUDAExecutionProvider` 推理（带 CPU
-  回退）。CLIP 文本塔不在单张热路径上，两套计划下都只在模型加载时
-  经 OpenVINO CPU 预计算一次提示词向量。显式 `cuda` 但环境不可用时，
+  回退）。CLIP 文本塔则**刻意保留在 OpenVINO CPU 上**：场景匹配所用
+  的 85 条提示词是一份固定清单，文本塔只在模型加载时批量推理一次，
+  把提示词向量缓存成矩阵；此后每张照片的场景判定只是视觉塔向量与该
+  矩阵的一次矩阵乘法，不再调用文本塔。既然每个进程只跑一次，把它搬
+  上 CUDA 对单张吞吐毫无收益，反而要多建一个 CUDA session、多维护
+  一份 ONNX 模型。显式 `cuda` 但环境不可用时，
   启动日志会给出安装提示、打标禁用而服务照常启动。ORT 包互斥安装、
   CUDA / cuDNN 前置与验证步骤见 [docs/deployment.md](docs/deployment.md)。
 

@@ -214,9 +214,14 @@ loading plans, each for a different scenario:
   selects this plan when it detects `CUDAExecutionProvider`, or set
   `device = "cuda"` explicitly. The four hot-path models — the CLIP visual
   tower, YOLO, and the two face models — all run through
-  `CUDAExecutionProvider` (with CPU fallback). The CLIP text tower is not on
-  the per-photo hot path: under both plans it runs once on OpenVINO CPU at
-  load time to precompute prompt embeddings. If `cuda` is requested but
+  `CUDAExecutionProvider` (with CPU fallback). The CLIP text tower is
+  deliberately kept on OpenVINO CPU: scene matching uses a fixed list of 85
+  prompts, so the text tower runs once as a batch at model load time and its
+  embedding matrix is cached; per-photo classification is then just a matrix
+  multiply of the visual embedding against that matrix, never calling the
+  text tower again. Since it runs only once per process, moving it to CUDA
+  would not improve per-photo throughput at all, while costing an extra CUDA
+  session and another model file to maintain. If `cuda` is requested but
   unavailable, startup logs explain how to fix the environment; tagging
   stays disabled while the server itself starts normally. The mutually
   exclusive ORT package swap, CUDA/cuDNN prerequisites, and verification
