@@ -34,6 +34,10 @@ TAG_MODEL_VERSION = "clip-v3-predownscale"
 CLIP_MODEL_VERSION = "clip-vit-b32-v2"
 FACE_MODEL_VERSION = "w600k-mbf-v1"
 
+# 归一化 [0,1] bbox 自 clip-v3 起引入；未来 bump 版本戳若仍保持归一化几何，
+# 必须把新戳追加进此集合（精确相等会在 bump 后静默退回像素解释）。
+NORMALIZED_BBOX_TAGS = frozenset({"clip-v3-predownscale"})
+
 # 两级分类体系 V2（原型实测：一级 ~93%、二级 ~83%）。
 # 结构：{一级: {二级: [prompt, ...]}}；prompt 级 score 取组内 max。
 HIERARCHY: dict[str, dict[str, list[str]]] = {
@@ -515,10 +519,15 @@ def normalize_bbox(
 def bbox_is_normalized(tag_model_version: str | None) -> bool:
     """face_embeddings.bbox 是否为归一化分数坐标，按图片的 tag_model_version 判定。
 
+    命中显式 allow-set ``NORMALIZED_BBOX_TAGS`` 才为 True（None / legacy 戳 /
+    未登记的未来戳均为 False，按像素坐标解释；无 wildcard 或前缀匹配）。
+    bump TAG_MODEL_VERSION 后若 bbox 几何仍归一化，必须同步把新戳加进集合，
+    否则 test_normalized_bbox_allow_set_must_cover_current_stamp 会响亮失败。
+
     不能看 face_embeddings.model_version：那只是人脸模型戳 FACE_MODEL_VERSION，
     bbox 几何改动前后未变，无法区分管线年代。
     """
-    return tag_model_version == TAG_MODEL_VERSION
+    return tag_model_version in NORMALIZED_BBOX_TAGS
 
 
 def denormalize_bbox(

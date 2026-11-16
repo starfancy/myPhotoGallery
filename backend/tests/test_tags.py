@@ -237,6 +237,17 @@ def test_bbox_is_normalized_discriminates_by_image_tag_stamp():
     assert bbox_is_normalized(None) is False
 
 
+def test_normalized_bbox_allow_set_must_cover_current_stamp():
+    # bump TAG_MODEL_VERSION 却忘记把新戳加进 NORMALIZED_BBOX_TAGS 时，
+    # 此守卫必须响亮失败——不能像精确相等那样静默退回 legacy 像素解释。
+    from myphoto.services.tagger import NORMALIZED_BBOX_TAGS
+
+    assert TAG_MODEL_VERSION in NORMALIZED_BBOX_TAGS
+    assert bbox_is_normalized("clip-v3-predownscale") is True
+    # 显式 allow-set，无 wildcard/前缀匹配：未知戳（含未来戳）一律按 legacy 像素解释
+    assert bbox_is_normalized("clip-v4-example") is False
+
+
 def test_denormalize_bbox_legacy_pixels_pass_through():
     # legacy 行：image_size 不参与，像素框原样（统一转 float）返回
     assert denormalize_bbox((10, 10, 50, 50), (200, 100), normalized=False) == (
