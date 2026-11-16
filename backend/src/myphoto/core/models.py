@@ -113,7 +113,9 @@ class FaceEmbedding(Base):
         ForeignKey("images.id", ondelete="CASCADE"), nullable=False,
     )
     face_index: Mapped[int] = mapped_column(Integer, nullable=False)  # 同图多脸时的序号
-    bbox: Mapped[str | None] = mapped_column(String, nullable=True)   # "[x1,y1,x2,y2]" 原图坐标系
+    # "[x1,y1,x2,y2]"：v3+（image.tag_model_version == TAG_MODEL_VERSION）为
+    # [0,1] 归一化分数；legacy 行为全分辨率像素坐标。cover 路由按图片戳解释。
+    bbox: Mapped[str | None] = mapped_column(String, nullable=True)
     embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     cluster_id: Mapped[str | None] = mapped_column(String, nullable=True)  # "P001"，未分配时 NULL

@@ -24,8 +24,12 @@ from myphoto.services.inference import BackendUnavailable, resolve_backend
 
 log = logging.getLogger("myphoto.tagger")
 
-# 模型版本戳：写入 images.tag_model_version / image_embeddings.model_version /
-# face_embeddings.model_version。换模型/调提示词时 bump，CLI 可据此决定重打。
+# 模型版本戳：
+# - TAG_MODEL_VERSION 写入 images.tag_model_version / image_embeddings.model_version，
+#   换模型/调提示词/改预处理几何时 bump，CLI 可据此决定重打；cover 路由也据此判别
+#   face_embeddings.bbox 是归一化分数还是 legacy 像素坐标。
+# - FACE_MODEL_VERSION 仅盖人脸模型，写入 face_embeddings.model_version；bbox 几何
+#   归一化不 bump 它，所以不能靠 face 行自己的戳判别 bbox 年代（见 bbox_is_normalized）。
 TAG_MODEL_VERSION = "clip-v3-predownscale"
 CLIP_MODEL_VERSION = "clip-vit-b32-v2"
 FACE_MODEL_VERSION = "w600k-mbf-v1"
@@ -105,7 +109,9 @@ _FACE_DET_THRESHOLD = 0.5
 
 @dataclass(frozen=True)
 class FaceResult:
-    bbox: tuple[int, int, int, int]  # (x1, y1, x2, y2) 原图坐标系
+    # (x1, y1, x2, y2) 归一化分数 [0,1]：x 占宽、y 占高，相对送入打标器且已
+    # EXIF 转正的图像。分数与解码分辨率无关（大 JPEG 可能按 DCT 半分辨率解码）。
+    bbox: tuple[float, float, float, float]
     confidence: float
     embedding: np.ndarray  # 512 维 float32，已 L2 归一化
 
@@ -481,9 +487,52 @@ class Tagger:
             blob = blob[None, ...]
             emb = self._recog.run(None, {self._recog.get_inputs()[0].name: blob})[0][0]
             emb = emb / np.linalg.norm(emb)
-            x1, y1, x2, y2 = (int(v) for v in box)
-            faces.append(FaceResult(bbox=(x1, y1, x2, y2), confidence=conf, embedding=emb))
+            # box 在 rgb（可能是 DCT 半分辨率解码图）的像素空间；归一化为分数，
+            # 落库后由 cover 路由按全分辨率转正原图还原（奇数边草稿不是精确 2x）。
+            box_f = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
+            faces.append(FaceResult(
+                bbox=normalize_bbox(box_f, rgb.size),
+                confidence=conf, embedding=emb,
+            ))
         return faces
+
+
+def normalize_bbox(
+    box: tuple[float, float, float, float],
+    size: tuple[int, int],
+) -> tuple[float, float, float, float]:
+    """像素框 → 占图像宽/高的 [0,1] 分数（x 除宽、y 除高）。
+
+    size 为 PIL 的 ``(w, h)``，即 box 所在像素空间的尺寸。分数坐标与解码
+    分辨率无关：大 JPEG 经 DCT 半分辨率（奇数边时甚至不是精确 1/2）解码后
+    检出的框，归一化后仍可映射回全分辨率原图。
+    """
+    w, h = size
+    x1, y1, x2, y2 = box
+    return x1 / w, y1 / h, x2 / w, y2 / h
+
+
+def bbox_is_normalized(tag_model_version: str | None) -> bool:
+    """face_embeddings.bbox 是否为归一化分数坐标，按图片的 tag_model_version 判定。
+
+    不能看 face_embeddings.model_version：那只是人脸模型戳 FACE_MODEL_VERSION，
+    bbox 几何改动前后未变，无法区分管线年代。
+    """
+    return tag_model_version == TAG_MODEL_VERSION
+
+
+def denormalize_bbox(
+    bbox: tuple[float, float, float, float],
+    image_size: tuple[int, int],
+    normalized: bool,
+) -> tuple[float, float, float, float]:
+    """cover 渲染用：归一化分数按 EXIF 转正后原图尺寸还原为像素框；
+    legacy 像素框原样返回（统一转 float），image_size 不参与。"""
+    x1, y1, x2, y2 = bbox
+    if not normalized:
+        return float(x1), float(y1), float(x2), float(y2)
+    w, h = image_size
+    return x1 * w, y1 * h, x2 * w, y2 * h
 
 
 def _letterbox(img: PILImage.Image, size: int = 640):

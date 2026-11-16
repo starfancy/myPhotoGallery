@@ -27,7 +27,16 @@ from myphoto.core.models import (
     ImageEmbedding,
 )
 from myphoto.services.scanner import Scanner
-from myphoto.services.tagger import HIERARCHY, TAG_MODEL_VERSION, TagResult, classify_scene, flatten_prompts
+from myphoto.services.tagger import (
+    HIERARCHY,
+    TAG_MODEL_VERSION,
+    TagResult,
+    bbox_is_normalized,
+    classify_scene,
+    denormalize_bbox,
+    flatten_prompts,
+    normalize_bbox,
+)
 
 
 # ---------- helpers ----------
@@ -66,7 +75,9 @@ class FakeTagger:
         faces = []
         for i in range(self._result.person_count):
             faces.append(FaceResult(
-                bbox=(i, i, i + 10, i + 10), confidence=0.9,
+                # v3 管线：bbox 为 [0,1] 归一化分数（相对送入打标器的转正图）
+                bbox=(0.1 * i, 0.1 * i, 0.1 * i + 0.5, 0.1 * i + 0.5),
+                confidence=0.9,
                 embedding=_unit_vec(512, i + 1),
             ))
         return TagResult(
@@ -187,6 +198,60 @@ def test_classify_scene_minor_max_within_major_ignores_other_majors():
     # top1 一级内：湖泊 0.9 > 海滩 0.8
     assert minor == "湖泊"
     assert conf == pytest.approx(0.9)
+
+
+# ---------- bbox 归一化/还原纯函数（与解码分辨率无关） ----------
+
+
+def test_normalize_bbox_divides_by_width_and_height():
+    # 非方形图：x 除宽、y 除高
+    assert normalize_bbox((10, 20, 110, 220), (100, 200)) == (
+        pytest.approx(0.1), pytest.approx(0.1),
+        pytest.approx(1.1), pytest.approx(1.1),
+    )
+
+
+def test_normalized_bbox_roundtrips_through_odd_dct_half_size():
+    # 奇数边 JPEG 的 DCT 草稿不是精确 /2（3201x2403 → 1601x1202）；
+    # 归一化分数必须能映射回 EXIF 转正后的全分辨率原图，不能假设固定 2x 倍数。
+    decoded = (1601, 1202)
+    original = (3201, 2403)
+    assert (original[0] / decoded[0], original[1] / decoded[1]) != (2.0, 2.0)
+
+    box = (160.0, 120.0, 320.0, 240.0)  # SCRFD 在解码图坐标系的检出框
+    frac = normalize_bbox(box, decoded)
+    back = denormalize_bbox(frac, original, normalized=True)
+    sx, sy = original[0] / decoded[0], original[1] / decoded[1]
+    assert back == pytest.approx((160 * sx, 120 * sy, 320 * sx, 240 * sy))
+    # 整张解码图 → 分数恰为 [0,0,1,1]，还原即整张原图
+    assert normalize_bbox((0, 0, decoded[0], decoded[1]), decoded) == (0.0, 0.0, 1.0, 1.0)
+    assert denormalize_bbox((0, 0, 1, 1), original, True) == (
+        0.0, 0.0, float(original[0]), float(original[1]),
+    )
+
+
+def test_bbox_is_normalized_discriminates_by_image_tag_stamp():
+    # face 行自带的 FACE_MODEL_VERSION 不随几何改动变化，只能用图片戳判别
+    assert bbox_is_normalized(TAG_MODEL_VERSION) is True
+    assert bbox_is_normalized("clip-v2-yolo11n-insightface") is False
+    assert bbox_is_normalized(None) is False
+
+
+def test_denormalize_bbox_legacy_pixels_pass_through():
+    # legacy 行：image_size 不参与，像素框原样（统一转 float）返回
+    assert denormalize_bbox((10, 10, 50, 50), (200, 100), normalized=False) == (
+        10.0, 10.0, 50.0, 50.0,
+    )
+    assert denormalize_bbox((10, 10, 50, 50), (9999, 8888), normalized=False) == (
+        10.0, 10.0, 50.0, 50.0,
+    )
+
+
+def test_denormalize_bbox_scales_normalized_fractions():
+    # [0,0.5,0,0.5] 在 2000x1000 上 → 左侧上半块像素框
+    assert denormalize_bbox((0, 0.5, 0, 0.5), (2000, 1000), normalized=True) == (
+        0.0, 500.0, 0.0, 500.0,
+    )
 
 
 # ---------- tag_images ----------

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, select, update
 
 from myphoto.services.access import access_scope_guard
+from myphoto.services.tagger import bbox_is_normalized, denormalize_bbox
 from myphoto.core.errors import AppError
 from myphoto.core.models import (
     FaceCluster,
@@ -101,6 +102,9 @@ async def cluster_face(
         image = await s.get(Image, face.image_id)
         root = await s.get(GalleryRoot, image.root_id)
         path = Path(root.absolute_path) / image.relative_path
+        # 用图片戳（而非 face 行的人脸模型戳）判别 bbox 年代：v3+ 为归一化分数，
+        # legacy 为当年全分辨率像素坐标。会话关闭前取出，供 to_thread 渲染使用。
+        normalized = bbox_is_normalized(image.tag_model_version)
 
     def _render():
         from PIL import Image as PILImage, ImageOps
@@ -108,16 +112,20 @@ async def cluster_face(
             im = ImageOps.exif_transpose(im).convert("RGB")
             bbox = json.loads(face.bbox) if face.bbox else None
             if bbox and len(bbox) == 4:
-                x1, y1, x2, y2 = [int(v) for v in bbox]
+                # 归一化分数先按转正后全分辨率原图还原为像素，再走统一外扩逻辑
+                x1, y1, x2, y2 = denormalize_bbox(
+                    (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])),
+                    im.size, normalized,
+                )
                 # 向外扩 20% 避免人脸紧贴边缘
                 w, h = im.size
                 pad_x = int((x2 - x1) * 0.2)
                 pad_y = int((y2 - y1) * 0.2)
-                x1 = max(0, x1 - pad_x)
-                y1 = max(0, y1 - pad_y)
-                x2 = min(w, x2 + pad_x)
-                y2 = min(h, y2 + pad_y)
-                im = im.crop((x1, y1, x2, y2))
+                x1 = max(0.0, x1 - pad_x)
+                y1 = max(0.0, y1 - pad_y)
+                x2 = min(float(w), x2 + pad_x)
+                y2 = min(float(h), y2 + pad_y)
+                im = im.crop((int(x1), int(y1), int(x2), int(y2)))
             im.thumbnail((100, 100), PILImage.Resampling.LANCZOS)
             buf = io.BytesIO()
             im.save(buf, "JPEG", quality=85)
