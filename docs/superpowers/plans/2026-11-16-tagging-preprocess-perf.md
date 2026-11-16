@@ -515,47 +515,48 @@ PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe \
 
 def test_jpeg_dct_halves_large_image(tmp_path):
     p = tmp_path / "big.jpg"
-    _jpg(p, size=(2000, 1000))
+    _jpg(p, size=(3200, 2400))
     im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
-    # DCT 1/2（MCU 取整后约一半）：明显缩小，最短边落在 500 附近
+    # 最短边 2400 > 1600 → draft DCT 1/2，偶数尺寸精确减半
     assert im.mode == "RGB"
-    assert 1.8 < 2000 / im.size[0] < 2.2
-    assert 400 <= im.size[1] <= 600
+    assert im.size == (1600, 1200)
 
 
-def test_small_jpeg_below_floor_is_not_drafted(tmp_path):
-    p = tmp_path / "small.jpg"
-    _jpg(p, size=(800, 600))
+def test_jpeg_at_or_below_floor_is_not_drafted(tmp_path):
+    # 守卫是严格大于：最短边恰等于地板不降；小图也不降
+    p = tmp_path / "edge.jpg"
+    _jpg(p, size=(1600, 1200))
     im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
-    assert im.size == (800, 600)
+    assert im.size == (1600, 1200)
 
 
 def test_png_silently_ignores_target_and_keeps_full_size(tmp_path):
     p = tmp_path / "big.png"
-    PILImage.new("RGB", (2000, 1000)).save(p)
+    PILImage.new("RGB", (3200, 2400)).save(p)
     im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
-    assert im.size == (2000, 1000)
+    assert im.size == (3200, 2400)
 
 
 def test_default_none_keeps_legacy_full_resolution(tmp_path):
     p = tmp_path / "big.jpg"
-    _jpg(p, size=(2000, 1000))
-    assert load_pil_image(p, is_raw=False).size == (2000, 1000)
+    _jpg(p, size=(3200, 2400))
+    assert load_pil_image(p, is_raw=False).size == (3200, 2400)
 
 
 def test_draft_combined_with_exif_orientation(tmp_path):
-    # draft 在转正之前配置；Orientation=6 的横版图转正后应为降采样竖图
+    # 3200x2400 横版 + Orientation=6：先 DCT 1/2 到 1600x1200，
+    # 再顺时针 90° EXIF 转正为 1200x1600 竖版
     p = tmp_path / "big_orient.jpg"
-    _jpg(p, size=(2000, 1000), orientation=6)
+    _jpg(p, size=(3200, 2400), orientation=6)
     im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
-    assert im.size[0] > im.size[1]          # 转正后竖版
-    assert im.size[0] < 2000 and im.size[1] < 1000  # 且确实降采样
+    assert im.size == (1200, 1600)
 ```
 
 - [ ] **Step 2: 运行确认失败**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests/test_imaging.py -v`
-Expected: 5 个新用例 FAIL（`TypeError: unexpected keyword argument` 或尺寸未降）
+Expected: 4 个新用例 FAIL（`TypeError: unexpected keyword argument`；default-None
+用例是回归守卫，实现前即通过）
 
 - [ ] **Step 3: 实现**
 
@@ -608,7 +609,7 @@ def _load_regular(source: str, target_shortest_edge: int | None = None) -> PILIm
 - [ ] **Step 4: 运行确认通过**
 
 Run: `.venv/Scripts/python.exe -m pytest backend/tests/test_imaging.py -v`
-Expected: 全部通过（原有 9 个 + 新增 5 个 = 14 passed）
+Expected: 全部通过（原有 8 个 + 新增 5 个 = 13 passed）
 
 - [ ] **Step 5: 确认缩略图路径未受影响**
 
