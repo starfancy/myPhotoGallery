@@ -27,6 +27,7 @@ from myphoto.core.models import (
 )
 from myphoto.imaging.formats import classify
 from myphoto.imaging.decode import load_pil_image
+from myphoto.imaging.preprocess import TAG_DECODE_FLOOR
 from myphoto.services.tagger import FACE_MODEL_VERSION, TAG_MODEL_VERSION, TagResult
 
 log = logging.getLogger("myphoto.tagging_jobs")
@@ -130,8 +131,14 @@ async def count_failed(
 
 
 def _decode_and_tag(tagger, path: Path) -> TagResult:
-    # 统一解码：RAW（.orf 等）走 rawpy，普通图 PIL+EXIF 转正，与缩略图同入口
-    with load_pil_image(path, is_raw=classify(path.name) == "raw") as im:
+    # 统一解码：RAW（.orf 等）走 rawpy，普通图 PIL+EXIF 转正，与缩略图同入口。
+    # 大图 JPEG 在解码阶段即 DCT 1/2 降采样（最短边地板 1600px），
+    # 后续 letterbox / BGR 转换全部在小图上进行。
+    with load_pil_image(
+        path,
+        is_raw=classify(path.name) == "raw",
+        target_shortest_edge=TAG_DECODE_FLOOR,
+    ) as im:
         return tagger.tag(im)
 
 

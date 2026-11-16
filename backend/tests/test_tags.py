@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import contextlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,7 +93,7 @@ def test_decode_and_tag_routes_by_extension(tmp_path, monkeypatch):
 
     calls: list[tuple[str, bool]] = []
 
-    def fake_load(path, is_raw):
+    def fake_load(path, is_raw, target_shortest_edge=None):
         calls.append((Path(path).name, is_raw))
         return PILImage.new("RGB", (32, 24))
 
@@ -573,3 +574,26 @@ def test_cli_tag_run_explicit_cuda_unavailable_has_hint(tmp_path, monkeypatch):
     assert r.exit_code != 0
     assert "CUDAExecutionProvider" in r.output
     assert "onnxruntime-gpu" in r.output
+
+
+def test_decode_and_tag_passes_dct_floor(monkeypatch, tmp_path):
+    from myphoto.services import tagging_jobs as jobs
+
+    captured = {}
+
+    class FakeTagger:
+        def tag(self, im):
+            captured["image_size"] = im.size
+            return "TAGGED"
+
+    def fake_load(path, is_raw, target_shortest_edge=None):
+        captured["floor"] = target_shortest_edge
+        return contextlib.nullcontext(PILImage.new("RGB", (10, 10)))
+
+    monkeypatch.setattr(jobs, "load_pil_image", fake_load)
+    p = tmp_path / "x.jpg"
+    p.write_bytes(b"x")
+
+    assert jobs._decode_and_tag(FakeTagger(), p) == "TAGGED"
+    assert captured["floor"] == 1600
+    assert captured["image_size"] == (10, 10)
