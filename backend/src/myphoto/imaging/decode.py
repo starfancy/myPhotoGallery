@@ -36,12 +36,12 @@ def load_pil_image(
     is_raw: bool,
     target_shortest_edge: int | None = None,
 ) -> PILImage.Image:
-    """把磁盘图片解码为已 EXIF 转正的全分辨率 RGB PIL 图像（不做缩放）。
+    """把磁盘图片解码为已 EXIF 转正的 RGB PIL 图像。
 
-    target_shortest_edge 仅对 JPEG 生效：原图最短边大于该值时用 libjpeg
-    DCT 1/2 降分辨率解码（解码即降采样，省掉全图像素的内存搬运）；
-    其他格式与 None 均走原路径。返回对象的文件句柄已关闭、像素驻留内存，
-    解码失败统一抛 ImageDecodeError。
+    默认全分辨率返回；target_shortest_edge 仅对 JPEG 生效：原图最短边大于
+    该值时用 libjpeg DCT 1/2 降分辨率解码（解码即降采样，省掉全图像素的
+    内存搬运），返回尺寸可能小于原图；其他格式与 None 均走全分辨率原路径。
+    返回对象的文件句柄已关闭、像素驻留内存，解码失败统一抛 ImageDecodeError。
     """
     try:
         if is_raw:

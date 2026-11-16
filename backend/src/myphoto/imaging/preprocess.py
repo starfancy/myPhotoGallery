@@ -19,8 +19,9 @@ def resize_shortest_edge(
 ) -> PILImage.Image:
     """等比缩放使最短边恰好为 size，保持长宽比。
 
-    取整规则与 CLIPProcessor 内部一致：scale = size / min(w, h)，
-    新边长 round(w*scale) / round(h*scale)。已是目标尺寸时原样返回，
+    取整规则近似 CLIPProcessor：scale = size / min(w, h)，新边长
+    round(w*scale) / round(h*scale)（HF 处理器对长边用 int() 截断，
+    差异 ≤1px，下游中心裁剪不可感）。已是目标尺寸时原样返回，
     避免无意义的像素拷贝。
     """
     w, h = img.size

@@ -163,6 +163,14 @@ def test_jpeg_at_or_below_floor_is_not_drafted(tmp_path):
     assert im.size == (1600, 1200)
 
 
+def test_jpeg_shortest_edge_equal_to_floor_is_not_drafted(tmp_path):
+    # 等号边界：(2000,1600) 最短边恰好 1600，严格 > 守卫不触发 DCT 降分辨率
+    p = tmp_path / "exact_floor.jpg"
+    _jpg(p, size=(2000, 1600))
+    im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
+    assert im.size == (2000, 1600)
+
+
 def test_png_silently_ignores_target_and_keeps_full_size(tmp_path):
     p = tmp_path / "big.png"
     PILImage.new("RGB", (3200, 2400)).save(p)
