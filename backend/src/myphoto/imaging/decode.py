@@ -31,24 +31,38 @@ class ImageDecodeError(Exception):
     """统一解码异常：缩略图层包装为 ThumbnailError，打标层落 tag_error。"""
 
 
-def load_pil_image(source: str | Path, is_raw: bool) -> PILImage.Image:
+def load_pil_image(
+    source: str | Path,
+    is_raw: bool,
+    target_shortest_edge: int | None = None,
+) -> PILImage.Image:
     """把磁盘图片解码为已 EXIF 转正的全分辨率 RGB PIL 图像（不做缩放）。
 
-    返回对象的文件句柄已关闭、像素驻留内存，调用方可继续模型推理或缩放；
+    target_shortest_edge 仅对 JPEG 生效：原图最短边大于该值时用 libjpeg
+    DCT 1/2 降分辨率解码（解码即降采样，省掉全图像素的内存搬运）；
+    其他格式与 None 均走原路径。返回对象的文件句柄已关闭、像素驻留内存，
     解码失败统一抛 ImageDecodeError。
     """
     try:
         if is_raw:
             return _load_raw(str(source))
-        return _load_regular(str(source))
+        return _load_regular(str(source), target_shortest_edge)
     except ImageDecodeError:
         raise
     except (UnidentifiedImageError, OSError, ValueError, RuntimeError) as exc:
         raise ImageDecodeError(f"image decode failed for {source}: {exc}") from exc
 
 
-def _load_regular(source: str) -> PILImage.Image:
+def _load_regular(source: str, target_shortest_edge: int | None = None) -> PILImage.Image:
     with PILImage.open(source) as im:
+        # draft 必须在 load 之前配置；仅 JPEG 具备 DCT 缩放能力，
+        # 非 JPEG 调用 draft 无效果，这里用格式守卫静默回退全分辨率。
+        if (
+            target_shortest_edge is not None
+            and im.format == "JPEG"
+            and min(im.size) > target_shortest_edge
+        ):
+            im.draft("RGB", (im.width // 2, im.height // 2))
         # 相机直出图竖拍仅靠 Orientation 标记；先转正，打标与缩略图方向才一致
         im = ImageOps.exif_transpose(im)
         if im.mode != "RGB":

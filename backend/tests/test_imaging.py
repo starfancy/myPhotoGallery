@@ -142,3 +142,44 @@ def test_raw_failure_wrapped_as_decode_error(tmp_path, rawpy_patch):
     install_module(_BoomRawPy(_FakeRaw(np.zeros((4, 4, 3), dtype=np.uint8))))
     with pytest.raises(ImageDecodeError):
         load_pil_image(tmp_path / "a.orf", is_raw=True)
+
+
+# ---------- DCT 降分辨率解码（target_shortest_edge） ----------
+
+def test_jpeg_dct_halves_large_image(tmp_path):
+    p = tmp_path / "big.jpg"
+    _jpg(p, size=(3200, 2400))
+    im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
+    # 最短边 2400 > 1600 → draft DCT 1/2，偶数尺寸精确减半
+    assert im.mode == "RGB"
+    assert im.size == (1600, 1200)
+
+
+def test_jpeg_at_or_below_floor_is_not_drafted(tmp_path):
+    # 守卫是严格大于：最短边恰等于地板不降；小图也不降
+    p = tmp_path / "edge.jpg"
+    _jpg(p, size=(1600, 1200))
+    im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
+    assert im.size == (1600, 1200)
+
+
+def test_png_silently_ignores_target_and_keeps_full_size(tmp_path):
+    p = tmp_path / "big.png"
+    PILImage.new("RGB", (3200, 2400)).save(p)
+    im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
+    assert im.size == (3200, 2400)
+
+
+def test_default_none_keeps_legacy_full_resolution(tmp_path):
+    p = tmp_path / "big.jpg"
+    _jpg(p, size=(3200, 2400))
+    assert load_pil_image(p, is_raw=False).size == (3200, 2400)
+
+
+def test_draft_combined_with_exif_orientation(tmp_path):
+    # 3200x2400 横版 + Orientation=6：先 DCT 1/2 到 1600x1200，
+    # 再顺时针 90° EXIF 转正为 1200x1600 竖版
+    p = tmp_path / "big_orient.jpg"
+    _jpg(p, size=(3200, 2400), orientation=6)
+    im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
+    assert im.size == (1200, 1600)
