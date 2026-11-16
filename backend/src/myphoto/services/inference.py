@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Sequence
 
 _CUDA_EP = "CUDAExecutionProvider"
@@ -55,6 +57,31 @@ def select_ort_providers(
     return [_CUDA_EP, _CPU_EP] if has_cuda else [_CPU_EP]
 
 
+def _find_cuda_runtime_on_path(
+    names: tuple[str, ...],
+    subdir_combos: tuple[tuple[str, ...], ...],
+) -> str | None:
+    """在 PATH 目录中查找 CUDA 运行库，返回首个命中的完整路径。
+
+    会额外查每个 PATH 目录下的 ``subdir_combos`` 子目录（Windows CUDA 13
+    Toolkit 把运行库放在 ``bin/x64``）。不能用 ``shutil.which``：Python 3.12
+    的 which 只返回扩展名命中 PATHEXT（.EXE/.CMD/...）的文件，对 .dll/.so
+    恒返回 None——库明明在 PATH 上也会被误判为"未安装"，进而错误触发
+    preload_dlls 刷 "Failed to load cudart64_*.dll" 警告（实测全局
+    CUDA 13.5 Toolkit 即如此）。
+    """
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        for subdirs in subdir_combos:
+            candidate_dir = os.path.join(directory, *subdirs)
+            for name in names:
+                path = os.path.join(candidate_dir, name)
+                if os.path.isfile(path):
+                    return path
+    return None
+
+
 def preload_cuda_dlls() -> None:
     """建 ORT CUDA 会话前预加载 CUDA/cuDNN DLL（Windows/Linux）。
 
@@ -64,19 +91,19 @@ def preload_cuda_dlls() -> None:
     CUDA / cuDNN DLL。ORT 约定缺失的 cuDNN 库只忽略、不报错；老版本
     ORT 没有该 API 时静默跳过。
 
-    若系统 PATH 已能解析 CUDA 运行库（典型：系统级 Toolkit 安装，如
-    ``C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.5\\bin``），
-    标准 DLL 搜索即可让会话正常加载，此时跳过预加载——preload_dlls 不认识
-    这类安装位置，强行调用只会刷 "Failed to load ... cublas64_*.dll" 警告。
+    若 PATH 已能解析 CUDA 运行库则跳过预加载——两种布局都识别：系统级
+    Toolkit 的 CUDA 13 Windows 布局（``...\\CUDA\\v13.5\\bin\\x64``）与
+    CUDA 12 / pip nvidia 包的扁平 ``bin`` 布局。系统级安装时 preload_dlls
+    只按 pip 包位置找库，强行调用只会刷 "Failed to load ... cublas64_*.dll"
+    警告，标准 DLL 搜索本就能让会话正常加载。
     """
-    import shutil
-    import sys
-
     if sys.platform == "win32":
         runtime_names = ("cudart64_13.dll", "cudart64_12.dll")
+        subdir_combos: tuple[tuple[str, ...], ...] = ((), ("x64",))
     else:
         runtime_names = ("libcudart.so.13", "libcudart.so.12")
-    if any(shutil.which(name) for name in runtime_names):
+        subdir_combos = ((),)
+    if _find_cuda_runtime_on_path(runtime_names, subdir_combos):
         return
 
     import onnxruntime as ort

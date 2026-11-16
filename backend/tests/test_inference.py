@@ -1,6 +1,6 @@
 """inference 设备/provider 决策纯函数（不加载任何模型）。"""
 
-import shutil
+import sys
 
 import onnxruntime as ort
 import pytest
@@ -59,24 +59,48 @@ def test_resolve_backend_explicit_cuda_missing_raises():
         resolve_backend("cuda", ["CPUExecutionProvider"])
 
 
-def test_preload_cuda_dlls_ignores_missing_libraries(monkeypatch):
-    # 本机（CI/无 GPU）PATH 上没有 CUDA 运行库，会真实调用 ORT 预加载；
+def _runtime_dll_names() -> list[str]:
+    if sys.platform == "win32":
+        return ["cudart64_13.dll", "cudart64_12.dll"]
+    return ["libcudart.so.13", "libcudart.so.12"]
+
+
+def test_preload_cuda_dlls_ignores_missing_libraries(monkeypatch, tmp_path):
+    # PATH 指向空目录（模拟 CI/无 GPU 机器）：真实调一次 ORT 预加载，
     # ORT 约定缺失库忽略而非报错，调用必须安全返回。
+    monkeypatch.setenv("PATH", str(tmp_path))
     preload_cuda_dlls()
 
 
-def test_preload_skips_ort_call_when_cuda_runtime_resolvable_on_path(monkeypatch):
-    # 系统级 Toolkit（如 CUDA v13.5 装在 Program Files）已在 PATH：
-    # 标准 DLL 加载即可工作，跳过 preload 避免 "Failed to load" 噪音。
-    monkeypatch.setattr(shutil, "which", lambda name: f"C:/fake/{name}")
+def test_preload_skips_ort_call_when_cuda_runtime_in_bin_root(tmp_path, monkeypatch):
+    # CUDA 12 / pip nvidia-* 包布局：运行库直接在 PATH 目录（bin）内。
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name in _runtime_dll_names():
+        (bindir / name).write_bytes(b"")
+    monkeypatch.setenv("PATH", str(bindir))
     calls = []
     monkeypatch.setattr(ort, "preload_dlls", lambda: calls.append(1))
     preload_cuda_dlls()
     assert calls == []
 
 
-def test_preload_calls_ort_when_no_cuda_runtime_on_path(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows CUDA 13 bin/x64 布局")
+def test_preload_skips_ort_call_when_cuda_runtime_in_x64_subdir(tmp_path, monkeypatch):
+    # CUDA 13 Windows Toolkit 布局：PATH 条目是 bin，运行库在其 x64 子目录。
+    x64dir = tmp_path / "bin" / "x64"
+    x64dir.mkdir(parents=True)
+    for name in _runtime_dll_names():
+        (x64dir / name).write_bytes(b"")
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    calls = []
+    monkeypatch.setattr(ort, "preload_dlls", lambda: calls.append(1))
+    preload_cuda_dlls()
+    assert calls == []
+
+
+def test_preload_calls_ort_when_no_cuda_runtime_on_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
     calls = []
     monkeypatch.setattr(ort, "preload_dlls", lambda: calls.append(1))
     preload_cuda_dlls()
