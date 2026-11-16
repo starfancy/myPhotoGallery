@@ -19,13 +19,14 @@ from pathlib import Path
 import numpy as np
 from PIL import Image as PILImage
 
+from myphoto.imaging.preprocess import CLIP_SHORTEST_EDGE, resize_shortest_edge
 from myphoto.services.inference import BackendUnavailable, resolve_backend
 
 log = logging.getLogger("myphoto.tagger")
 
 # 模型版本戳：写入 images.tag_model_version / image_embeddings.model_version /
 # face_embeddings.model_version。换模型/调提示词时 bump，CLI 可据此决定重打。
-TAG_MODEL_VERSION = "clip-v2-yolo11n-insightface"
+TAG_MODEL_VERSION = "clip-v3-predownscale"
 CLIP_MODEL_VERSION = "clip-vit-b32-v2"
 FACE_MODEL_VERSION = "w600k-mbf-v1"
 
@@ -396,7 +397,8 @@ class Tagger:
             return classify_scene(sims, self._flat_prompts)
 
     def _clip_scene(self, rgb: PILImage.Image) -> tuple[str, str, float, np.ndarray]:
-        x = self._clip_proc(images=rgb, return_tensors="np")
+        small = resize_shortest_edge(rgb, CLIP_SHORTEST_EDGE)
+        x = self._clip_proc(images=small, return_tensors="np")
         pixel_values = x["pixel_values"].astype(np.float32)
         if self.backend_plan == "cuda":
             img_emb = self._clip_visual_ort.run(
