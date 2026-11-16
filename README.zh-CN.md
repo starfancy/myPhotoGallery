@@ -301,6 +301,12 @@ pnpm --dir frontend build
 `ALTER TABLE ... ADD COLUMN` 迁移）。升级前仍建议先备份
 `<data_dir>/app.db`（默认即项目根目录下的 `app.db`）。
 
+打标预处理优化（2026-11）：CLIP 改为代码侧预降采样、大图 JPEG 启用 DCT
+1/2 解码（最短边地板 1600px），模型权重与标签体系不变。升级后新图自动
+走新管线；如需库内图像向量完全一致，可先备份再执行一次
+`myphoto tag run --force`（不执行不影响任何功能，`relabel` 对存量向量
+仍然有效）。
+
 ## 开发
 
 ```bash

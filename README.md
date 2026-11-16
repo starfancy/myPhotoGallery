@@ -333,6 +333,14 @@ existing tables automatically (lightweight `ALTER TABLE ... ADD COLUMN`
 migrations). Back up `<data_dir>/app.db` (default: `app.db` in the project
 root) before upgrading anyway.
 
+Tagging preprocessing optimization (2026-11): CLIP inputs are now
+pre-downscaled in code, and large JPEGs decode at DCT half resolution
+(shortest-edge floor 1600px); model weights and the tag taxonomy are
+unchanged. New photos automatically use the new pipeline. If you want every
+stored image embedding to be byte-comparable with the new geometry, back up
+first and run `myphoto tag run --force` once (skipping it is harmless —
+`relabel` still works on the existing embeddings).
+
 ## Development
 
 ```bash
