@@ -9,7 +9,9 @@ from typing import Union
 
 # ---------- shared defaults (cwd-independent) ----------
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# 本文件位于 <root>/backend/src/myphoto/core/config.py：parents[4] 才是项目根
+# （包重组前文件在 myphoto/ 下时是 parents[3]，多了 core/ 这一层）。
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
 
 log = logging.getLogger("myphoto.config")

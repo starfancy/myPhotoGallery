@@ -1,6 +1,24 @@
 import tomllib
 
-from myphoto.core.config import AppConfig, DEFAULT_CONFIG_PATH, load_or_init, resolve_config_path
+from myphoto.core.config import (
+    AppConfig,
+    DEFAULT_CONFIG_PATH,
+    PROJECT_ROOT,
+    load_or_init,
+    resolve_config_path,
+)
+
+
+def test_project_root_points_at_repo_root():
+    # 回归：包重组把 config.py 下移到 core/ 后，__file__ 的 parents 层级
+    # 一度错位，默认 config.toml 被建到 backend/ 下而非项目根。
+    assert (PROJECT_ROOT / "pyproject.toml").is_file()
+    assert DEFAULT_CONFIG_PATH == PROJECT_ROOT / "config.toml"
+
+
+def test_default_config_path_is_cwd_independent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert resolve_config_path(None) == DEFAULT_CONFIG_PATH
 
 
 def test_creates_default_when_missing(tmp_path):
