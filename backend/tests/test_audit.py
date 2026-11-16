@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from myphoto.audit import write_audit
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import AuditLog
+from myphoto.services.audit import write_audit
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.core.models import AuditLog
 
 
 @pytest.fixture

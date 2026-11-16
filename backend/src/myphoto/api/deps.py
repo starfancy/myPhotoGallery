@@ -4,9 +4,9 @@ import ipaddress
 
 from fastapi import Depends, Request
 
-from myphoto.errors import AppError
-from myphoto.models import User
-from myphoto.security import TokenError, decode_token
+from myphoto.core.errors import AppError
+from myphoto.core.models import User
+from myphoto.core.security import TokenError, decode_token
 
 SESSION_COOKIE = "mpg_session"
 
@@ -44,7 +44,7 @@ async def current_user(request: Request) -> User:
     # 步骤 3：访问域判定（spec §5.2）。逻辑与 access.access_scope_guard 一致，
     # 但这里直接复用本模块的 _is_lan_ip，避免 Depends 嵌套循环。
     if user.access_scope == "lan_only":
-        from myphoto import access  # lazy：避免模块级循环
+        from myphoto.services import access  # lazy：避免模块级循环
         ip = access.get_client_ip(request, cfg.trusted_proxies)
         if not _is_lan_ip(ip):
             raise AppError(
@@ -85,7 +85,7 @@ async def require_lan_ip(request: Request) -> None:
     - trusted_proxies=[]：直接用 request.client.host
     - trusted_proxies 非空：仅当 request.client.host 命中 trusted 时才读 XFF
     """
-    from myphoto import access  # lazy：避免模块级循环
+    from myphoto.services import access  # lazy：避免模块级循环
     cfg = request.app.state.config
     host = access.get_client_ip(request, cfg.trusted_proxies)
     if not _is_lan_ip(host):

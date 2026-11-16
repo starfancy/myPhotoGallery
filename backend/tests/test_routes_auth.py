@@ -7,10 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 
-from myphoto.deps import SESSION_COOKIE, admin_required
-from myphoto.errors import AppError
+from myphoto.api.deps import SESSION_COOKIE, admin_required
+from myphoto.core.errors import AppError
 from myphoto.main import build_app
-from myphoto.models import User
+from myphoto.core.models import User
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ def test_wrong_password(app_and_pw):
 
 def test_unknown_user_still_verifies_one_password(app_and_pw, monkeypatch):
     client, _, _ = app_and_pw
-    from myphoto import routes_auth
+    from myphoto.api.routes import auth as routes_auth
 
     calls = []
     real_verify = routes_auth.verify_password
@@ -126,7 +126,7 @@ def test_successful_login_resets_failures(app_and_pw):
 
 def test_lockout_expires_at_exact_window_boundary(app_and_pw, monkeypatch):
     client, _, _ = app_and_pw
-    from myphoto import routes_auth
+    from myphoto.api.routes import auth as routes_auth
 
     now = [0.0]
     monkeypatch.setattr(routes_auth.time, "monotonic", lambda: now[0])
@@ -187,7 +187,7 @@ def test_disabled_user_session_is_unauthenticated(app_and_pw):
 def test_disabled_user_login_verifies_password_then_rejects(app_and_pw, monkeypatch):
     client, password, app = app_and_pw
     client.portal.call(_set_admin_enabled, app, 0)
-    from myphoto import routes_auth
+    from myphoto.api.routes import auth as routes_auth
 
     calls = []
     real_verify = routes_auth.verify_password
@@ -292,8 +292,8 @@ def test_me_returns_access_scope(app_and_pw):
 
 def test_login_lan_only_from_public_ip_blocked(app_factory):
     """P4: access_scope=lan_only 用户从公网 IP 登录 → 403。"""
-    from myphoto.models import User
-    from myphoto.security import hash_password
+    from myphoto.core.models import User
+    from myphoto.core.security import hash_password
 
     with app_factory() as (client, _, app):
         # 创建 lan_only viewer
@@ -321,8 +321,8 @@ def test_login_lan_only_from_public_ip_blocked(app_factory):
 
 def test_login_lan_only_ip_does_not_lock_account(app_factory):
     """P4: access_scope_violation 不计入登录失败锁计数器。"""
-    from myphoto.models import User
-    from myphoto.security import hash_password
+    from myphoto.core.models import User
+    from myphoto.core.security import hash_password
 
     with app_factory() as (client, _, app):
         async def _create_lan_viewer():

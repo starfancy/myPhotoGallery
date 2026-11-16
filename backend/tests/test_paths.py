@@ -1,7 +1,7 @@
 import os
 import pytest
 from pathlib import Path
-from myphoto.paths import (
+from myphoto.core.paths import (
     PathTraversalError,
     normalize_relative,
     resolve_within_root,

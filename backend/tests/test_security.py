@@ -1,6 +1,6 @@
 import time
 import pytest
-from myphoto.security import (
+from myphoto.core.security import (
     TokenError,
     decode_token,
     hash_password,

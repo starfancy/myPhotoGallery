@@ -298,7 +298,7 @@ tagging_jobs 全程不调用 ThumbnailGenerator。
 
 > 2026-11 落地实现，已取代初稿的"400px 中间层"方案。
 >
-> **2026-11 解码统一更新**：像素解码收敛到 `myphoto/imaging.py` 的
+> **2026-11 解码统一更新**：像素解码收敛到 `myphoto/imaging/decode.py` 的
 > `load_pil_image(path, is_raw)`，缩略图生成与打标共用同一入口——RAW
 > （.orf/.cr2/.nef 等）走 rawpy（内嵌 JPEG 预览优先、demosaic 兜底），
 > 普通图走 Pillow 并统一做 EXIF Orientation 转正与 RGB 转换，HEIF opener

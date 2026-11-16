@@ -22,11 +22,11 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from myphoto.audit import write_audit
-from myphoto.deps import admin_required, current_user
-from myphoto.errors import AppError
-from myphoto.models import Folder, GalleryRoot, Image, Trash, User
-from myphoto.trash import NEVER_PURGE_TS, trash_dir_for
+from myphoto.services.audit import write_audit
+from myphoto.api.deps import admin_required, current_user
+from myphoto.core.errors import AppError
+from myphoto.core.models import Folder, GalleryRoot, Image, Trash, User
+from myphoto.services.trash import NEVER_PURGE_TS, trash_dir_for
 
 log = logging.getLogger("myphoto.routes_images")
 

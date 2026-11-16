@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from myphoto.db import make_engine
+from myphoto.core.db import make_engine
 
 
 async def test_pragmas_applied_to_file_connection(tmp_path):

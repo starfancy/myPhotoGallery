@@ -15,9 +15,9 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import select
 
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.errors import AppError
-from myphoto.models import Gallery, User, UserGallery
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.core.errors import AppError
+from myphoto.core.models import Gallery, User, UserGallery
 
 
 # ---- helpers ----
@@ -66,56 +66,56 @@ def _make_request(client_host: str = "127.0.0.1", xff: str | None = None):
 # ---- get_client_ip ----
 
 def test_get_client_ip_trusted_proxies_empty_ignores_xff():
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="8.8.8.8", xff="1.2.3.4")
     assert get_client_ip(req, []) == "8.8.8.8"
 
 
 def test_get_client_ip_trusted_proxies_empty_no_xff():
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="10.0.0.1", xff=None)
     assert get_client_ip(req, []) == "10.0.0.1"
 
 
 def test_get_client_ip_client_in_trusted_uses_xff_leftmost():
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="127.0.0.1", xff="203.0.113.7, 10.0.0.5")
     assert get_client_ip(req, ["127.0.0.1"]) == "203.0.113.7"
 
 
 def test_get_client_ip_client_in_trusted_no_xff_falls_back():
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="127.0.0.1", xff=None)
     assert get_client_ip(req, ["127.0.0.1"]) == "127.0.0.1"
 
 
 def test_get_client_ip_client_not_in_trusted_ignores_xff():
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="8.8.8.8", xff="1.2.3.4")
     assert get_client_ip(req, ["127.0.0.1", "10.0.0.0/8"]) == "8.8.8.8"
 
 
 def test_get_client_ip_skips_unknown_segments():
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="127.0.0.1", xff="unknown, , 203.0.113.9")
     assert get_client_ip(req, ["127.0.0.1"]) == "203.0.113.9"
 
 
 def test_get_client_ip_all_xff_segments_unknown_falls_back():
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="127.0.0.1", xff="unknown,")
     assert get_client_ip(req, ["127.0.0.1"]) == "127.0.0.1"
 
 
 def test_get_client_ip_trusted_proxies_cidr_match():
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="10.0.0.5", xff="203.0.113.7")
     assert get_client_ip(req, ["10.0.0.0/8"]) == "203.0.113.7"
 
 
 def test_get_client_ip_invalid_cidr_entry_ignored():
     """trusted_proxies 中非法 CIDR 跳过该项，不抛异常。"""
-    from myphoto.access import get_client_ip
+    from myphoto.services.access import get_client_ip
     req = _make_request(client_host="10.0.0.5", xff="203.0.113.7")
     # 第一项无效，但 10.0.0.0/8 命中
     assert get_client_ip(req, ["not-a-cidr", "10.0.0.0/8"]) == "203.0.113.7"
@@ -131,7 +131,7 @@ def _run(coro):
 
 
 def test_access_scope_guard_lan_only_lan_ip_passes():
-    from myphoto.access import access_scope_guard
+    from myphoto.services.access import access_scope_guard
     user = User(id=1, username="u", password_hash="x", role="viewer",
                 access_scope="lan_only", enabled=1, created_at=0)
     req = _make_request(client_host="192.168.1.5")
@@ -141,7 +141,7 @@ def test_access_scope_guard_lan_only_lan_ip_passes():
 
 
 def test_access_scope_guard_lan_only_public_ip_raises_403():
-    from myphoto.access import access_scope_guard
+    from myphoto.services.access import access_scope_guard
     user = User(id=1, username="u", password_hash="x", role="viewer",
                 access_scope="lan_only", enabled=1, created_at=0)
     req = _make_request(client_host="8.8.8.8")
@@ -153,7 +153,7 @@ def test_access_scope_guard_lan_only_public_ip_raises_403():
 
 
 def test_access_scope_guard_remote_allowed_any_ip_passes():
-    from myphoto.access import access_scope_guard
+    from myphoto.services.access import access_scope_guard
     user = User(id=1, username="u", password_hash="x", role="admin",
                 access_scope="remote_allowed", enabled=1, created_at=0)
     req = _make_request(client_host="8.8.8.8")
@@ -164,7 +164,7 @@ def test_access_scope_guard_remote_allowed_any_ip_passes():
 
 def test_access_scope_guard_honors_trusted_proxies():
     """trusted_proxies + lan_only admin 从 XFF 标识的 LAN IP 登录应通过。"""
-    from myphoto.access import access_scope_guard
+    from myphoto.services.access import access_scope_guard
     user = User(id=1, username="u", password_hash="x", role="admin",
                 access_scope="lan_only", enabled=1, created_at=0)
     # request.client.host = 8.8.8.8（公网，nginx 反代）
@@ -210,7 +210,7 @@ def asyncio_run(coro):
 # ---- check_gallery_access (pure helper) ----
 
 async def test_check_gallery_access_admin_passes_without_row(session):
-    from myphoto.access import check_gallery_access
+    from myphoto.services.access import check_gallery_access
     now = int(time.time())
     admin = User(username="admin", password_hash="x", role="admin",
                  access_scope="lan_only", enabled=1, created_at=now)
@@ -222,7 +222,7 @@ async def test_check_gallery_access_admin_passes_without_row(session):
 
 
 async def test_check_gallery_access_viewer_with_grant_passes(session):
-    from myphoto.access import check_gallery_access
+    from myphoto.services.access import check_gallery_access
     now = int(time.time())
     v = User(username="v", password_hash="x", role="viewer",
              access_scope="lan_only", enabled=1, created_at=now)
@@ -235,7 +235,7 @@ async def test_check_gallery_access_viewer_with_grant_passes(session):
 
 
 async def test_check_gallery_access_viewer_without_grant_404(session):
-    from myphoto.access import check_gallery_access
+    from myphoto.services.access import check_gallery_access
     now = int(time.time())
     v = User(username="v", password_hash="x", role="viewer",
              access_scope="lan_only", enabled=1, created_at=now)
@@ -253,7 +253,7 @@ async def test_check_gallery_access_viewer_without_grant_404(session):
 
 async def test_check_gallery_access_after_gallery_deleted_404(session):
     """gallery 删除后 viewer 访问该 gid 应 404（行被 CASCADE 删）。"""
-    from myphoto.access import check_gallery_access
+    from myphoto.services.access import check_gallery_access
     now = int(time.time())
     v = User(username="v", password_hash="x", role="viewer",
              access_scope="lan_only", enabled=1, created_at=now)
@@ -275,7 +275,7 @@ async def test_check_gallery_access_after_gallery_deleted_404(session):
 # ---- gallery_scope_guard (Depends form) ----
 
 async def test_gallery_scope_guard_admin_passes_without_row(session_and_sm):
-    from myphoto.access import gallery_scope_guard
+    from myphoto.services.access import gallery_scope_guard
     session, sm = session_and_sm
     now = int(time.time())
     admin = User(username="admin", password_hash="x", role="admin",
@@ -290,7 +290,7 @@ async def test_gallery_scope_guard_admin_passes_without_row(session_and_sm):
 
 
 async def test_gallery_scope_guard_viewer_with_grant_passes(session_and_sm):
-    from myphoto.access import gallery_scope_guard
+    from myphoto.services.access import gallery_scope_guard
     session, sm = session_and_sm
     now = int(time.time())
     v = User(username="v", password_hash="x", role="viewer",
@@ -307,7 +307,7 @@ async def test_gallery_scope_guard_viewer_with_grant_passes(session_and_sm):
 
 
 async def test_gallery_scope_guard_viewer_without_grant_404(session_and_sm):
-    from myphoto.access import gallery_scope_guard
+    from myphoto.services.access import gallery_scope_guard
     session, sm = session_and_sm
     now = int(time.time())
     v = User(username="v", password_hash="x", role="viewer",

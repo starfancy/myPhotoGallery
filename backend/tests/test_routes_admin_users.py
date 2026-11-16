@@ -10,13 +10,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from myphoto.main import build_app
-from myphoto.models import User, UserGallery
+from myphoto.core.models import User, UserGallery
 
 
 async def _add_viewer(app, username="viewer", password="viewerpw",
                      role="viewer", access_scope="remote_allowed",
                      enabled=1, gallery_ids=None):
-    from myphoto.security import hash_password
+    from myphoto.core.security import hash_password
 
     async with app.state.sessionmaker() as s:
         u = User(
@@ -42,7 +42,7 @@ async def _add_viewer_with_gids(app, username, gids):
 
 
 async def _add_gallery(app, name):
-    from myphoto.models import Gallery
+    from myphoto.core.models import Gallery
 
     async with app.state.sessionmaker() as s:
         g = Gallery(name=name, created_at=int(time.time()))
@@ -66,7 +66,7 @@ async def _count_user_galleries(app, uid):
 
 async def _last_audit(app, action=None):
     """返回最近的审计行，可按 action 过滤。"""
-    from myphoto.models import AuditLog
+    from myphoto.core.models import AuditLog
 
     async with app.state.sessionmaker() as s:
         stmt = select(AuditLog).order_by(AuditLog.id.desc()).limit(1)

@@ -15,8 +15,8 @@ from PIL import Image as PILImage
 from sqlalchemy import select, update
 
 from myphoto.cli import cli
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import (
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.core.models import (
     FaceCluster,
     FaceEmbedding,
     Folder,
@@ -25,8 +25,8 @@ from myphoto.models import (
     Image,
     ImageEmbedding,
 )
-from myphoto.scanner import Scanner
-from myphoto.tagger import HIERARCHY, TAG_MODEL_VERSION, TagResult, classify_scene, flatten_prompts
+from myphoto.services.scanner import Scanner
+from myphoto.services.tagger import HIERARCHY, TAG_MODEL_VERSION, TagResult, classify_scene, flatten_prompts
 
 
 # ---------- helpers ----------
@@ -60,7 +60,7 @@ class FakeTagger:
         self.calls.append(str(image.size))
         if self.fail:
             raise RuntimeError("fake boom")
-        from myphoto.tagger import FaceResult
+        from myphoto.services.tagger import FaceResult
 
         faces = []
         for i in range(self._result.person_count):
@@ -88,7 +88,7 @@ def _jpg(path: Path, w: int = 40, h: int = 30) -> None:
 
 def test_decode_and_tag_routes_by_extension(tmp_path, monkeypatch):
     """普通图与 RAW 走统一解码入口，is_raw 由扩展名判定。"""
-    from myphoto.tagging_jobs import _decode_and_tag
+    from myphoto.services.tagging_jobs import _decode_and_tag
 
     calls: list[tuple[str, bool]] = []
 
@@ -96,7 +96,7 @@ def test_decode_and_tag_routes_by_extension(tmp_path, monkeypatch):
         calls.append((Path(path).name, is_raw))
         return PILImage.new("RGB", (32, 24))
 
-    monkeypatch.setattr("myphoto.tagging_jobs.load_pil_image", fake_load)
+    monkeypatch.setattr("myphoto.services.tagging_jobs.load_pil_image", fake_load)
     raw = tmp_path / "shot.ORF"
     jpg = tmp_path / "shot.jpg"
     raw.write_bytes(b"x")
@@ -192,7 +192,7 @@ def test_classify_scene_minor_max_within_major_ignores_other_majors():
 
 
 async def test_tag_images_writes_tags_and_embeddings(env):
-    from myphoto.tagging_jobs import tag_images
+    from myphoto.services.tagging_jobs import tag_images
 
     root_dir, sm, root_id, _gallery_id = env
     _jpg(root_dir / "a.jpg")
@@ -219,7 +219,7 @@ async def test_tag_images_writes_tags_and_embeddings(env):
 
 
 async def test_tag_images_skips_history_failed_until_force(env):
-    from myphoto.tagging_jobs import tag_images
+    from myphoto.services.tagging_jobs import tag_images
 
     root_dir, sm, root_id, _gallery_id = env
     _jpg(root_dir / "a.jpg")
@@ -240,7 +240,7 @@ async def test_tag_images_skips_history_failed_until_force(env):
 
 
 async def test_tag_images_retry_failed_only_picks_error_rows(env):
-    from myphoto.tagging_jobs import tag_images
+    from myphoto.services.tagging_jobs import tag_images
 
     root_dir, sm, root_id, _gallery_id = env
     _jpg(root_dir / "ok.jpg")
@@ -262,7 +262,7 @@ async def test_tag_images_retry_failed_only_picks_error_rows(env):
 
 
 async def test_tag_images_hash_changed_retags_but_unchanged_skips(env):
-    from myphoto.tagging_jobs import tag_images
+    from myphoto.services.tagging_jobs import tag_images
 
     root_dir, sm, root_id, _gallery_id = env
     _jpg(root_dir / "a.jpg")
@@ -290,7 +290,7 @@ async def test_tag_images_hash_changed_retags_but_unchanged_skips(env):
 
 
 async def test_tag_images_single_failure_does_not_abort(env):
-    from myphoto.tagging_jobs import tag_images
+    from myphoto.services.tagging_jobs import tag_images
 
     root_dir, sm, root_id, _gallery_id = env
     _jpg(root_dir / "good.jpg")
@@ -312,7 +312,7 @@ async def test_tag_images_single_failure_does_not_abort(env):
 
 
 async def _insert_face(sm, image_id: int, vec: np.ndarray, cluster_id: str | None = None):
-    from myphoto.tagging_jobs import _emb_to_bytes
+    from myphoto.services.tagging_jobs import _emb_to_bytes
 
     async with sm() as s:
         s.add(FaceEmbedding(
@@ -324,7 +324,7 @@ async def _insert_face(sm, image_id: int, vec: np.ndarray, cluster_id: str | Non
 
 
 async def test_cluster_faces_reuses_existing_cluster_id(env):
-    from myphoto.tagging_jobs import cluster_faces
+    from myphoto.services.tagging_jobs import cluster_faces
 
     _root_dir, sm, root_id, _gallery_id = env
     img1 = await _add_image(sm, root_id, "a.jpg")
@@ -371,7 +371,7 @@ async def test_cluster_faces_reuses_existing_cluster_id(env):
 
 
 async def test_prune_removes_unnamed_orphans_but_keeps_used_and_named(env):
-    from myphoto.tagging_jobs import prune_orphan_clusters
+    from myphoto.services.tagging_jobs import prune_orphan_clusters
 
     _root_dir, sm, root_id, _gid = env
     img = await _add_image(sm, root_id, "a.jpg")
@@ -404,7 +404,7 @@ async def test_prune_removes_unnamed_orphans_but_keeps_used_and_named(env):
 
 
 async def test_tag_status_counts(env):
-    from myphoto.tagging_jobs import tag_images, tag_status
+    from myphoto.services.tagging_jobs import tag_images, tag_status
 
     root_dir, sm, root_id, _gallery_id = env
     _jpg(root_dir / "a.jpg")
@@ -430,7 +430,7 @@ async def test_tag_status_counts(env):
 
 
 async def test_scanner_hook_tags_changed_images_not_unchanged(env):
-    from myphoto.tagging_jobs import tag_images
+    from myphoto.services.tagging_jobs import tag_images
 
     root_dir, sm, root_id, _gallery_id = env
     _jpg(root_dir / "a.jpg")

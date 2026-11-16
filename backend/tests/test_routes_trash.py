@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from myphoto.main import build_app
-from myphoto.models import AuditLog, Folder, Image, Trash
+from myphoto.core.models import AuditLog, Folder, Image, Trash
 
 
 def _jpg(p: Path):
@@ -20,7 +20,7 @@ def _jpg(p: Path):
 
 
 async def _seed(app, photos):
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g = Gallery(name="G", created_at=int(time.time()))
@@ -43,8 +43,8 @@ async def _scan(app, rid):
 
 
 async def _add_viewer(app):
-    from myphoto.models import User
-    from myphoto.security import hash_password
+    from myphoto.core.models import User
+    from myphoto.core.security import hash_password
 
     async with app.state.sessionmaker() as s:
         s.add(User(
@@ -66,7 +66,7 @@ async def _list_trash(app):
 
 
 async def _add_exclusion(app, rid, relative_path, reason=None):
-    from myphoto.models import Exclusion
+    from myphoto.core.models import Exclusion
 
     async with app.state.sessionmaker() as s:
         s.add(Exclusion(
@@ -386,7 +386,7 @@ def test_delete_trash_entry_path_guard_blocks(admin_client):
     """构造一条 trash_relative_path 指向 root 外的行，验证 delete 被护栏拒绝。"""
     c, app, gid, rid, _ = admin_client
 
-    from myphoto.models import Trash
+    from myphoto.core.models import Trash
 
     async def _seed_evil():
         async with app.state.sessionmaker() as s:
@@ -436,7 +436,7 @@ def test_purge_removes_expired_only(admin_client):
     c, app, gid, rid, photos = admin_client
 
     # 手工插入两条：一条已过期，一条未过期，都在 TRASH_DIR 内
-    from myphoto.models import Trash
+    from myphoto.core.models import Trash
 
     async def _seed():
         tdir = photos / f".trash/{gid}/{rid}/20260101"

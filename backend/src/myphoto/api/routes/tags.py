@@ -14,9 +14,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, select, update
 
-from myphoto.access import access_scope_guard
-from myphoto.errors import AppError
-from myphoto.models import (
+from myphoto.services.access import access_scope_guard
+from myphoto.core.errors import AppError
+from myphoto.core.models import (
     FaceCluster,
     FaceEmbedding,
     Gallery,

@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from myphoto.lut_scanner import scan_luts
-from myphoto.models import Base, Lut
+from myphoto.services.lut_scanner import scan_luts
+from myphoto.core.models import Base, Lut
 
 
 @pytest.fixture

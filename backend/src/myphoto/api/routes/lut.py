@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 
-from myphoto.deps import admin_required, current_user
-from myphoto.errors import AppError
-from myphoto.models import Lut, User
+from myphoto.api.deps import admin_required, current_user
+from myphoto.core.errors import AppError
+from myphoto.core.models import Lut, User
 
 router = APIRouter(prefix="/api", tags=["luts"])
 
@@ -114,7 +114,7 @@ async def rescan_luts(
     request: Request,
     _admin: User = Depends(admin_required),
 ):
-    from myphoto.lut_scanner import scan_luts
+    from myphoto.services.lut_scanner import scan_luts
     sm = request.app.state.sessionmaker
     result = await scan_luts(sm, _luts_dir(request))
     return {

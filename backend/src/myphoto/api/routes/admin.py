@@ -19,13 +19,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
-from myphoto.audit import write_audit
-from myphoto.config import load_or_init
-from myphoto.config_writer import SettingsUpdates, update_settings_file
-from myphoto.deps import admin_required, require_lan_ip
-from myphoto.errors import AppError
-from myphoto.models import AuditLog, Exclusion, Gallery, GalleryRoot, Image, User, UserGallery
-from myphoto.security import hash_password
+from myphoto.services.audit import write_audit
+from myphoto.core.config import load_or_init
+from myphoto.core.config_writer import SettingsUpdates, update_settings_file
+from myphoto.api.deps import admin_required, require_lan_ip
+from myphoto.core.errors import AppError
+from myphoto.core.models import AuditLog, Exclusion, Gallery, GalleryRoot, Image, User, UserGallery
+from myphoto.core.security import hash_password
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 

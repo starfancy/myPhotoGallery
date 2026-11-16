@@ -18,9 +18,9 @@ import logging
 from fastapi import Request
 from sqlalchemy import select
 
-from myphoto.deps import _is_lan_ip, current_user  # 单向：helpers + current_user
-from myphoto.errors import AppError
-from myphoto.models import User, UserGallery
+from myphoto.api.deps import _is_lan_ip, current_user  # 单向：helpers + current_user
+from myphoto.core.errors import AppError
+from myphoto.core.models import User, UserGallery
 
 _log = logging.getLogger("myphoto.access")
 

@@ -11,7 +11,7 @@ from PIL import Image as PILImage
 from sqlalchemy import select
 
 from myphoto.main import build_app
-from myphoto.models import Image, Trash
+from myphoto.core.models import Image, Trash
 
 
 def _jpg(p: Path) -> None:

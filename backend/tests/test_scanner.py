@@ -11,9 +11,9 @@ from PIL import Image as PILImage
 from PIL.TiffImagePlugin import IFDRational
 from sqlalchemy import delete, select
 
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import Exclusion, Folder, Gallery, GalleryRoot, Image
-from myphoto.scanner import (
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.core.models import Exclusion, Folder, Gallery, GalleryRoot, Image
+from myphoto.services.scanner import (
     Scanner,
     _RootStatus,
     _extract_exif_json,
@@ -394,7 +394,7 @@ async def test_progress_advances_through_phases(env, monkeypatch):
     for n in range(3):
         _jpg(root_dir / f"{n}.jpg")
 
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
     gate = threading.Event()
     calls = {"n": 0}
     real_process = sc._process_file
@@ -447,8 +447,8 @@ async def test_concurrent_write_succeeds_during_hashing(tmp_path, monkeypatch):
     regression that holds the write txn across hashing blocks the concurrent
     writer past busy_timeout and fails the wait_for.
     """
-    import myphoto.scanner as sc
-    from myphoto.models import Gallery, GalleryRoot
+    import myphoto.services.scanner as sc
+    from myphoto.core.models import Gallery, GalleryRoot
 
     db_path = tmp_path / "test.db"
     engine = await make_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
@@ -517,7 +517,7 @@ async def test_hashing_phase_processes_files_concurrently(env, monkeypatch):
     to serial execution."""
     root_dir, sm, root_id = env
 
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
 
     workers = sc._HASH_WORKERS
     if workers < 2:
@@ -549,7 +549,7 @@ async def test_hashing_phase_processes_files_concurrently(env, monkeypatch):
 
 def test_sha1_of_matches_sha1_of_contents(tmp_path):
     """顺序读打开方式不得改变哈希结果。"""
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
 
     payload = b"sequential scan hint " * 5000
     p = tmp_path / "a.jpg"
@@ -563,7 +563,7 @@ def test_sha1_of_matches_sha1_of_contents(tmp_path):
 
 def test_sha1_open_carries_sequential_hint(tmp_path, monkeypatch):
     """打开标志必须携带平台可用的顺序读提示。"""
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
 
     p = tmp_path / "a.jpg"
     p.write_bytes(b"x" * 100_000)
@@ -587,7 +587,7 @@ def test_sha1_open_carries_sequential_hint(tmp_path, monkeypatch):
 
 def test_sha1_uses_posix_fadvise_sequential(tmp_path, monkeypatch):
     """Linux 上应以 POSIX_FADV_SEQUENTIAL 通知内核预读。"""
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
 
     if not hasattr(os, "posix_fadvise"):
         pytest.skip("posix_fadvise not available on this platform")
@@ -609,7 +609,7 @@ def test_sha1_uses_posix_fadvise_sequential(tmp_path, monkeypatch):
 
 def test_sha1_sequential_fadvise_failure_is_non_fatal(tmp_path, monkeypatch):
     """posix_fadvise 被文件系统拒绝（OSError）时仍能正常算出哈希。"""
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
 
     if not hasattr(os, "posix_fadvise"):
         pytest.skip("posix_fadvise not available on this platform")
@@ -627,7 +627,7 @@ def test_sha1_sequential_fadvise_failure_is_non_fatal(tmp_path, monkeypatch):
 
 async def test_scanner_hash_workers_override(env):
     """并发数可由配置 ([scanner].hash_workers) 覆盖；None/非正数回退源码默认。"""
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
 
     _root_dir, sm, _root_id = env
 
@@ -718,7 +718,7 @@ async def test_request_rescan_while_running_marks_redirty(env, monkeypatch):
     for n in range(2):
         _jpg(root_dir / f"{n}.jpg")
 
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
     gate = threading.Event()
     entered = threading.Event()
     real_process = sc._process_file
@@ -829,7 +829,7 @@ async def test_request_rescan_while_queued_does_not_redirty(env, monkeypatch):
         await session.refresh(root_b_row)
         root_b = root_b_row.id
 
-    import myphoto.scanner as sc
+    import myphoto.services.scanner as sc
 
     gate = threading.Event()
     entered = threading.Event()

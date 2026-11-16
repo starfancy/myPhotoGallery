@@ -1,6 +1,6 @@
 import tomllib
 
-from myphoto.config import AppConfig, DEFAULT_CONFIG_PATH, load_or_init, resolve_config_path
+from myphoto.core.config import AppConfig, DEFAULT_CONFIG_PATH, load_or_init, resolve_config_path
 
 
 def test_creates_default_when_missing(tmp_path):

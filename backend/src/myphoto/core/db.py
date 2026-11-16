@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from myphoto.models import Base
+from myphoto.core.models import Base
 
 _log = logging.getLogger("myphoto.db")
 

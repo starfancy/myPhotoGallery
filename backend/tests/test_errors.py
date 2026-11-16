@@ -1,7 +1,7 @@
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from myphoto.errors import AppError, install_error_handlers
+from myphoto.core.errors import AppError, install_error_handlers
 
 
 def test_app_error_response_shape():

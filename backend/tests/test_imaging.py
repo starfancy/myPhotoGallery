@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from PIL import Image as PILImage
 
-from myphoto.imaging import ImageDecodeError, load_pil_image
+from myphoto.imaging.decode import ImageDecodeError, load_pil_image
 
 
 def _jpg(path, size=(800, 600), orientation=None):

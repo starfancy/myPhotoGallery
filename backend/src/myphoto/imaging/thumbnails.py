@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image as PILImage
 
 # 导入即注册 HEIF opener，并拿到统一解码入口（普通图/RAW、EXIF 转正逻辑唯一来源）
-from myphoto.imaging import ImageDecodeError, load_pil_image
+from myphoto.imaging.decode import ImageDecodeError, load_pil_image
 
 log = logging.getLogger("myphoto.thumbnails")
 
@@ -39,7 +39,7 @@ class ThumbnailGenerator:
 
 def _render_thumb(source: str, size: int, out: Path, is_raw: bool) -> None:
     try:
-        # 解码逻辑与打标完全共用 myphoto.imaging（RAW 内嵌预览/demosaic、EXIF 转正）
+        # 解码逻辑与打标完全共用 myphoto.imaging.decode（RAW 内嵌预览/demosaic、EXIF 转正）
         image = load_pil_image(source, is_raw)
     except ImageDecodeError as exc:
         raise ThumbnailError(str(exc)) from exc

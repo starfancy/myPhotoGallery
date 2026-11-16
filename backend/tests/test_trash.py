@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from myphoto.audit import write_audit  # noqa: F401  (import 校验)
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import AuditLog, Gallery, GalleryRoot, Trash, User
-from myphoto.trash import (
+from myphoto.services.audit import write_audit  # noqa: F401  (import 校验)
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.core.models import AuditLog, Gallery, GalleryRoot, Trash, User
+from myphoto.services.trash import (
     NEVER_PURGE_TS,
     TRASH_BASENAME,
     is_under_trash_dir,

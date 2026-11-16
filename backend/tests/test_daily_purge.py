@@ -9,9 +9,9 @@ import time
 import pytest
 from sqlalchemy import select
 
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import AuditLog, Gallery, GalleryRoot, Trash, User
-from myphoto.trash import daily_purge_loop, next_daily_run
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.core.models import AuditLog, Gallery, GalleryRoot, Trash, User
+from myphoto.services.trash import daily_purge_loop, next_daily_run
 
 
 def test_next_daily_run_later_today():
@@ -95,7 +95,7 @@ async def test_daily_loop_purges_and_audits_then_cancels(loop_env, monkeypatch):
             return  # fire the purge immediately
         raise asyncio.CancelledError
 
-    import myphoto.trash as trash_mod
+    import myphoto.services.trash as trash_mod
     monkeypatch.setattr(trash_mod.asyncio, "sleep", fake_sleep)
 
     task = asyncio.create_task(daily_purge_loop(sm, lambda: _Cfg()))
@@ -130,7 +130,7 @@ async def test_daily_loop_survives_purge_error(loop_env, monkeypatch, caplog):
             return  # 第一轮：放行到 purge 路径
         raise asyncio.CancelledError  # 第二轮：关停
 
-    import myphoto.trash as trash_mod
+    import myphoto.services.trash as trash_mod
 
     async def boom(*_a, **_kw):
         raise RuntimeError("db down")

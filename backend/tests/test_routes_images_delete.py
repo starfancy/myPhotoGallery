@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from myphoto.main import build_app
-from myphoto.models import AuditLog, Folder, Image, Trash
+from myphoto.core.models import AuditLog, Folder, Image, Trash
 
 
 def _jpg(p: Path):
@@ -20,7 +20,7 @@ def _jpg(p: Path):
 
 
 async def _seed(app, photos):
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g = Gallery(name="G", created_at=int(time.time()))
@@ -44,8 +44,8 @@ async def _scan(app, rid):
 
 async def _add_viewer(app):
     """建一个 viewer 账号；返回 (username, password)。"""
-    from myphoto.models import User
-    from myphoto.security import hash_password
+    from myphoto.core.models import User
+    from myphoto.core.security import hash_password
 
     async with app.state.sessionmaker() as s:
         s.add(User(
@@ -258,7 +258,7 @@ def test_batch_delete_forbidden_for_viewer(admin_client):
 
 
 def test_retention_zero_writes_never_purge_sentinel(admin_client):
-    from myphoto.trash import NEVER_PURGE_TS
+    from myphoto.services.trash import NEVER_PURGE_TS
 
     c, app, _gid, _rid, _photos = admin_client
     assert c.patch(

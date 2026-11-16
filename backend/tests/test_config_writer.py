@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from myphoto.config import load_or_init
-from myphoto.config_writer import SettingsUpdates, update_settings_file
+from myphoto.core.config import load_or_init
+from myphoto.core.config_writer import SettingsUpdates, update_settings_file
 
 
 def _cfg(tmp_path: Path) -> Path:

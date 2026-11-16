@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
 from myphoto.main import build_app
-from myphoto.models import AuditLog
+from myphoto.core.models import AuditLog
 
 
 @pytest.fixture

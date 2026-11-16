@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from sqlalchemy import case, delete, func, or_, select, update
 
-from myphoto.models import (
+from myphoto.core.models import (
     FaceCluster,
     FaceEmbedding,
     Gallery,
@@ -25,9 +25,9 @@ from myphoto.models import (
     Image,
     ImageEmbedding,
 )
-from myphoto.formats import classify
-from myphoto.imaging import load_pil_image
-from myphoto.tagger import FACE_MODEL_VERSION, TAG_MODEL_VERSION, TagResult
+from myphoto.imaging.formats import classify
+from myphoto.imaging.decode import load_pil_image
+from myphoto.services.tagger import FACE_MODEL_VERSION, TAG_MODEL_VERSION, TagResult
 
 log = logging.getLogger("myphoto.tagging_jobs")
 

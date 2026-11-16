@@ -12,22 +12,22 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
-from myphoto.analytics import AnalyticsCache
-from myphoto.audit import purge_expired as purge_audit_expired
-from myphoto.config import (
+from myphoto.services.analytics import AnalyticsCache
+from myphoto.services.audit import purge_expired as purge_audit_expired
+from myphoto.core.config import (
     AppConfig,
     load_or_init,
     resolve_config_path,
     resolve_models_dir,
 )
-from myphoto.db import make_engine, make_sessionmaker
-from myphoto.errors import AppError, install_error_handlers
-from myphoto.models import GalleryRoot
-from myphoto.scanner import Scanner
-from myphoto.schema_init import ensure_schema_and_admin
-from myphoto.thumb_cache_stats import ThumbCacheUsage
-from myphoto.thumbnails import ThumbnailGenerator
-from myphoto.trash import daily_purge_loop, purge_expired
+from myphoto.core.db import make_engine, make_sessionmaker
+from myphoto.core.errors import AppError, install_error_handlers
+from myphoto.core.models import GalleryRoot
+from myphoto.services.scanner import Scanner
+from myphoto.core.schema_init import ensure_schema_and_admin
+from myphoto.imaging.cache_stats import ThumbCacheUsage
+from myphoto.imaging.thumbnails import ThumbnailGenerator
+from myphoto.services.trash import daily_purge_loop, purge_expired
 
 log = logging.getLogger("myphoto.main")
 
@@ -53,7 +53,7 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         # 显式 cuda 不可用或缺模型时 tagger=None，打标禁用但服务正常启动。
         tagger = None
         if cfg.tagging_enabled and cfg.tagging_scan_on_import:
-            from myphoto.tagger import Tagger
+            from myphoto.services.tagger import Tagger
 
             candidate = Tagger(
                 resolve_models_dir(cfg, config_file),
@@ -108,7 +108,7 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
 
         # LUT 库启动扫描：发现新 .cube（默认 disabled）、软删丢失文件
         try:
-            from myphoto.lut_scanner import scan_luts
+            from myphoto.services.lut_scanner import scan_luts
             luts_dir = Path(cfg.data_dir) / "luts"
             lut_result = await scan_luts(sm, luts_dir)
             log.info(
@@ -123,7 +123,7 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
         app.state.thumbnails = ThumbnailGenerator(thumb_cache_dir)
         app.state.thumb_usage = ThumbCacheUsage(thumb_cache_dir)
         app.state.analytics = AnalyticsCache()
-        from myphoto.routes_download import TicketStore
+        from myphoto.api.routes.download import TicketStore
         app.state.download_tickets = TicketStore()
         # 每日定时清理：所有 app.state 赋值完成后再挂后台循环（循环首轮即读
         # app.state.config）；关停时在 finally 中取消。
@@ -146,39 +146,39 @@ def build_app(config_path: Union[str, Path, None] = None) -> FastAPI:
     app.state.login_lockout = {}
     install_error_handlers(app)
 
-    from myphoto.routes_auth import router as auth_router
+    from myphoto.api.routes.auth import router as auth_router
 
     app.include_router(auth_router)
 
-    from myphoto.routes_browse import router as browse_router
+    from myphoto.api.routes.browse import router as browse_router
 
     app.include_router(browse_router)
 
-    from myphoto.routes_media import router as media_router
+    from myphoto.api.routes.media import router as media_router
 
     app.include_router(media_router)
 
-    from myphoto.routes_admin import router as admin_router
+    from myphoto.api.routes.admin import router as admin_router
 
     app.include_router(admin_router)
 
-    from myphoto.routes_images import router as images_router
+    from myphoto.api.routes.images import router as images_router
 
     app.include_router(images_router)
 
-    from myphoto.routes_download import router as download_router
+    from myphoto.api.routes.download import router as download_router
 
     app.include_router(download_router)
 
-    from myphoto.routes_trash import router as trash_router
+    from myphoto.api.routes.trash import router as trash_router
 
     app.include_router(trash_router)
 
-    from myphoto.routes_lut import router as lut_router
+    from myphoto.api.routes.lut import router as lut_router
 
     app.include_router(lut_router)
 
-    from myphoto.routes_tags import router as tags_router
+    from myphoto.api.routes.tags import router as tags_router
 
     app.include_router(tags_router)
 

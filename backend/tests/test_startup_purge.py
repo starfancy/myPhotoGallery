@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from myphoto.main import build_app
-from myphoto.models import AuditLog, Trash
+from myphoto.core.models import AuditLog, Trash
 
 
 def _jpg(p: Path):
@@ -28,7 +28,7 @@ def _admin_creds_from_capsys(capsys) -> str:
 
 async def _seed(app, photos, expired: bool):
     """建 gallery/root/trash 行 + 落盘一个 .trash 文件。"""
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g = Gallery(name="G", created_at=int(time.time()))
@@ -131,7 +131,7 @@ def test_startup_purge_uses_retention_from_config(tmp_path, capsys):
         pw = _admin_creds_from_capsys(capsys)
         c.post("/api/auth/login", json={"username": "admin", "password": pw})
 
-        from myphoto.models import Gallery, GalleryRoot
+        from myphoto.core.models import Gallery, GalleryRoot
 
         async def _seed_root():
             async with app.state.sessionmaker() as s:
@@ -153,7 +153,7 @@ def test_startup_purge_uses_retention_from_config(tmp_path, capsys):
         rid = c.portal.call(_seed_root)
         c.portal.call(_scan, rid)
 
-        from myphoto.models import Image
+        from myphoto.core.models import Image
 
         async def _find_image_id():
             async with app.state.sessionmaker() as s:

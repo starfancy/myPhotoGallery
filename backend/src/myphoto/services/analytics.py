@@ -17,7 +17,7 @@ from typing import Iterable
 
 from sqlalchemy import func, select
 
-from myphoto.models import Image
+from myphoto.core.models import Image
 
 # ---- 厂商归一 -------------------------------------------------------------
 

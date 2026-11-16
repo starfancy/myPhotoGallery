@@ -2,8 +2,8 @@ import asyncio
 import time
 
 import pytest
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import Exclusion, Gallery, GalleryRoot, Image, Trash, User, UserGallery
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.core.models import Exclusion, Gallery, GalleryRoot, Image, Trash, User, UserGallery
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ async def test_image_unique_relative_path_per_root(session):
     r = GalleryRoot(gallery_id=g.id, label="l", absolute_path="/x", enabled=1)
     session.add(r)
     await session.flush()
-    from myphoto.models import Folder
+    from myphoto.core.models import Folder
     f = Folder(root_id=r.id, relative_path="", name="", image_count=0, descendant_count=0)
     session.add(f)
     await session.flush()
@@ -75,7 +75,7 @@ async def test_image_exif_json_nullable(session):
     r = GalleryRoot(gallery_id=g.id, label="l", absolute_path="/x", enabled=1)
     session.add(r)
     await session.flush()
-    from myphoto.models import Folder
+    from myphoto.core.models import Folder
     f = Folder(root_id=r.id, relative_path="", name="", image_count=0, descendant_count=0)
     session.add(f)
     await session.flush()
@@ -373,7 +373,7 @@ async def test_exclusion_unique_path_per_root(session):
 def test_lut_model_roundtrip(tmp_path):
     import asyncio
     from sqlalchemy.ext.asyncio import create_async_engine
-    from myphoto.models import Base, Lut
+    from myphoto.core.models import Base, Lut
 
     async def go():
         engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/t.db")

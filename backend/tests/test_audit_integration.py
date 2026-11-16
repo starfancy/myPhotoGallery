@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from myphoto.cli import cli
 from myphoto.main import build_app
-from myphoto.models import AuditLog
+from myphoto.core.models import AuditLog
 
 
 def _jpg(p: Path):
@@ -131,7 +131,7 @@ def test_scan_error_writes_audit(app_with_client):
         # Insert a root pointing to a missing path directly via ORM,
         # then invoke scanner.scan_root_now. The scan_transaction will raise.
         sm = app.state.sessionmaker
-        from myphoto.models import Gallery, GalleryRoot
+        from myphoto.core.models import Gallery, GalleryRoot
         async with sm() as s:
             g = Gallery(name="Broken", description=None, created_at=int(time.time()))
             s.add(g)
@@ -165,8 +165,8 @@ def test_cli_add_gallery_writes_audit(tmp_path):
     assert r.exit_code == 0, r.output
 
     # Open the DB directly to inspect audit rows.
-    from myphoto.config import load_or_init
-    from myphoto.db import make_engine, make_sessionmaker
+    from myphoto.core.config import load_or_init
+    from myphoto.core.db import make_engine, make_sessionmaker
 
     async def _fetch():
         loaded = load_or_init(str(cfg))
@@ -206,8 +206,8 @@ def test_cli_add_root_writes_audit(tmp_path):
     )
     assert r.exit_code == 0, r.output
 
-    from myphoto.config import load_or_init
-    from myphoto.db import make_engine, make_sessionmaker
+    from myphoto.core.config import load_or_init
+    from myphoto.core.db import make_engine, make_sessionmaker
 
     async def _fetch():
         loaded = load_or_init(str(cfg))

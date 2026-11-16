@@ -122,7 +122,7 @@ def test_browse_fs_non_lan_ip_returns_403(tmp_path, capsys):
 def test_browse_fs_writes_fs_browse_audit(client_as_admin, tmp_path):
     from sqlalchemy import select
 
-    from myphoto.models import AuditLog
+    from myphoto.core.models import AuditLog
 
     (tmp_path / "sub").mkdir()
     app = client_as_admin.app
@@ -169,7 +169,7 @@ def test_browse_fs_skips_symlink(client_as_admin, tmp_path):
 
 
 def test_browse_fs_truncates_beyond_cap(client_as_admin, tmp_path, monkeypatch):
-    from myphoto import routes_admin
+    from myphoto.api.routes import admin as routes_admin
 
     monkeypatch.setattr(routes_admin, "BROWSE_FS_MAX_ENTRIES", 3)
     for i in range(5):
@@ -183,7 +183,7 @@ def test_browse_fs_truncates_beyond_cap(client_as_admin, tmp_path, monkeypatch):
 
 
 def test_browse_fs_exact_cap_not_truncated(client_as_admin, tmp_path, monkeypatch):
-    from myphoto import routes_admin
+    from myphoto.api.routes import admin as routes_admin
 
     monkeypatch.setattr(routes_admin, "BROWSE_FS_MAX_ENTRIES", 3)
     for i in range(3):
@@ -205,7 +205,7 @@ def test_browse_fs_response_has_no_store_header(client_as_admin, tmp_path):
 def test_browse_fs_failed_call_still_audits(client_as_admin, tmp_path):
     from sqlalchemy import select
 
-    from myphoto.models import AuditLog
+    from myphoto.core.models import AuditLog
 
     app = client_as_admin.app
     bad_path = str(tmp_path / "nope")
@@ -235,7 +235,7 @@ def test_browse_fs_windows_drive_labels(monkeypatch):
     """Drive entries carry a volume label; a failed label query falls back to
     the drive-type name. Uses a fake ctypes so it runs on every platform."""
     import asyncio
-    from myphoto import routes_admin
+    from myphoto.api.routes import admin as routes_admin
 
     SEM_FAILCRITICALERRORS = 0x0001
     SEM_NOOPENFILEERRORBOX = 0x8000

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from myphoto.main import build_app
-from myphoto.models import Image
+from myphoto.core.models import Image
 
 
 def _jpg(p: Path):
@@ -34,7 +34,7 @@ def _jpg_with_exif(p: Path):
 
 
 async def _seed(app, photos):
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g = Gallery(name="G", created_at=int(time.time()))
@@ -55,8 +55,8 @@ async def _scan(app, rid):
 
 
 async def _add_viewer(app):
-    from myphoto.models import User
-    from myphoto.security import hash_password
+    from myphoto.core.models import User
+    from myphoto.core.security import hash_password
 
     async with app.state.sessionmaker() as s:
         s.add(User(
@@ -94,7 +94,7 @@ def client(tmp_path, capsys):
         c.portal.call(_seed, app, photos)
 
         async def _first_rid():
-            from myphoto.models import GalleryRoot
+            from myphoto.core.models import GalleryRoot
 
             async with app.state.sessionmaker() as s:
                 return (await s.execute(select(GalleryRoot))).scalar_one().id

@@ -8,7 +8,7 @@ from PIL.TiffImagePlugin import IFDRational
 from click.testing import CliRunner
 
 from myphoto.cli import cli
-from myphoto.config import DEFAULT_CONFIG_PATH
+from myphoto.core.config import DEFAULT_CONFIG_PATH
 
 
 def _jpg(p: Path):
@@ -187,9 +187,9 @@ def _clear_exif_json(cfg: Path):
     """把 images.exif_json 全部改成 NULL，模拟历史入库未抽 EXIF。"""
     from sqlalchemy import update
 
-    from myphoto.config import load_or_init
-    from myphoto.db import make_engine, make_sessionmaker
-    from myphoto.models import Image
+    from myphoto.core.config import load_or_init
+    from myphoto.core.db import make_engine, make_sessionmaker
+    from myphoto.core.models import Image
 
     async def _run():
         c = load_or_init(cfg)
@@ -205,9 +205,9 @@ def _clear_exif_json(cfg: Path):
 
 
 def _read_exif_column(cfg: Path) -> dict[str, str | None]:
-    from myphoto.config import load_or_init
-    from myphoto.db import make_engine, make_sessionmaker
-    from myphoto.models import Image
+    from myphoto.core.config import load_or_init
+    from myphoto.core.db import make_engine, make_sessionmaker
+    from myphoto.core.models import Image
     from sqlalchemy import select
 
     async def _run():
@@ -282,9 +282,9 @@ def test_rescan_exif_missing_file_counts_as_missing(tmp_path):
 def _read_dims(cfg: Path) -> dict[str, tuple[int | None, int | None]]:
     from sqlalchemy import select
 
-    from myphoto.config import load_or_init
-    from myphoto.db import make_engine, make_sessionmaker
-    from myphoto.models import Image
+    from myphoto.core.config import load_or_init
+    from myphoto.core.db import make_engine, make_sessionmaker
+    from myphoto.core.models import Image
 
     async def _run():
         c = load_or_init(cfg)
@@ -317,9 +317,9 @@ def test_rescan_exif_force_corrects_oriented_dimensions(tmp_path):
     # 模拟旧版本入库的错误宽高（未交换，横版）
     from sqlalchemy import update
 
-    from myphoto.config import load_or_init
-    from myphoto.db import make_engine, make_sessionmaker
-    from myphoto.models import Image
+    from myphoto.core.config import load_or_init
+    from myphoto.core.db import make_engine, make_sessionmaker
+    from myphoto.core.models import Image
 
     async def _corrupt():
         c = load_or_init(cfg)

@@ -6,10 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from myphoto.main import build_app
-from myphoto.models import Folder, Gallery, GalleryRoot, Image, User
-from myphoto.security import hash_password
+from myphoto.core.models import Folder, Gallery, GalleryRoot, Image, User
+from myphoto.core.security import hash_password
 
-from myphoto.analytics import (
+from myphoto.services.analytics import (
     _month_key,
     aggregate_rows,
     aperture_bucket,
@@ -479,7 +479,7 @@ def test_analytics_cache_reuses_until_signature_changes(app_client, monkeypatch)
         calls += 1
         return {"total": calls}
 
-    monkeypatch.setattr("myphoto.analytics.build_analytics", fake_build)
+    monkeypatch.setattr("myphoto.services.analytics.build_analytics", fake_build)
 
     async def scenario():
         await app.state.analytics.get(sm)

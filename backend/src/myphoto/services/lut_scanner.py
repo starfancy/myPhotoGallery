@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from myphoto.models import Lut
+from myphoto.core.models import Lut
 
 log = logging.getLogger(__name__)
 

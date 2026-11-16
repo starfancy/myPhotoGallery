@@ -26,7 +26,7 @@ def _build(tmp_path, capsys, files):
     pw = re.search(r"password=(\S+)", out).group(1)
     c.post("/api/auth/login", json={"username": "admin", "password": pw})
 
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async def _seed():
         async with app.state.sessionmaker() as s:
@@ -161,7 +161,7 @@ def test_search_scene_filter(env):
     c, app, gid, rid = env
     async def _tag():
         from sqlalchemy import update
-        from myphoto.models import Image
+        from myphoto.core.models import Image
         async with app.state.sessionmaker() as s:
             await s.execute(update(Image).where(Image.filename == "apple.JPG")
                              .values(scene_major="食物", scene_minor="甜点", tagged_at=1))
@@ -188,7 +188,7 @@ def test_search_date_range_filter(env):
     c, app, gid, rid = env
     async def _tag():
         from sqlalchemy import update
-        from myphoto.models import Image
+        from myphoto.core.models import Image
         async with app.state.sessionmaker() as s:
             await s.execute(update(Image).where(Image.filename == "apple.JPG")
                              .values(taken_at=1_700_000_000))
@@ -231,8 +231,8 @@ def test_unauthenticated_blocked(tmp_path):
 
 def test_viewer_unauthorized_gallery_404(env):
     c, app, gid, rid = env
-    from myphoto.models import User
-    from myphoto.security import hash_password
+    from myphoto.core.models import User
+    from myphoto.core.security import hash_password
 
     async def _mk_viewer():
         async with app.state.sessionmaker() as s:

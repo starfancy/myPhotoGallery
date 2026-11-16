@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image as PILImage
 
-from myphoto.inference import BackendUnavailable, resolve_backend
+from myphoto.services.inference import BackendUnavailable, resolve_backend
 
 log = logging.getLogger("myphoto.tagger")
 
@@ -175,7 +175,7 @@ class Tagger:
         算好（注入 available 时同样生效），_ensure_loaded 直接复用，不再
         重新探测——这样无 GPU 机器也能注入 provider 列表走 cuda 计划代码。
         """
-        from myphoto.inference import select_ort_providers
+        from myphoto.services.inference import select_ort_providers
 
         self.models_dir = Path(models_dir)
         self.device = device
@@ -265,7 +265,7 @@ class Tagger:
             # 显式传 providers 建会话不会触发 ORT 内部的 DLL 预加载，必须
             # 自己先调一次：从 pip nvidia-* 包等位置加载 CUDA/cuDNN，否则
             # 会在首个 Conv 算子报 cudnn64_9.dll LoadLibrary failed (error 2)
-            from myphoto.inference import preload_cuda_dlls
+            from myphoto.services.inference import preload_cuda_dlls
 
             preload_cuda_dlls()
         log.info(

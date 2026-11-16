@@ -15,7 +15,7 @@ def _jpg(p: Path, size=(200, 150), color=(200, 100, 50)):
 
 
 async def _seed(app, photos):
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g = Gallery(name="G", created_at=int(time.time()))
@@ -38,7 +38,7 @@ async def _scan(app, rid):
 
 
 async def _fetch_one(app):
-    from myphoto.models import Image
+    from myphoto.core.models import Image
     from sqlalchemy import select as _s
 
     async with app.state.sessionmaker() as s:
@@ -113,7 +113,7 @@ def test_image_range(env):
 
 async def _seed_two_galleries(app, photos1, photos2):
     """两个图库各含一个根目录；返回 ((g1, r1), (g2, r2))。"""
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g1 = Gallery(name="G1", created_at=int(time.time()))
@@ -139,8 +139,8 @@ async def _seed_two_galleries(app, photos1, photos2):
 
 async def _add_viewer_with_galleries(app, username, password, gallery_ids):
     """创建 viewer 并授权指定的 gallery_ids。"""
-    from myphoto.models import User, UserGallery
-    from myphoto.security import hash_password
+    from myphoto.core.models import User, UserGallery
+    from myphoto.core.security import hash_password
 
     async with app.state.sessionmaker() as s:
         user = User(
@@ -162,7 +162,7 @@ async def _add_viewer_with_galleries(app, username, password, gallery_ids):
 
 async def _fetch_images_by_root(app):
     """返回 {root_id: (image_id, sha1)} 映射。"""
-    from myphoto.models import Image
+    from myphoto.core.models import Image
     from sqlalchemy import select as _s
 
     async with app.state.sessionmaker() as s:

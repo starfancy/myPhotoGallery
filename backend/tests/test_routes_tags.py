@@ -17,7 +17,7 @@ def _jpg(p: Path, size=(50, 40)):
 
 
 async def _seed(app, photos):
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g = Gallery(name="G", created_at=int(time.time()))
@@ -39,7 +39,7 @@ async def _tag_cluster(app, images_spec):
     images_spec: [(filename, taken_at), ...]
     """
     from sqlalchemy import select
-    from myphoto.models import FaceCluster, FaceEmbedding, Folder, GalleryRoot, Image
+    from myphoto.core.models import FaceCluster, FaceEmbedding, Folder, GalleryRoot, Image
 
     async with app.state.sessionmaker() as s:
         root = (await s.execute(select(GalleryRoot))).scalar_one()
@@ -106,7 +106,7 @@ def test_list_clusters_hides_orphan_empty_clusters(client):
     app = c.app
 
     async def _add_orphan():
-        from myphoto.models import FaceCluster
+        from myphoto.core.models import FaceCluster
         async with app.state.sessionmaker() as s:
             s.add(FaceCluster(
                 cluster_id="P999", display_name="孤儿", sample_face_id=None,
@@ -183,7 +183,7 @@ def test_cluster_images_folder_path_uses_directory_part(client):
 
     async def _add_subfolder_face():
         from sqlalchemy import select
-        from myphoto.models import FaceEmbedding, Folder, GalleryRoot, Image
+        from myphoto.core.models import FaceEmbedding, Folder, GalleryRoot, Image
 
         async with app.state.sessionmaker() as s:
             root = (await s.execute(select(GalleryRoot))).scalar_one()

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from myphoto.tagger import Tagger
+from myphoto.services.tagger import Tagger
 
 _OPEN_VINO_FILES = [
     "clip-ov/visual.xml",

@@ -6,7 +6,7 @@ import time
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from myphoto.models import AuditLog
+from myphoto.core.models import AuditLog
 
 log = logging.getLogger("myphoto.audit")
 

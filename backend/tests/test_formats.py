@@ -1,5 +1,5 @@
 import pytest
-from myphoto.formats import (
+from myphoto.imaging.formats import (
     ALL_EXTENSIONS,
     RAW_EXTENSIONS,
     WEB_EXTENSIONS,

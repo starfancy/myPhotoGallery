@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from myphoto.deps import _is_lan_ip
-from myphoto.errors import AppError
+from myphoto.api.deps import _is_lan_ip
+from myphoto.core.errors import AppError
 
 
 @pytest.mark.parametrize("ip", [
@@ -70,7 +70,7 @@ def _run(coro):
 def test_require_lan_ip_trusted_proxies_empty_ignores_xff():
     """P4: trusted_proxies=[] 时，XFF 不影响 client_ip，公网仍 403。"""
     from types import SimpleNamespace
-    from myphoto.deps import require_lan_ip
+    from myphoto.api.deps import require_lan_ip
 
     req = _FakeRequest(client_host="8.8.8.8", xff="127.0.0.1")
     req.app.state.config = SimpleNamespace(trusted_proxies=[])
@@ -82,7 +82,7 @@ def test_require_lan_ip_trusted_proxies_empty_ignores_xff():
 def test_require_lan_ip_trusted_proxies_match_uses_xff_lan():
     """P4: nginx 在 trusted 中时，XFF 标识的 LAN IP 让 require_lan_ip 通过。"""
     from types import SimpleNamespace
-    from myphoto.deps import require_lan_ip
+    from myphoto.api.deps import require_lan_ip
 
     req = _FakeRequest(client_host="8.8.8.8", xff="192.168.1.5")
     req.app.state.config = SimpleNamespace(trusted_proxies=["8.8.8.8"])
@@ -93,7 +93,7 @@ def test_require_lan_ip_trusted_proxies_match_uses_xff_lan():
 def test_require_lan_ip_lan_client_passes_regardless_of_config():
     """P4: 客户端本身是 LAN IP 时，无需 trusted_proxies 也通过。"""
     from types import SimpleNamespace
-    from myphoto.deps import require_lan_ip
+    from myphoto.api.deps import require_lan_ip
 
     req = _FakeRequest(client_host="192.168.1.5", xff=None)
     req.app.state.config = SimpleNamespace(trusted_proxies=[])
@@ -102,7 +102,7 @@ def test_require_lan_ip_lan_client_passes_regardless_of_config():
 
 def test_require_lan_ip_no_state_raises_500_or_app_error():
     """app.state 缺 config 时应能优雅报错（不会 AttributeError 抛 500）。"""
-    from myphoto.deps import require_lan_ip
+    from myphoto.api.deps import require_lan_ip
 
     req = _FakeRequest(client_host="8.8.8.8")
     # 没有 req.app.state.config → 期望 AppError；不应 AttributeError
@@ -116,10 +116,10 @@ async def test_current_user_lan_only_lan_ip_passes():
     """P4: lan_only + LAN IP → current_user 通过。"""
     from types import SimpleNamespace
     from sqlalchemy import select
-    from myphoto.db import create_all, make_engine, make_sessionmaker
-    from myphoto.deps import current_user
-    from myphoto.models import User as UserModel
-    from myphoto.security import make_token
+    from myphoto.core.db import create_all, make_engine, make_sessionmaker
+    from myphoto.api.deps import current_user
+    from myphoto.core.models import User as UserModel
+    from myphoto.core.security import make_token
 
     engine = await make_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)
@@ -145,10 +145,10 @@ async def test_current_user_lan_only_public_ip_raises_403():
     """P4: lan_only + 公网 IP → current_user 抛 403 access_scope_violation。"""
     from types import SimpleNamespace
     from sqlalchemy import select
-    from myphoto.db import create_all, make_engine, make_sessionmaker
-    from myphoto.deps import current_user
-    from myphoto.models import User as UserModel
-    from myphoto.security import make_token
+    from myphoto.core.db import create_all, make_engine, make_sessionmaker
+    from myphoto.api.deps import current_user
+    from myphoto.core.models import User as UserModel
+    from myphoto.core.security import make_token
 
     engine = await make_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)
@@ -175,10 +175,10 @@ async def test_current_user_remote_allowed_public_ip_passes():
     """P4: remote_allowed + 公网 IP → 通过。"""
     from types import SimpleNamespace
     from sqlalchemy import select
-    from myphoto.db import create_all, make_engine, make_sessionmaker
-    from myphoto.deps import current_user
-    from myphoto.models import User as UserModel
-    from myphoto.security import make_token
+    from myphoto.core.db import create_all, make_engine, make_sessionmaker
+    from myphoto.api.deps import current_user
+    from myphoto.core.models import User as UserModel
+    from myphoto.core.security import make_token
 
     engine = await make_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)
@@ -203,10 +203,10 @@ async def test_current_user_lan_only_trusted_proxy_xff_lan_passes():
     """P4: lan_only + nginx 在 trusted + XFF=LAN → 通过。"""
     from types import SimpleNamespace
     from sqlalchemy import select
-    from myphoto.db import create_all, make_engine, make_sessionmaker
-    from myphoto.deps import current_user
-    from myphoto.models import User as UserModel
-    from myphoto.security import make_token
+    from myphoto.core.db import create_all, make_engine, make_sessionmaker
+    from myphoto.api.deps import current_user
+    from myphoto.core.models import User as UserModel
+    from myphoto.core.security import make_token
 
     engine = await make_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)

@@ -1,9 +1,9 @@
 import pytest
 from sqlalchemy import select
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.models import User
-from myphoto.schema_init import ensure_schema_and_admin
-from myphoto.security import verify_password
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.core.models import User
+from myphoto.core.schema_init import ensure_schema_and_admin
+from myphoto.core.security import verify_password
 
 
 @pytest.fixture

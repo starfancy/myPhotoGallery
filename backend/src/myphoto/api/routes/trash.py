@@ -27,13 +27,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from myphoto.audit import write_audit
-from myphoto.deps import admin_required
-from myphoto.errors import AppError
-from myphoto.formats import classify
-from myphoto.models import Exclusion, Folder, GalleryRoot, Image, Trash, User
-from myphoto.thumbnails import ALLOWED_SIZES, ThumbnailError
-from myphoto.trash import (
+from myphoto.services.audit import write_audit
+from myphoto.api.deps import admin_required
+from myphoto.core.errors import AppError
+from myphoto.imaging.formats import classify
+from myphoto.core.models import Exclusion, Folder, GalleryRoot, Image, Trash, User
+from myphoto.imaging.thumbnails import ALLOWED_SIZES, ThumbnailError
+from myphoto.services.trash import (
     delete_one as _trash_delete_one,
     is_under_trash_dir,
     purge_expired,
@@ -200,7 +200,7 @@ async def _restore_one(
     # 试图从图片本身读一次尺寸和 EXIF；失败则用默认（不阻断）
     width, height, taken_at, exif_json = None, None, None, None
     try:
-        from myphoto.scanner import _process_file
+        from myphoto.services.scanner import _process_file
 
         _sha1, w, h, t, e = _process_file(dst, kind == "raw")
         width, height, taken_at, exif_json = w, h, t, e

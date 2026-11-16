@@ -26,11 +26,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from myphoto.access import check_gallery_access
-from myphoto.deps import current_user
-from myphoto.errors import AppError
-from myphoto.models import GalleryRoot, Image, User
-from myphoto.paths import PathTraversalError, resolve_within_root
+from myphoto.services.access import check_gallery_access
+from myphoto.api.deps import current_user
+from myphoto.core.errors import AppError
+from myphoto.core.models import GalleryRoot, Image, User
+from myphoto.core.paths import PathTraversalError, resolve_within_root
 
 log = logging.getLogger("myphoto.routes_download")
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from PIL import Image as PILImage
 
-from myphoto.thumbnails import ALLOWED_SIZES, ThumbnailGenerator, ThumbnailError
+from myphoto.imaging.thumbnails import ALLOWED_SIZES, ThumbnailGenerator, ThumbnailError
 
 
 def _jpg(p: Path, size=(800, 600)):

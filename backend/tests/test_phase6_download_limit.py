@@ -5,10 +5,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from myphoto.config import load_or_init
-from myphoto.config_writer import SettingsUpdates, update_settings_file
+from myphoto.core.config import load_or_init
+from myphoto.core.config_writer import SettingsUpdates, update_settings_file
 from myphoto.main import build_app
-from myphoto.models import AuditLog
+from myphoto.core.models import AuditLog
 
 
 @pytest.fixture

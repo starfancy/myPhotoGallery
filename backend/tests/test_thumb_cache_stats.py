@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from myphoto.thumb_cache_stats import ThumbCacheUsage, walk_usage
+from myphoto.imaging.cache_stats import ThumbCacheUsage, walk_usage
 
 
 def test_walk_usage_sums_files(tmp_path: Path):

@@ -6,11 +6,11 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from myphoto.audit import write_audit
-from myphoto.deps import SESSION_COOKIE, current_user
-from myphoto.errors import AppError
-from myphoto.models import User
-from myphoto.security import hash_password, make_token, verify_password
+from myphoto.services.audit import write_audit
+from myphoto.api.deps import SESSION_COOKIE, current_user
+from myphoto.core.errors import AppError
+from myphoto.core.models import User
+from myphoto.core.security import hash_password, make_token, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -87,8 +87,8 @@ async def login(body: LoginBody, request: Request, response: Response):
         else:
             # P4: 步骤 3 判定 — lan_only 用户从公网登录直接拒绝（403），不计入锁计数。
             if user.access_scope == "lan_only":
-                from myphoto import access  # lazy import 避免循环
-                from myphoto.deps import _is_lan_ip
+                from myphoto.services import access  # lazy import 避免循环
+                from myphoto.api.deps import _is_lan_ip
                 effective_ip = access.get_client_ip(request, cfg.trusted_proxies)
                 if not _is_lan_ip(effective_ip):
                     raise AppError(

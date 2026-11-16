@@ -9,11 +9,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from myphoto.audit import purge_expired
-from myphoto.config import load_or_init
-from myphoto.db import create_all, make_engine, make_sessionmaker
+from myphoto.services.audit import purge_expired
+from myphoto.core.config import load_or_init
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
 from myphoto.main import build_app
-from myphoto.models import AuditLog
+from myphoto.core.models import AuditLog
 
 
 @pytest.mark.parametrize("value,expected", [
@@ -136,7 +136,7 @@ def test_settings_patch_rejects(client, bad):
 
 async def test_daily_tick_purges_audit_after_trash(monkeypatch):
     """daily_purge_loop 同一 tick 内先 trash 后 audit；audit 段独立 try。"""
-    from myphoto.trash import daily_purge_loop
+    from myphoto.services.trash import daily_purge_loop
 
     engine = await make_engine("sqlite+aiosqlite:///:memory:")
     await create_all(engine)
@@ -160,7 +160,7 @@ async def test_daily_tick_purges_audit_after_trash(monkeypatch):
             return
         raise asyncio.CancelledError
 
-    import myphoto.trash as trash_mod
+    import myphoto.services.trash as trash_mod
     monkeypatch.setattr(trash_mod.asyncio, "sleep", fake_sleep)
     task = asyncio.create_task(daily_purge_loop(sm, lambda: _Cfg()))
     with pytest.raises(asyncio.CancelledError):

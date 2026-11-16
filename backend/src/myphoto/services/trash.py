@@ -17,8 +17,8 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from myphoto.audit import purge_expired as purge_audit_expired, write_audit
-from myphoto.models import GalleryRoot, Trash
+from myphoto.services.audit import purge_expired as purge_audit_expired, write_audit
+from myphoto.core.models import GalleryRoot, Trash
 
 log = logging.getLogger("myphoto.trash")
 

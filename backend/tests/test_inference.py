@@ -5,7 +5,7 @@ import shutil
 import onnxruntime as ort
 import pytest
 
-from myphoto.inference import (
+from myphoto.services.inference import (
     BackendUnavailable,
     preload_cuda_dlls,
     resolve_backend,

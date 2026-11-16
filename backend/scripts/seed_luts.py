@@ -19,10 +19,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from myphoto.config import load_or_init, resolve_config_path  # noqa: E402
-from myphoto.db import make_engine, make_sessionmaker  # noqa: E402
-from myphoto.lut_scanner import scan_luts  # noqa: E402
-from myphoto.schema_init import ensure_schema_and_admin  # noqa: E402
+from myphoto.core.config import load_or_init, resolve_config_path  # noqa: E402
+from myphoto.core.db import make_engine, make_sessionmaker  # noqa: E402
+from myphoto.services.lut_scanner import scan_luts  # noqa: E402
+from myphoto.core.schema_init import ensure_schema_and_admin  # noqa: E402
 
 
 SYNTHETIC_PRESETS = [
@@ -66,7 +66,7 @@ async def main() -> int:
 
     # 3. 把 synthetic/* 的 enabled 改为 1（首次种子时打开）
     from sqlalchemy import select, update  # noqa: F401
-    from myphoto.models import Lut  # noqa: F401
+    from myphoto.core.models import Lut  # noqa: F401
     async with sm() as s:
         for slug in ["warm", "cool", "mono"]:
             row = (await s.execute(select(Lut).where(Lut.slug == slug))).scalar_one_or_none()

@@ -9,7 +9,7 @@ from PIL import Image as PILImage
 from fastapi.testclient import TestClient
 
 from myphoto.main import build_app
-from myphoto.routes_download import (
+from myphoto.api.routes.download import (
     DownloadEntry,
     TicketRecord,
     TicketStore,
@@ -106,7 +106,7 @@ def env(tmp_path, capsys):
     pw = re.search(r"password=(\S+)", capsys.readouterr().out).group(1)
     c.post("/api/auth/login", json={"username": "admin", "password": pw})
 
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async def _seed():
         async with app.state.sessionmaker() as s:
@@ -193,8 +193,8 @@ def test_ticket_is_one_time(env):
 
 def test_ticket_bound_to_user(env):
     c, app, gid, r1, _, _ = env
-    from myphoto.models import User, UserGallery
-    from myphoto.security import hash_password
+    from myphoto.core.models import User, UserGallery
+    from myphoto.core.security import hash_password
 
     async def _go():
         async with app.state.sessionmaker() as s:
@@ -218,8 +218,8 @@ def test_ticket_bound_to_user(env):
 
 def test_viewer_without_gallery_grant_cannot_post(env):
     c, app, gid, r1, _, _ = env
-    from myphoto.models import User
-    from myphoto.security import hash_password
+    from myphoto.core.models import User
+    from myphoto.core.security import hash_password
 
     async def _go():
         async with app.state.sessionmaker() as s:
@@ -308,7 +308,7 @@ def test_concurrent_claim_only_one_wins():
 
 def test_zip_stream_abort_on_generator_close(tmp_path):
     import time as _time
-    from myphoto.routes_download import _zip_stream
+    from myphoto.api.routes.download import _zip_stream
     photos = tmp_path / "big"
     photos.mkdir()
     entries = []
@@ -339,7 +339,7 @@ def test_zip_stream_abort_on_generator_close(tmp_path):
 def test_queue_sink_aborts_on_cancel_and_reaper_joins(tmp_path):
     import queue as qmod
     import threading
-    from myphoto.routes_download import (
+    from myphoto.api.routes.download import (
         _QueueSink, _SENTINEL, _reap_worker, _zip_worker,
     )
     big = tmp_path / "big.bin"

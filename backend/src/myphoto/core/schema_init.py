@@ -5,9 +5,9 @@ import time
 
 from sqlalchemy import select
 
-from myphoto.db import create_all
-from myphoto.models import User
-from myphoto.security import hash_password
+from myphoto.core.db import create_all
+from myphoto.core.models import User
+from myphoto.core.security import hash_password
 
 
 def _generate_password() -> str:

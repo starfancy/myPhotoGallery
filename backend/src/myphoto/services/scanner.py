@@ -15,10 +15,10 @@ from PIL import ExifTags, Image as PILImage
 from PIL.TiffImagePlugin import IFDRational
 from sqlalchemy import select
 
-from myphoto.audit import write_audit
-from myphoto.formats import classify, is_supported
-from myphoto.models import Exclusion, Folder, GalleryRoot, Image
-from myphoto.tagger import TAG_MODEL_VERSION
+from myphoto.services.audit import write_audit
+from myphoto.imaging.formats import classify, is_supported
+from myphoto.core.models import Exclusion, Folder, GalleryRoot, Image
+from myphoto.services.tagger import TAG_MODEL_VERSION
 
 log = logging.getLogger("myphoto.scanner")
 
@@ -35,9 +35,9 @@ _SCAN_BATCH_SIZE = 200
 # config.toml) overrides this; see Scanner.__init__.
 _HASH_WORKERS = min(8, (os.cpu_count() or 4))
 
-# HEIF/HEIC opener 统一在 myphoto.imaging 注册（缩略图与打标共用）；
+# HEIF/HEIC opener 统一在 myphoto.imaging.decode 注册（缩略图与打标共用）；
 # 本模块 PILImage.open 读 EXIF 同样依赖它，导入即完成注册。
-import myphoto.imaging  # noqa: F401  pylint: disable=unused-import
+import myphoto.imaging.decode  # noqa: F401  pylint: disable=unused-import
 
 
 # EXIF tag ID → 输出字典中使用的名字。GPSInfo (0x8825) 单独处理：其值
@@ -364,7 +364,7 @@ class Scanner:
                     tag_error = None
                     if self._tagger is not None:
                         try:
-                            from myphoto.tagging_jobs import _decode_and_tag
+                            from myphoto.services.tagging_jobs import _decode_and_tag
 
                             tag_result = await asyncio.to_thread(
                                 _decode_and_tag, self._tagger, walked.path,
@@ -499,7 +499,7 @@ class Scanner:
             if pending_embeddings:
                 # flush 为新建图片分配 id，embedding 行以 image_id 为主键
                 await session.flush()
-                from myphoto.tagging_jobs import _persist_embeddings
+                from myphoto.services.tagging_jobs import _persist_embeddings
 
                 for image, result, now in pending_embeddings:
                     await _persist_embeddings(session, image.id, result, now)

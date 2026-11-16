@@ -6,12 +6,12 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 
-from myphoto.access import check_gallery_access
-from myphoto.deps import current_user
-from myphoto.errors import AppError
-from myphoto.models import GalleryRoot, Image, User
-from myphoto.paths import PathTraversalError, resolve_within_root
-from myphoto.thumbnails import ALLOWED_SIZES, ThumbnailError
+from myphoto.services.access import check_gallery_access
+from myphoto.api.deps import current_user
+from myphoto.core.errors import AppError
+from myphoto.core.models import GalleryRoot, Image, User
+from myphoto.core.paths import PathTraversalError, resolve_within_root
+from myphoto.imaging.thumbnails import ALLOWED_SIZES, ThumbnailError
 
 router = APIRouter(prefix="/api", tags=["media"])
 

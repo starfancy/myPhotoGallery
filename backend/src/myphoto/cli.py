@@ -11,14 +11,14 @@ import click
 import uvicorn
 from sqlalchemy import func, select
 
-from myphoto.audit import write_audit
-from myphoto.config import load_or_init, resolve_config_path, resolve_models_dir
-from myphoto.db import create_all, make_engine, make_sessionmaker
-from myphoto.formats import classify
-from myphoto.models import Gallery, GalleryRoot, Image, User
-from myphoto.scanner import Scanner, _process_file
-from myphoto.schema_init import ensure_schema_and_admin
-from myphoto.security import hash_password
+from myphoto.services.audit import write_audit
+from myphoto.core.config import load_or_init, resolve_config_path, resolve_models_dir
+from myphoto.core.db import create_all, make_engine, make_sessionmaker
+from myphoto.imaging.formats import classify
+from myphoto.core.models import Gallery, GalleryRoot, Image, User
+from myphoto.services.scanner import Scanner, _process_file
+from myphoto.core.schema_init import ensure_schema_and_admin
+from myphoto.core.security import hash_password
 
 _cli_log = logging.getLogger("myphoto.cli")
 
@@ -305,7 +305,7 @@ def _build_tagger(cfg, config_path: str | None) -> tuple:
     """返回 (tagger, reason)：成功 (tagger, None)，不可用 (None, 中文原因)。"""
     if not cfg.tagging_enabled:
         return None, "[tagging].enabled=false，智能标签已关闭"
-    from myphoto.tagger import Tagger
+    from myphoto.services.tagger import Tagger
 
     tagger = Tagger(
         resolve_models_dir(cfg, resolve_config_path(config_path)),
@@ -366,7 +366,7 @@ def tag_status_cmd(ctx, gallery):
     async def _run_it():
         engine, sm, cfg = await _bootstrap(ctx.obj["config_path"])
         try:
-            from myphoto.tagging_jobs import tag_status
+            from myphoto.services.tagging_jobs import tag_status
 
             rows = await tag_status(sm)
             if gallery:
@@ -375,7 +375,7 @@ def tag_status_cmd(ctx, gallery):
                     raise click.ClickException(f"gallery '{gallery}' not found")
             # status 命令无论模型是否就位都展示解析出的后端计划（Tagger 构造
             # 只做文件检查、不加载模型，零重负载），便于排查配置问题。
-            from myphoto.tagger import Tagger
+            from myphoto.services.tagger import Tagger
 
             if not cfg.tagging_enabled:
                 click.echo("models ready: NO（[tagging].enabled=false，智能标签已关闭）")
@@ -425,7 +425,7 @@ def tag_run_cmd(ctx, gallery, folder, force, retry_failed):
             tagger, reason = _build_tagger(cfg, ctx.obj["config_path"])
             if tagger is None:
                 raise click.ClickException(f"tagger 不可用：{reason}")
-            from myphoto.tagging_jobs import cluster_faces, count_failed, tag_images
+            from myphoto.services.tagging_jobs import cluster_faces, count_failed, tag_images
 
             async with sm() as s:
                 gallery_id = await _gallery_id_by_name(s, gallery) if gallery else None
@@ -478,7 +478,7 @@ def tag_cluster_cmd(ctx):
     async def _run_it():
         engine, sm, _cfg = await _bootstrap(ctx.obj["config_path"])
         try:
-            from myphoto.tagging_jobs import cluster_faces
+            from myphoto.services.tagging_jobs import cluster_faces
 
             cs = await cluster_faces(sm, progress_cb=_make_progress_echo())
             click.echo(f"assigned={cs.assigned} new_clusters={cs.new_clusters}")
@@ -503,7 +503,7 @@ def tag_relabel_cmd(ctx):
             tagger, reason = _build_tagger(cfg, ctx.obj["config_path"])
             if tagger is None:
                 raise click.ClickException(f"tagger 不可用：{reason}")
-            from myphoto.tagging_jobs import relabel
+            from myphoto.services.tagging_jobs import relabel
 
             n = await relabel(sm, tagger, progress_cb=_make_progress_echo())
             click.echo(f"relabeled={n}")
@@ -527,7 +527,7 @@ def tag_gc_cmd(ctx, include_named):
     async def _run_it():
         engine, sm, _cfg = await _bootstrap(ctx.obj["config_path"])
         try:
-            from myphoto.tagging_jobs import prune_orphan_clusters
+            from myphoto.services.tagging_jobs import prune_orphan_clusters
 
             removed = await prune_orphan_clusters(sm, include_named=include_named)
             if removed:

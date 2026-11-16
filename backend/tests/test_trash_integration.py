@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from myphoto.main import build_app
-from myphoto.models import AuditLog, Folder, Gallery, GalleryRoot, Image, Trash
+from myphoto.core.models import AuditLog, Folder, Gallery, GalleryRoot, Image, Trash
 
 
 def _jpg(p: Path):

@@ -6,10 +6,10 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import and_, func, or_, select
 
-from myphoto.access import access_scope_guard, gallery_scope_guard
-from myphoto.errors import AppError
-from myphoto.models import Folder, Gallery, GalleryRoot, Image, User, UserGallery
-from myphoto.paths import PathTraversalError, normalize_relative
+from myphoto.services.access import access_scope_guard, gallery_scope_guard
+from myphoto.core.errors import AppError
+from myphoto.core.models import Folder, Gallery, GalleryRoot, Image, User, UserGallery
+from myphoto.core.paths import PathTraversalError, normalize_relative
 
 router = APIRouter(prefix="/api", tags=["browse"])
 
@@ -580,7 +580,7 @@ async def tags_stats(
         rows = (await s.execute(q.group_by(Image.scene_major, Image.scene_minor))).all()
 
     # 按 HIERARCHY 顺序输出；未见过的组合追加在后
-    from myphoto.tagger import HIERARCHY
+    from myphoto.services.tagger import HIERARCHY
 
     counts: dict[str, dict[str, int]] = {}
     for major, minor, n in rows:

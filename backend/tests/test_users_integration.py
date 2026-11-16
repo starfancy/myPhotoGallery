@@ -66,7 +66,7 @@ def fresh_app(tmp_path: Path, *, trusted_proxies: list[str] | None = None):
 
 
 async def _seed_galleries(app, names: list[str]) -> list[int]:
-    from myphoto.models import Gallery
+    from myphoto.core.models import Gallery
 
     async with app.state.sessionmaker() as s:
         ids = []

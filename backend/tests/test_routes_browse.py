@@ -15,7 +15,7 @@ def _jpg(p: Path, size=(50, 40)):
 
 
 async def _seed(app, photos):
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g = Gallery(name="G", created_at=int(time.time()))
@@ -113,7 +113,7 @@ def test_images_scene_filter(client_with_data):
 
     async def _tag():
         from sqlalchemy import update
-        from myphoto.models import Image
+        from myphoto.core.models import Image
         async with app.state.sessionmaker() as s:
             await s.execute(update(Image).where(Image.filename == "b.jpg")
                              .values(scene_major="自然风光", scene_minor="山景", tagged_at=1))
@@ -144,7 +144,7 @@ def test_folders_scene_filter_only_returns_matching_subfolders(client_with_data)
 
     async def _tag():
         from sqlalchemy import update
-        from myphoto.models import Image
+        from myphoto.core.models import Image
         async with app.state.sessionmaker() as s:
             await s.execute(update(Image).where(Image.filename == "b.jpg")
                              .values(scene_major="自然风光", scene_minor="山景", tagged_at=1))
@@ -186,7 +186,7 @@ def test_images_and_folders_date_range_filter(client_with_data):
 
     async def _set_dates():
         from sqlalchemy import update
-        from myphoto.models import Image
+        from myphoto.core.models import Image
         async with app.state.sessionmaker() as s:
             await s.execute(update(Image).where(Image.filename == "b.jpg")
                              .values(taken_at=1_700_000_000))
@@ -225,7 +225,7 @@ def test_tags_stats_endpoint(client_with_data):
 
     async def _tag():
         from sqlalchemy import update
-        from myphoto.models import Image
+        from myphoto.core.models import Image
         async with app.state.sessionmaker() as s:
             await s.execute(update(Image).where(Image.filename == "a.jpg")
                              .values(scene_major="城市建筑", scene_minor="街景", tagged_at=1))
@@ -391,7 +391,7 @@ def test_unauthenticated_blocked(tmp_path):
 
 async def _seed_two_galleries(app, photos1, photos2):
     """创建两个图库，各含一个根目录；返回 ((g1, r1), (g2, r2))。"""
-    from myphoto.models import Gallery, GalleryRoot
+    from myphoto.core.models import Gallery, GalleryRoot
 
     async with app.state.sessionmaker() as s:
         g1 = Gallery(name="Gallery1", created_at=int(time.time()))
@@ -417,8 +417,8 @@ async def _seed_two_galleries(app, photos1, photos2):
 
 async def _add_viewer_with_galleries(app, username, password, gallery_ids):
     """创建 viewer 并授权指定的 gallery_ids。"""
-    from myphoto.models import User, UserGallery
-    from myphoto.security import hash_password
+    from myphoto.core.models import User, UserGallery
+    from myphoto.core.security import hash_password
 
     async with app.state.sessionmaker() as s:
         user = User(

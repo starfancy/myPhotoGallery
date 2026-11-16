@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from myphoto.main import build_app
 from sqlalchemy import select
 
-from myphoto.models import AuditLog
+from myphoto.core.models import AuditLog
 
 
 @pytest.fixture
@@ -97,7 +97,7 @@ def test_duplicate_exclusion_race_integrityerror_maps_to_409(env_client, monkeyp
     """Loser of a concurrent-create race: the pre-check SELECT misses but the
     INSERT hits uq_exclusion_path_per_root -> IntegrityError must surface as
     409 conflict, not 500, and must not trigger a rescan."""
-    import myphoto.routes_admin as ra
+    import myphoto.api.routes.admin as ra
 
     c, app, gid, rid, photos = env_client
     target = photos / "exports"
