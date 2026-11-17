@@ -288,10 +288,11 @@ transformers、numpy）。注意点：
   （ORT 1.31 的 GPU wheel 已是 CUDA 13 目标，配 CUDA Toolkit 13.x）。
   两种安装方式任选：
 
-  1. **系统级 Toolkit（Windows 常见）**：官网装 CUDA Toolkit，确保其
-     `bin` 目录在 PATH 中（路径含 "Program Files" 等空格没有问题）。
-     程序检测到 PATH 能解析 cudart 后会跳过 ORT 自带预加载，直接走
-     标准 DLL 搜索。
+  1. **系统级 Toolkit（Windows 常见）**：官网装 CUDA Toolkit，安装程序
+     会把其 `bin` 目录加入 PATH（路径含 "Program Files" 等空格没有问题）。
+     注意 CUDA 13 的 Windows 安装把运行库放在 `bin/x64` 子目录，程序
+     对 PATH 目录及其 `x64` 子目录都会查找；检测到 cudart 后跳过 ORT
+     自带预加载，直接走标准 DLL 搜索。
   2. **纯 pip 环境（无系统 Toolkit）**：按需安装
      `nvidia-cuda-runtime-cu12`、`nvidia-cublas-cu12`、
      `nvidia-cudnn-cu12`（CUDA 13 环境把包名后缀换成 `-cu13`）；打标器
@@ -308,17 +309,29 @@ transformers、numpy）。注意点：
     （error 2 = 文件不存在），按上面任一方式安装即可。
   - `Failed to load cublas64_13.dll / cudart64_13.dll ... Please follow
     https://onnxruntime.ai/...`：这是 `preload_dlls()` 在 pip 包目录里
-    没找到库时的提示；若你用的是系统级 Toolkit 且 PATH 配置正确，会话
-    仍会经标准 DLL 搜索正常加载——随后日志出现 `Memcpy nodes` 且
-    `tag status` 显示 cuda 即证明实际可用。新版本程序检测到 PATH 上的
-    cudart 后会直接跳过预加载，不再打印这组提示。
+    没找到库时的提示。两种情形：
+    1. 你用的是系统级 Toolkit（PATH 上本来就有 cudart），该提示纯属
+       噪音——会话随后经标准 DLL 搜索正常加载全局库，CUDA 照常工作。
+       程序会遍历 PATH 目录（含 CUDA 13 Windows 的 `bin/x64` 子目录）
+       直接查找 cudart 文件：命中则跳过预加载，不打印这组提示。注意
+       不能用 `shutil.which` 做这个判断——Python 3.12 的 which 只匹配
+       PATHEXT 可执行扩展名，对 `.dll` 恒返回 None。
+    2. 两种安装方式都没做时，这是真实缺库信号，按上面的步骤安装。
+    区分二者不要只看这组提示，用下面的"确认 GPU 真的在工作"探针。
   - `4 Memcpy nodes are added to the graph ... for
     CUDAExecutionProvider` 与 `No registered plugin EP device found ...
     device_id=0`：均为 ORT 的一次性提示（拷贝节点 / 插件式 EP 注册
     日志），batch=1 打标场景可忽略，不影响正确性。
-  - 确认 GPU 真的在工作：bench 脚本打印的各会话 providers 含
-    `CUDAExecutionProvider`，且同机 `TAGGER_DEVICE=cpu` 与默认
-    （cuda/auto）两次跑出来的耗时有明显差距。
+  - 确认 GPU 真的在工作（最直接，无需跑全量）：
+
+    ```powershell
+    .venv\Scripts\python -c "import onnxruntime as ort; s=ort.InferenceSession(r'backend\models\yolo11n.onnx', providers=['CUDAExecutionProvider','CPUExecutionProvider']); print(s.get_providers())"
+    ```
+
+    输出含 `CUDAExecutionProvider` 即 GPU 会话可用；只剩
+    `CPUExecutionProvider` 说明运行库仍未就位（静默回退 CPU，结果正确
+    但慢）。也可翻打标启动日志里的 `... ORT providers=...` 行，或用
+    bench 脚本对比同机 `TAGGER_DEVICE=cpu` 与默认（cuda/auto）的耗时。
 - **启用配置**：`config.toml` 的 `[tagging]` 段设 `device = "cuda"`；
   保持默认 `auto` 时，探测到 `CUDAExecutionProvider` 也会自动启用。
 - **额外模型文件**：cuda 计划需要 `backend/models/clip-onnx/visual.onnx`
