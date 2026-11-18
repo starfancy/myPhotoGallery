@@ -225,15 +225,28 @@ describe("FilterPreviewView", () => {
     expect(scroll.find(".fp-resize-handle").exists()).toBe(false)
   })
 
-  it("图库模式下拖放文件被忽略（拖放仅本地模式生效）", async () => {
+  it("图库模式下拖放完全不拦截（拖放仅本地模式生效）", async () => {
     const w = mount(FilterPreviewView)
     await flushPromises()
     const file = new File(["x"], "drop.jpg", { type: "image/jpeg" })
-    const ev = new Event("drop", { bubbles: true, cancelable: true })
-    Object.defineProperty(ev, "dataTransfer", { value: { files: [file] } })
-    await w.element.dispatchEvent(ev)
+    const drop = new Event("drop", { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, "dataTransfer", { value: { files: [file] } })
+    await w.element.dispatchEvent(drop)
     await flushPromises()
     expect(w.text()).toContain("IMG_0001.jpg") // 名称未被替换
+    // 不 preventDefault：浏览器默认行为不被页面吞掉
+    expect(drop.defaultPrevented).toBe(false)
+
+    const over = new Event("dragover", { bubbles: true, cancelable: true })
+    Object.defineProperty(over, "dataTransfer", { value: { types: ["Files"] } })
+    await w.element.dispatchEvent(over)
+    expect(over.defaultPrevented).toBe(false)
+
+    const enter = new Event("dragenter", { bubbles: true, cancelable: true })
+    Object.defineProperty(enter, "dataTransfer", { value: { types: ["Files"] } })
+    await w.element.dispatchEvent(enter)
+    expect(enter.defaultPrevented).toBe(false)
+    expect(w.classes()).not.toContain("is-dragover")
   })
 
   it("竖向手柄具备 separator ARIA 语义", async () => {

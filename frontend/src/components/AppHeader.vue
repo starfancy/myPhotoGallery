@@ -191,7 +191,8 @@ onBeforeUnmount(() => {
 
 function onOpenLocalTools() {
   toolsOpen.value = false
-  window.open("/filter-preview?local=1", "_blank", "noopener")
+  // 当前标签页内跳转，不新开窗口
+  void router.push("/filter-preview?local=1")
 }
 
 async function onLogout() {

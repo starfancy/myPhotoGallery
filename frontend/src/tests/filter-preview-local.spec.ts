@@ -146,6 +146,12 @@ describe("FilterPreviewView 本地模式", () => {
     expect(w.classes()).toContain("is-dragover")
     expect(w.find(".fp-drop-hint").exists()).toBe(true)
 
+    // 本地模式 dragover 必须 preventDefault，浏览器才会放行 drop
+    const over = new Event("dragover", { bubbles: true, cancelable: true })
+    Object.defineProperty(over, "dataTransfer", { value: { types: ["Files"] } })
+    await w.element.dispatchEvent(over)
+    expect(over.defaultPrevented).toBe(true)
+
     await w.element.dispatchEvent(new Event("dragleave", { bubbles: true }))
     expect(w.classes()).not.toContain("is-dragover")
   })

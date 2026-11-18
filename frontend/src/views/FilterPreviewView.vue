@@ -510,10 +510,11 @@ function onDragEnter(e: DragEvent) {
 }
 
 function onDragOver(e: DragEvent) {
-  // 任何模式都禁止浏览器默认开文件行为（否则误拖文件会让整个 SPA 跳走）；
+  // 拖放仅本地模式生效：图库模式不拦截，保留浏览器默认行为
+  if (!isLocal) return
   // dragover preventDefault 是 drop 事件能够触发的前提
   e.preventDefault()
-  if (isLocal && e.dataTransfer) e.dataTransfer.dropEffect = "copy"
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"
 }
 
 function onDragLeave() {
@@ -523,11 +524,11 @@ function onDragLeave() {
 }
 
 async function onDrop(e: DragEvent) {
-  // 任何模式都吞掉默认行为，避免浏览器直接打开文件导致 SPA 跳走
+  // 图库模式完全不插手拖放（不 preventDefault）
+  if (!isLocal) return
   e.preventDefault()
   dragDepth = 0
   dragOver.value = false
-  if (!isLocal) return
   const files = Array.from(e.dataTransfer?.files ?? [])
   // 多张受支持图片只打开第一张；非图片混在前面时跳过它
   const first = files.find((f) => f.type.startsWith("image/"))
