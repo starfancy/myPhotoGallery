@@ -1,5 +1,12 @@
 <template>
-  <div class="fp-page" :class="{ 'is-resizing': dragging || sideDragging }">
+  <div
+    class="fp-page"
+    :class="{ 'is-resizing': dragging || sideDragging, 'is-dragover': dragOver }"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
     <header class="fp-topbar">
       <span class="fp-name">{{ name || (isLocal ? "本地图片（未选择）" : "") }}</span>
       <input ref="fileInputEl" type="file" accept="image/*" @change="onPickLocal" hidden />
@@ -41,7 +48,7 @@
         <canvas ref="canvasEl" class="fp-canvas"></canvas>
         <div v-if="fallbackMsg" class="fp-fallback">{{ fallbackMsg }}</div>
         <div v-if="isLocal && !rendererReady && !fallbackMsg" class="fp-fallback">
-          从上方"选择本地图片"按钮选一张照片，纯前端处理，不上传服务器
+          从上方"选择本地图片"按钮选一张照片，或直接把图片拖到页面（多张时只打开第一张），纯前端处理，不上传服务器
         </div>
       </main>
     </div>
@@ -109,10 +116,15 @@
         @pointercancel="onPointerUp"
         @keydown="onKeydown"
       ></div>
-      <LutGroupList :groups="groups" :thumbs="thumbs"
-                    :active-id="activeId" :renderer-ready="rendererReady"
-                    @pick="pick" />
+      <!-- 滚动职责在内层：手柄留在不滚动的 section 上，列表滚动时不会随之移出视口 -->
+      <div class="fp-strip-scroll">
+        <LutGroupList :groups="groups" :thumbs="thumbs"
+                      :active-id="activeId" :renderer-ready="rendererReady"
+                      @pick="pick" />
+      </div>
     </section>
+
+    <div v-if="isLocal && dragOver" class="fp-drop-hint">松开鼠标，打开第一张图片</div>
   </div>
 </template>
 
@@ -133,6 +145,7 @@ import {
 } from "../lib/resize"
 import { parseCube } from "../lib/lutParser"
 import type { LutData } from "../lib/lutParser"
+import { injectExif } from "../lib/exif"
 
 const route = useRoute()
 const isLocal = route.query.local === "1"
@@ -152,6 +165,13 @@ const mixPct = ref(0)
 const stripOpen = ref(true)
 const sideOpen = ref(false)
 const downloadingOriginal = ref(false)
+
+// ---- 本地模式拖拽选图 ----
+const dragOver = ref(false)
+/** dragenter/dragleave 配对计数：子元素间移动会冒泡 leave，归零才隐藏提示层 */
+let dragDepth = 0
+/** 当前本地源文件字节，下载时用于把 EXIF 搬回导出 JPEG */
+let localSourceBytes: ArrayBuffer | null = null
 
 // ---- 滤镜条可调高度 ----
 const stripEl = ref<HTMLElement | null>(null)
@@ -388,7 +408,14 @@ async function onDownload() {
   try {
     renderer.render(currentMix)
     const blob = await renderer.exportJpeg()
-    triggerDownload(blob, `${activeId.value ?? "original"}`)
+    // 本地模式有源文件字节：把原 EXIF 搬回 canvas 导出（Orientation 已复位为 1）
+    const out = localSourceBytes
+      ? new Blob(
+          [injectExif(localSourceBytes, new Uint8Array(await blob.arrayBuffer()))],
+          { type: "image/jpeg" },
+        )
+      : blob
+    triggerDownload(out, `${activeId.value ?? "original"}`)
   } catch (err) {
     console.warn("download failed", err)
     window.alert("下载失败")
@@ -412,6 +439,8 @@ async function onDownloadOriginal() {
     const res = await fetch(`/api/image/${imageId}`)
     if (!res.ok) throw new Error(`fetch original failed: ${res.status}`)
     const blob = await res.blob()
+    // 原图字节在手：导出时保留原图 EXIF（无 EXIF 的格式 injectExif 会自动原样返回）
+    const sourceBytes = await blob.arrayBuffer()
     const objectUrl = URL.createObjectURL(blob)
     try {
       const origImg = await loadImage(objectUrl)
@@ -419,7 +448,14 @@ async function onDownloadOriginal() {
       renderer.setImage(origImg)
       renderer.render(currentMix)
       const outBlob = await renderer.exportJpeg(0.95)
-      triggerDownload(outBlob, `${activeId.value ?? "original"}-full`)
+      const merged = injectExif(
+        sourceBytes,
+        new Uint8Array(await outBlob.arrayBuffer()),
+      )
+      triggerDownload(
+        new Blob([merged], { type: "image/jpeg" }),
+        `${activeId.value ?? "original"}-full`,
+      )
     } finally {
       URL.revokeObjectURL(objectUrl)
       // 3. 恢复预览：切回 1600 缩略图
@@ -436,9 +472,9 @@ async function onDownloadOriginal() {
   }
 }
 
-async function onPickLocal(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (!file || !renderer) return
+async function loadLocalFile(file: File) {
+  if (!renderer) return
+  localSourceBytes = await file.arrayBuffer()
   const url = URL.createObjectURL(file)
   try {
     const img = await loadImage(url)
@@ -455,6 +491,47 @@ async function onPickLocal(e: Event) {
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+function onPickLocal(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) void loadLocalFile(file)
+  // 清空 value，否则再次选择同一个文件不会触发 change
+  input.value = ""
+}
+
+function onDragEnter(e: DragEvent) {
+  if (!isLocal) return
+  if (!e.dataTransfer?.types?.includes("Files")) return
+  e.preventDefault()
+  dragDepth += 1
+  dragOver.value = true
+}
+
+function onDragOver(e: DragEvent) {
+  // 任何模式都禁止浏览器默认开文件行为（否则误拖文件会让整个 SPA 跳走）；
+  // dragover preventDefault 是 drop 事件能够触发的前提
+  e.preventDefault()
+  if (isLocal && e.dataTransfer) e.dataTransfer.dropEffect = "copy"
+}
+
+function onDragLeave() {
+  if (!isLocal) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragOver.value = false
+}
+
+async function onDrop(e: DragEvent) {
+  // 任何模式都吞掉默认行为，避免浏览器直接打开文件导致 SPA 跳走
+  e.preventDefault()
+  dragDepth = 0
+  dragOver.value = false
+  if (!isLocal) return
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  // 多张受支持图片只打开第一张；非图片混在前面时跳过它
+  const first = files.find((f) => f.type.startsWith("image/"))
+  if (first) await loadLocalFile(first)
 }
 
 onMounted(async () => {
@@ -556,6 +633,7 @@ async function renderThumbs() {
 .fp-page {
   display: flex; flex-direction: column;
   height: 100vh; background: #111; color: #eee;
+  position: relative; /* 拖放提示层的定位参照 */
 }
 .fp-topbar {
   padding: 10px 16px; font-size: 14px;
@@ -644,6 +722,13 @@ async function renderThumbs() {
   /* 默认只露一行：padding 20 + 组标题 ~20 + 缩略图按钮 ~86 ≈ 126px；
      拖拽手柄后由内联 height 接管，小屏用 50vh 兜底 */
   max-height: min(126px, 50vh);
+  /* 外层不滚动：绝对定位的手柄参照本元素，列表滚动时它钉在顶部不随之移动。
+     滚动职责交给内层 .fp-strip-scroll（与左侧栏手柄同模式）。 */
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.fp-strip-scroll {
+  flex: 1; min-height: 0;
   overflow-y: auto;
 }
 .fp-resize-handle {
@@ -669,4 +754,13 @@ async function renderThumbs() {
 .fp-resize-handle:focus-visible { outline: none; }
 /* 拖拽期间禁止选中文本（在根节点切类，避免 :has 兼容问题） */
 .fp-page.is-resizing { user-select: none; }
+/* 本地模式拖拽悬停提示层：不接管指针事件，drop 始终落到页面根 */
+.fp-drop-hint {
+  position: absolute; inset: 12px; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px dashed #3b82f6; border-radius: 10px;
+  background: rgba(17, 17, 17, 0.82);
+  color: #93c5fd; font-size: 16px;
+  pointer-events: none;
+}
 </style>

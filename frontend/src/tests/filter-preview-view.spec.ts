@@ -209,6 +209,33 @@ describe("FilterPreviewView", () => {
     expect(w.find("aside.fp-side").attributes("style")).toContain("display: none")
   })
 
+  it("底部滤镜条：高度手柄在滚动容器之外，列表滚动时手柄不随之滚走", async () => {
+    // 回归：手柄曾以 absolute 放在 overflow:auto 的 .fp-strip 内部，
+    // 绝对定位元素随内容滚动，滚下去后手柄移出视口无法拖拽。
+    // 与左侧栏同模式：滚动职责交给内层 .fp-strip-scroll，手柄留在不滚动的 section。
+    const w = mount(FilterPreviewView)
+    await flushPromises()
+    const strip = w.get("section.fp-strip")
+    const scroll = strip.find(".fp-strip-scroll")
+    expect(scroll.exists()).toBe(true)
+    // LutGroupList 渲染的 .fp-group 必须在滚动层内
+    expect(scroll.find(".fp-group").exists()).toBe(true)
+    // 手柄是 section 的直接子节点，不在滚动层内
+    expect(strip.find(".fp-resize-handle").exists()).toBe(true)
+    expect(scroll.find(".fp-resize-handle").exists()).toBe(false)
+  })
+
+  it("图库模式下拖放文件被忽略（拖放仅本地模式生效）", async () => {
+    const w = mount(FilterPreviewView)
+    await flushPromises()
+    const file = new File(["x"], "drop.jpg", { type: "image/jpeg" })
+    const ev = new Event("drop", { bubbles: true, cancelable: true })
+    Object.defineProperty(ev, "dataTransfer", { value: { files: [file] } })
+    await w.element.dispatchEvent(ev)
+    await flushPromises()
+    expect(w.text()).toContain("IMG_0001.jpg") // 名称未被替换
+  })
+
   it("竖向手柄具备 separator ARIA 语义", async () => {
     const w = mount(FilterPreviewView)
     await flushPromises()
