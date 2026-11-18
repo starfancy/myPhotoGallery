@@ -352,7 +352,9 @@ cd frontend && pnpm dev
 ```
 
 - Backend tests: run `pytest` from the repo root (suite under
-  `backend/tests/`).
+  `backend/tests/`); on multi-core machines pass `-n auto` to parallelize
+  (pytest-xdist, ~40s vs ~135s serial for the full suite). Default stays
+  serial to keep single-test debugging simple.
 - Frontend tests: `cd frontend && pnpm test` (Vitest).
 - `pnpm build` runs `vue-tsc --noEmit` before bundling, so it doubles as the
   typecheck gate. `pnpm preview` serves `frontend/dist/` locally on port 4173

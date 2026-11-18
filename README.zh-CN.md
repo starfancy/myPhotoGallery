@@ -317,7 +317,9 @@ myphoto serve --reload
 cd frontend && pnpm dev
 ```
 
-- 后端测试：在仓库根目录运行 `pytest`（测试位于 `backend/tests/`）。
+- 后端测试：在仓库根目录运行 `pytest`（测试位于 `backend/tests/`）；
+  多核机器可加 `-n auto` 并行（pytest-xdist，全量约 40s vs 串行约 135s），
+  默认串行以便单测调试。
 - 前端测试：`cd frontend && pnpm test`（Vitest）。
 - `pnpm build` 在打包前先执行 `vue-tsc --noEmit`，因此也兼作类型检查
   门禁。`pnpm preview` 可在本机 4173 端口预览 `frontend/dist/`，仅用于
