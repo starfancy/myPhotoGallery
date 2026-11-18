@@ -200,6 +200,35 @@ def test_classify_scene_minor_max_within_major_ignores_other_majors():
     assert conf == pytest.approx(0.9)
 
 
+# ---------- 月亮类目（2026-11 实拍月亮样品在闭集体系里被误标为雪景/甜点） ----------
+
+MOON_PROMPTS = [
+    "a photo of the moon",
+    "a photo of a full moon",
+    "a photo of a crescent moon",
+    "a photo of the moon in the night sky",
+]
+
+
+def test_hierarchy_includes_moon_category_under_natural_scenery():
+    # 探针实测：CLIP 对三张月亮样品的 moon prompt 得分（0.30~0.34）远超
+    # 体系内最高 prompt（0.22~0.24），缺的是分类体系里的桶，不是模型能力
+    assert "月亮" in HIERARCHY["自然风光"]
+    assert HIERARCHY["自然风光"]["月亮"] == MOON_PROMPTS
+
+
+def test_classify_scene_routes_moon_similarities_to_moon_category():
+    # 复现月亮样品的分数形态：体系内 prompt 全在 0.22 噪声带，moon prompt 0.31 领跑
+    prompts = flatten_prompts()
+    sims = np.full(len(prompts), 0.22, dtype=np.float64)
+    moon_idx = prompts.index(("自然风光", "月亮", MOON_PROMPTS[0]))
+    sims[moon_idx] = 0.31
+    major, minor, conf = classify_scene(sims)
+    assert major == "自然风光"
+    assert minor == "月亮"
+    assert conf == pytest.approx(0.31)
+
+
 # ---------- bbox 归一化/还原纯函数（与解码分辨率无关） ----------
 
 

@@ -39,6 +39,7 @@ def test_clip_scene_feeds_224_shortest_edge(tmp_path):
     assert captured["size"] == (448, 224)
 
 
-def test_tag_model_version_bumped_for_preprocessing_change():
-    # 预处理几何变化必须体现到版本戳，供库内向量来源追溯
-    assert TAG_MODEL_VERSION == "clip-v3-predownscale"
+def test_tag_model_version_bumped_for_moon_category():
+    # 提示词集合变化（新增月亮类目）必须 bump 版本戳，供库内向量来源追溯；
+    # relabel 据此把旧戳图片重算到新体系
+    assert TAG_MODEL_VERSION == "clip-v4-moon-category"

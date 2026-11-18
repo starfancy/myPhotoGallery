@@ -30,13 +30,14 @@ log = logging.getLogger("myphoto.tagger")
 #   face_embeddings.bbox 是归一化分数还是 legacy 像素坐标。
 # - FACE_MODEL_VERSION 仅盖人脸模型，写入 face_embeddings.model_version；bbox 几何
 #   归一化不 bump 它，所以不能靠 face 行自己的戳判别 bbox 年代（见 bbox_is_normalized）。
-TAG_MODEL_VERSION = "clip-v3-predownscale"
+TAG_MODEL_VERSION = "clip-v4-moon-category"
 CLIP_MODEL_VERSION = "clip-vit-b32-v2"
 FACE_MODEL_VERSION = "w600k-mbf-v1"
 
 # 归一化 [0,1] bbox 自 clip-v3 起引入；未来 bump 版本戳若仍保持归一化几何，
 # 必须把新戳追加进此集合（精确相等会在 bump 后静默退回像素解释）。
-NORMALIZED_BBOX_TAGS = frozenset({"clip-v3-predownscale"})
+# v4 仅新增月亮类目 prompt，几何未变；v3 旧行的 bbox 同样是归一化分数，必须保留。
+NORMALIZED_BBOX_TAGS = frozenset({"clip-v3-predownscale", "clip-v4-moon-category"})
 
 # 两级分类体系 V2（原型实测：一级 ~93%、二级 ~83%）。
 # 结构：{一级: {二级: [prompt, ...]}}；prompt 级 score 取组内 max。
@@ -52,6 +53,15 @@ HIERARCHY: dict[str, dict[str, list[str]]] = {
         "沙漠": ["a photo of desert landscape", "a photo of sand dunes"],
         "雪景": ["a photo of snow", "a photo of snow covered mountains"],
         "天空云": ["a photo of blue sky with clouds", "a photo of dramatic sky"],
+        # 2026-11 实拍月亮样品（凸月/满月/娥眉月）探针实测：moon prompt 得分
+        # 0.30~0.34，远超闭集内最高 prompt 的 0.22~0.24——此前体系无天文桶，
+        # 月亮被误判为天空云/雪景/甜点。prompt 经 prototypes 诊断脚本验证。
+        "月亮": [
+            "a photo of the moon",
+            "a photo of a full moon",
+            "a photo of a crescent moon",
+            "a photo of the moon in the night sky",
+        ],
     },
     "植物花卉": {
         "花卉特写": ["a close-up of flowers", "a close-up of blooming flowers", "a photo of yellow chrysanthemums", "a photo of lotus flower"],
