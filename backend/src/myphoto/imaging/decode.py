@@ -18,6 +18,12 @@ from PIL import Image as PILImage, ImageOps, UnidentifiedImageError
 
 log = logging.getLogger("myphoto.imaging")
 
+# 支持 libjpeg DCT 降分辨率（draft）的 Pillow 格式。MPO 是相机直出多图 JPEG
+# 容器（松下 Lumix 等），Pillow 的 MpoImageFile 同样走 JPEG 解码管线、draft
+# 同样生效——只认 "JPEG" 会让整库 MPO 静默跳过半分辨率解码、全像素进打标管线
+# （2026-11 Lumix 打标慢根因，实测放宽后暖端到端 ~2.4x）。
+_DCT_DRAFT_FORMATS = frozenset({"JPEG", "MPO"})
+
 # 全项目唯一的 HEIF opener 注册点（导入本模块即生效）
 try:
     import pillow_heif  # type: ignore[import-not-found]
@@ -38,9 +44,10 @@ def load_pil_image(
 ) -> PILImage.Image:
     """把磁盘图片解码为已 EXIF 转正的 RGB PIL 图像。
 
-    默认全分辨率返回；target_shortest_edge 仅对 JPEG 生效：原图最短边大于
-    该值时用 libjpeg DCT 1/2 降分辨率解码（解码即降采样，省掉全图像素的
-    内存搬运），返回尺寸可能小于原图；其他格式与 None 均走全分辨率原路径。
+    默认全分辨率返回；target_shortest_edge 仅对 JPEG/MPO 生效（见
+    _DCT_DRAFT_FORMATS）：原图最短边大于该值时用 libjpeg DCT 1/2 降分辨率
+    解码（解码即降采样，省掉全图像素的内存搬运），返回尺寸可能小于原图；
+    其他格式与 None 均走全分辨率原路径。
     返回对象的文件句柄已关闭、像素驻留内存，解码失败统一抛 ImageDecodeError。
     """
     try:
@@ -55,11 +62,11 @@ def load_pil_image(
 
 def _load_regular(source: str, target_shortest_edge: int | None = None) -> PILImage.Image:
     with PILImage.open(source) as im:
-        # draft 必须在 load 之前配置；仅 JPEG 具备 DCT 缩放能力，
-        # 非 JPEG 调用 draft 无效果，这里用格式守卫静默回退全分辨率。
+        # draft 必须在 load 之前配置；仅 JPEG/MPO 具备 DCT 缩放能力，
+        # 其他格式调用 draft 无效果，用格式守卫静默回退全分辨率。
         if (
             target_shortest_edge is not None
-            and im.format == "JPEG"
+            and im.format in _DCT_DRAFT_FORMATS
             and min(im.size) > target_shortest_edge
         ):
             im.draft("RGB", (im.width // 2, im.height // 2))

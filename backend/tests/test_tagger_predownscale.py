@@ -39,7 +39,8 @@ def test_clip_scene_feeds_224_shortest_edge(tmp_path):
     assert captured["size"] == (448, 224)
 
 
-def test_tag_model_version_bumped_for_moon_category():
-    # 提示词集合变化（新增月亮类目）必须 bump 版本戳，供库内向量来源追溯；
-    # relabel 据此把旧戳图片重算到新体系
-    assert TAG_MODEL_VERSION == "clip-v4-moon-category"
+def test_tag_model_version_bumped_for_mpo_halfres():
+    # MPO 纳入 DCT 半分辨率解码（decode._DCT_DRAFT_FORMATS）改变了送入模型
+    # 的像素几何，按约定 bump 版本戳，供库内向量来源追溯；旧戳图片不会被
+    # 自动重打（pending 只看 tagged_sha1 vs sha1），新旧戳行允许共存。
+    assert TAG_MODEL_VERSION == "clip-v5-mpo-halfres"

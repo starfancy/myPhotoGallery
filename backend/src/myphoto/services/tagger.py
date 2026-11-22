@@ -30,14 +30,20 @@ log = logging.getLogger("myphoto.tagger")
 #   face_embeddings.bbox 是归一化分数还是 legacy 像素坐标。
 # - FACE_MODEL_VERSION 仅盖人脸模型，写入 face_embeddings.model_version；bbox 几何
 #   归一化不 bump 它，所以不能靠 face 行自己的戳判别 bbox 年代（见 bbox_is_normalized）。
-TAG_MODEL_VERSION = "clip-v4-moon-category"
+TAG_MODEL_VERSION = "clip-v5-mpo-halfres"
 CLIP_MODEL_VERSION = "clip-vit-b32-v2"
 FACE_MODEL_VERSION = "w600k-mbf-v1"
 
 # 归一化 [0,1] bbox 自 clip-v3 起引入；未来 bump 版本戳若仍保持归一化几何，
 # 必须把新戳追加进此集合（精确相等会在 bump 后静默退回像素解释）。
-# v4 仅新增月亮类目 prompt，几何未变；v3 旧行的 bbox 同样是归一化分数，必须保留。
-NORMALIZED_BBOX_TAGS = frozenset({"clip-v3-predownscale", "clip-v4-moon-category"})
+# v4 仅新增月亮类目 prompt，几何未变；v5 把 DCT 半分辨率解码放宽到 MPO
+# （decode._DCT_DRAFT_FORMATS），送入模型的像素分辨率变了但 bbox 仍是归一化
+# 分数，几何约定未变；v3/v4 旧行同样必须保留。
+NORMALIZED_BBOX_TAGS = frozenset({
+    "clip-v3-predownscale",
+    "clip-v4-moon-category",
+    "clip-v5-mpo-halfres",
+})
 
 # 两级分类体系 V2（原型实测：一级 ~93%、二级 ~83%）。
 # 结构：{一级: {二级: [prompt, ...]}}；prompt 级 score 取组内 max。

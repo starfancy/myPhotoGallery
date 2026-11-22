@@ -191,3 +191,45 @@ def test_draft_combined_with_exif_orientation(tmp_path):
     _jpg(p, size=(3200, 2400), orientation=6)
     im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
     assert im.size == (1200, 1600)
+
+
+# ---------- MPO（相机直出多图 JPEG 容器，Lumix 等） ----------
+
+def _mpo(path, size=(3200, 2400), orientation=None):
+    """写一个真实 MPO 文件（主图 + 一张缩略图），Pillow 重开时 format == 'MPO'。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = PILImage.new("RGB", size)
+    thumb = PILImage.new("RGB", (max(1, size[0] // 10), max(1, size[1] // 10)))
+    kwargs = dict(save_all=True, append_images=[thumb])
+    if orientation is not None:
+        exif = img.getexif()
+        exif[0x0112] = orientation
+        kwargs["exif"] = exif.tobytes()
+    img.save(path, "MPO", **kwargs)
+
+
+def test_mpo_uses_dct_half_resolution(tmp_path):
+    # 回归：Lumix 直出 .JPG 实为 MPO 容器，旧守卫只认 "JPEG" 导致 draft 被
+    # 整体跳过、全分辨率进打标管线。MPO 走同一 JPEG 解码管线，draft 生效。
+    p = tmp_path / "p1000.JPG"
+    _mpo(p, size=(3200, 2400))
+    with PILImage.open(p) as meta:
+        assert meta.format == "MPO"  # 守卫前提：文件确实被识别为 MPO 而非 JPEG
+    im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
+    assert im.mode == "RGB"
+    assert im.size == (1600, 1200)
+
+
+def test_mpo_at_or_below_floor_keeps_full_size(tmp_path):
+    p = tmp_path / "small.mpo"
+    _mpo(p, size=(1600, 1200))
+    im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
+    assert im.size == (1600, 1200)
+
+
+def test_mpo_draft_combined_with_exif_orientation(tmp_path):
+    # 与 JPEG 同路径：先 DCT 1/2 到 1600x1200，再 Orientation=6 转正为 1200x1600
+    p = tmp_path / "orient.mpo"
+    _mpo(p, size=(3200, 2400), orientation=6)
+    im = load_pil_image(p, is_raw=False, target_shortest_edge=1600)
+    assert im.size == (1200, 1600)
