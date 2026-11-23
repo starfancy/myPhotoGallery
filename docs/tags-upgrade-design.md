@@ -170,9 +170,24 @@ myphoto tag gc --include-named # 连已命名但变孤儿的簇也删
 ### 3.3 人脸聚类时机
 
 - **单张打标时**：只提取人脸向量，不立刻聚类（`cluster_id = NULL`）
-- **打完一个图库后**：自动触发该图库的聚类（该库所有未分配的人脸向量算一遍）
-- **`myphoto tag cluster`**：全库重新聚类（模型升级/调阈值时用）
-- 聚类算法：贪心 cosine > 0.45（原型已验证），簇大小 < 3 的标 `low_confidence`
+- **`tag run` 结尾**：自动跑一次增量聚类，**只处理 `cluster_id IS NULL`
+  的新脸**；已分配的脸（含用户命名簇）永远不会被重算或搬家。所以
+  `--retry-failed` 只重试失败图片本身：这些图片若成功会产生新脸，新脸才
+  参与聚类；没有新脸时 CLI 打印"无待分配人脸，跳过"，是空操作而非全量重聚
+- **`myphoto tag cluster`**：手动再跑一次同一个增量函数（同样只处理 NULL
+  新脸）；真正的全量重聚需先 `--force` 重打清空 face 行
+- 聚类算法（落地版）：按 face id 顺序贪心，与任一已分配脸 cosine > 0.5
+  归入其簇，否则新建 `Pxxx`（原型 0.45 阈值未直接采用；`low_confidence`
+  标记未实现，留 Phase 4）
+- 实现注记（2026-11）：①相似度矩阵一次性预分配，循环内只做视图切片——
+  旧实现每轮 `np.stack` 全量拷贝是 O(N²)，8000 张未分配脸贪心循环实测
+  ~47s；②簇分配用 Core `executemany` 分批 UPDATE（7000 行 2.4s → 0.03s），
+  不再逐行 aiosqlite 往返
+- 退出挂起坑（2026-11）：`openvino.runtime.Core()` 会启动 openvino_telemetry
+  发送线程，GA4 后端在 Windows 上无超时 `urlopen`，网络不通时解释器
+  atexit 会 join 该线程导致 CLI 完成后进程不退（只能 Ctrl+C）。
+  `inference.disable_openvino_telemetry()` 在首次 Core 构造前把 ga/ga4
+  发送入口 no-op 掉，`Tagger._ensure_loaded` 自动调用
 
 ## 4. UI 升级
 

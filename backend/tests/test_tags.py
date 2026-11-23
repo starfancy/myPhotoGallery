@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from click.testing import CliRunner
 from PIL import Image as PILImage
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from myphoto.cli import cli
 from myphoto.core.db import create_all, make_engine, make_sessionmaker
@@ -473,6 +473,59 @@ async def test_cluster_faces_reuses_existing_cluster_id(env):
         assert new_id == "P003"
 
 
+async def test_cluster_faces_large_batch_uses_preallocated_matrix_and_bulk_update(env):
+    """超过 _WRITE_BATCH 的脸量：预分配矩阵 + 多批 executemany 全量正确落库。"""
+    from myphoto.services.tagging_jobs import _WRITE_BATCH, cluster_faces
+
+    _root_dir, sm, root_id, _gallery_id = env
+    img_id = await _add_image(sm, root_id, "a.jpg")
+
+    n_groups, per_group = 3, 40
+    total = n_groups * per_group
+    assert total > _WRITE_BATCH  # 确实跨多批 executemany
+    for g in range(n_groups):
+        base = _unit_vec(512, g * 10)  # 组间正交（cosine=0），组内同向量（cosine=1）
+        for _ in range(per_group):
+            await _insert_face(sm, img_id, base)
+
+    stats = await cluster_faces(sm)
+    assert stats.assigned == total
+    assert stats.new_clusters == n_groups  # 每组第一张开新簇，其余归并
+
+    async with sm() as s:
+        nulls = (await s.execute(
+            select(FaceEmbedding).where(FaceEmbedding.cluster_id.is_(None))
+        )).all()
+        assert nulls == []  # 批量 UPDATE 无遗漏
+        cluster_ids = set((await s.execute(
+            select(FaceEmbedding.cluster_id).distinct()
+        )).scalars().all())
+        assert cluster_ids == {"P001", "P002", "P003"}
+        for cid in cluster_ids:
+            cnt = (await s.execute(
+                select(func.count())
+                .select_from(FaceEmbedding)
+                .where(FaceEmbedding.cluster_id == cid)
+            )).scalar_one()
+            assert cnt == per_group
+        clusters = (await s.execute(select(FaceCluster))).scalars().all()
+        assert {c.cluster_id for c in clusters} == cluster_ids
+
+
+async def test_cluster_faces_no_unassigned_is_noop_with_progress(env):
+    """没有 cluster_id IS NULL 的脸时直接返回零值统计，不触发进度回调。"""
+    from myphoto.services.tagging_jobs import cluster_faces
+
+    _root_dir, sm, root_id, _gallery_id = env
+    img_id = await _add_image(sm, root_id, "a.jpg")
+    await _insert_face(sm, img_id, _unit_vec(512, 0), cluster_id="P001")
+
+    calls = []
+    stats = await cluster_faces(sm, progress_cb=lambda *a: calls.append(a))
+    assert stats.assigned == 0 and stats.new_clusters == 0
+    assert calls == []
+
+
 # ---------- prune_orphan_clusters ----------
 
 
@@ -657,6 +710,24 @@ def test_cli_tag_run_zero_result_hints_retry_failed(tmp_path, monkeypatch):
     assert r.exit_code == 0, r.output
     assert "scanned=0" in r.output
     assert "retry-failed" in r.output
+
+
+def test_cli_tag_run_reports_skip_when_no_faces_to_cluster(tmp_path, monkeypatch):
+    # FakeTagger 不产出人脸：聚类阶段是空操作，CLI 必须明确说"跳过"而不是
+    # 让用户误以为每次 run 都在全量重聚人脸。
+    photos = tmp_path / "photos"
+    _jpg(photos / "a.jpg")
+    cfg = tmp_path / "config.toml"
+    runner = CliRunner()
+    runner.invoke(cli, ["--config", str(cfg), "add-gallery", "Home"])
+    runner.invoke(cli, ["--config", str(cfg), "add-root", "Home", "R", str(photos.resolve())])
+    runner.invoke(cli, ["--config", str(cfg), "rescan"])
+    import myphoto.cli as cli_mod
+    monkeypatch.setattr(cli_mod, "_build_tagger", lambda cfg_, cp: (FakeTagger(), None))
+
+    r = runner.invoke(cli, ["--config", str(cfg), "tag", "run"])
+    assert r.exit_code == 0, r.output
+    assert "无待分配人脸" in r.output
 
 
 def test_cli_tag_run_explicit_cuda_unavailable_has_hint(tmp_path, monkeypatch):

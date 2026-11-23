@@ -451,7 +451,12 @@ def tag_run_cmd(ctx, gallery, folder, force, retry_failed):
                         "重试失败项用 --retry-failed，全量重打用 --force"
                     )
             cs = await cluster_faces(sm, progress_cb=_make_progress_echo())
-            click.echo(f"clustered: assigned={cs.assigned} new_clusters={cs.new_clusters}")
+            if cs.assigned:
+                click.echo(f"clustered: assigned={cs.assigned} new_clusters={cs.new_clusters}")
+            else:
+                # --retry-failed/无新人脸时聚类是空操作：只处理 cluster_id
+                # IS NULL 的新脸，已有簇（含用户命名）永远不会被重算。
+                click.echo("clustered: 无待分配人脸，跳过（增量聚类只处理新脸，已有簇不变）")
 
             async with sm() as s:
                 await write_audit(
@@ -481,7 +486,10 @@ def tag_cluster_cmd(ctx):
             from myphoto.services.tagging_jobs import cluster_faces
 
             cs = await cluster_faces(sm, progress_cb=_make_progress_echo())
-            click.echo(f"assigned={cs.assigned} new_clusters={cs.new_clusters}")
+            if cs.assigned:
+                click.echo(f"assigned={cs.assigned} new_clusters={cs.new_clusters}")
+            else:
+                click.echo("无待分配人脸，跳过（增量聚类只处理 cluster_id IS NULL 的新脸，已有簇不变）")
             async with sm() as s:
                 await write_audit(s, "tag_cluster", None, "cli", target="all",
                                   detail=f"assigned={cs.assigned} new={cs.new_clusters}")
