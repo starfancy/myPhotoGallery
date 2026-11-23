@@ -20,7 +20,11 @@ import numpy as np
 from PIL import Image as PILImage
 
 from myphoto.imaging.preprocess import CLIP_SHORTEST_EDGE, resize_shortest_edge
-from myphoto.services.inference import BackendUnavailable, resolve_backend
+from myphoto.services.inference import (
+    BackendUnavailable,
+    disable_openvino_telemetry,
+    resolve_backend,
+)
 
 log = logging.getLogger("myphoto.tagger")
 
@@ -277,6 +281,9 @@ class Tagger:
         if reason is not None:
             raise RuntimeError(reason)
 
+        # 必须先于 Core()：openvino 遥测线程在网络不通时会拖住解释器退出
+        # （见 inference.disable_openvino_telemetry 的挂起链路说明）。
+        disable_openvino_telemetry()
         from openvino.runtime import Core  # heavy import
         # 本项目只用 CLIPProcessor 的 PIL/numpy 预处理路径，不实例化任何 HF
         # 模型类，因此运行时不需要 PyTorch。未装 torch 时 transformers 会在

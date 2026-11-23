@@ -1,16 +1,19 @@
 """inference 设备/provider 决策纯函数（不加载任何模型）。"""
 
 import sys
+import types
 
 import onnxruntime as ort
 import pytest
 
 from myphoto.services.inference import (
     BackendUnavailable,
+    disable_openvino_telemetry,
     preload_cuda_dlls,
     resolve_backend,
     select_ort_providers,
 )
+import myphoto.services.inference as inf_mod
 
 CPU = ["CPUExecutionProvider"]
 CUDA = ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -105,3 +108,73 @@ def test_preload_calls_ort_when_no_cuda_runtime_on_path(tmp_path, monkeypatch):
     monkeypatch.setattr(ort, "preload_dlls", lambda: calls.append(1))
     preload_cuda_dlls()
     assert calls == [1]
+
+
+# ---------- disable_openvino_telemetry ----------
+
+
+def test_disable_telemetry_replaces_backend_sends_with_noop(monkeypatch):
+    # 真实 openvino_telemetry 包：patch 后两个发送入口均为 no-op，且幂等。
+    # 测试环境未构造过 Core()，顺带覆盖"单例未初始化"的 RuntimeError 分支。
+    pytest.importorskip("openvino_telemetry")
+    from openvino_telemetry.backend import backend_ga, backend_ga4
+
+    monkeypatch.setattr(inf_mod, "_telemetry_disabled", False)
+    disable_openvino_telemetry()
+    assert inf_mod._telemetry_disabled is True
+
+    # no-op：任意参数直接返回 None，不触发任何 urlopen
+    assert backend_ga4._send_func(object()) is None
+    assert backend_ga.GABackend.send(object(), object()) is None
+
+    # 幂等：重复调用安全
+    disable_openvino_telemetry()
+    assert inf_mod._telemetry_disabled is True
+
+
+def test_disable_telemetry_silent_when_package_missing(monkeypatch):
+    monkeypatch.setattr(inf_mod, "_telemetry_disabled", False)
+    # sys.modules 里置 None 会让 `import openvino_telemetry` 抛 ImportError
+    monkeypatch.setitem(sys.modules, "openvino_telemetry", None)
+    disable_openvino_telemetry()  # 不抛即通过
+    assert inf_mod._telemetry_disabled is False
+
+
+def test_disable_telemetry_force_shuts_down_existing_singleton(monkeypatch):
+    # 单例已被更早的 Core() 初始化的分支：consent 置 False 并 force_shutdown。
+    monkeypatch.setattr(inf_mod, "_telemetry_disabled", False)
+
+    class FakeTelemetry:
+        instances: list["FakeTelemetry"] = []
+
+        def __init__(self):
+            self.consent = True
+            self.shutdowns: list[float] = []
+            FakeTelemetry.instances.append(self)
+
+        def force_shutdown(self, timeout):
+            self.shutdowns.append(timeout)
+
+    class FakeGABackend:
+        pass
+
+    fake_backends = types.ModuleType("openvino_telemetry.backend")
+    fake_backends.backend_ga4 = types.SimpleNamespace(
+        _send_func=lambda request_data: "should-be-replaced",
+    )
+    fake_backends.backend_ga = types.SimpleNamespace(GABackend=FakeGABackend)
+    fake_pkg = types.ModuleType("openvino_telemetry")
+    fake_pkg.Telemetry = FakeTelemetry
+    fake_pkg.backend = fake_backends
+
+    monkeypatch.setitem(sys.modules, "openvino_telemetry", fake_pkg)
+    monkeypatch.setitem(sys.modules, "openvino_telemetry.backend", fake_backends)
+
+    disable_openvino_telemetry()
+
+    inst = FakeTelemetry.instances[0]
+    assert inst.consent is False
+    assert inst.shutdowns == [0.1]
+    assert fake_backends.backend_ga4._send_func(123) is None
+    assert fake_backends.backend_ga.GABackend.send(None, None) is None
+    assert inf_mod._telemetry_disabled is True

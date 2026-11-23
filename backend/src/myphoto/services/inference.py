@@ -7,13 +7,56 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from collections.abc import Sequence
 
+log = logging.getLogger("myphoto.inference")
+
 _CUDA_EP = "CUDAExecutionProvider"
 _CPU_EP = "CPUExecutionProvider"
 _VALID_DEVICES = ("auto", "cpu", "cuda")
+
+_telemetry_disabled = False
+
+
+def disable_openvino_telemetry() -> None:
+    """关闭 openvino 匿名遥测并收掉它的发送线程（幂等，任何失败静默）。
+
+    实测挂起链路（onnxruntime 1.32 + openvino_telemetry 2025.2，Windows）：
+    ``openvino.runtime.Core()`` 构造时初始化遥测单例，事件经
+    ThreadPoolExecutor 工作线程 POST 到 google-analytics.com；GA4 后端在
+    Windows 上直接 ``urlopen`` 且**无超时**，网络不通时 connect 长期挂起。
+    解释器退出阶段 ``concurrent.futures.thread._python_exit`` 会 join 这个
+    非 daemon 线程，于是 CLI 活全干完了进程却不退出（只能 Ctrl+C）。
+
+    必须在首次 ``Core()`` 之前调用：把 ga/ga4 两个后端的发送入口替换成
+    no-op，发送线程池从此收不到任务；若单例已被更早的调用初始化，再用
+    ``consent=False`` + ``force_shutdown`` 兜底。遥测本身与打标无关，任何
+    异常都不得影响主流程。
+    """
+    global _telemetry_disabled
+    if _telemetry_disabled:
+        return
+    try:
+        from openvino_telemetry import Telemetry
+        from openvino_telemetry.backend import backend_ga, backend_ga4
+
+        # GA4（Windows 路径）：模块级 _send_func 是实际的 urlopen 调用点
+        backend_ga4._send_func = lambda request_data: None
+        # GA（旧后端，同样无超时裸 urlopen）：堵类方法
+        backend_ga.GABackend.send = lambda self, message: None
+        # 单例可能已被更早的 Core()/ovc 调用初始化：掐断后续事件并收旧线程
+        try:
+            tm = Telemetry()
+            tm.consent = False
+            tm.force_shutdown(timeout=0.1)
+        except RuntimeError:
+            pass
+        _telemetry_disabled = True
+    except Exception:
+        log.debug("disable_openvino_telemetry failed", exc_info=True)
 
 
 class BackendUnavailable(RuntimeError):
