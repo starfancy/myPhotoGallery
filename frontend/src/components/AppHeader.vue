@@ -191,8 +191,8 @@ onBeforeUnmount(() => {
 
 function onOpenLocalTools() {
   toolsOpen.value = false
-  // 当前标签页内跳转，不新开窗口
-  void router.push("/filter-preview?local=1")
+  // 新标签页打开本地工具页；页内选图/拖入只在该标签页内加载，不再开窗
+  window.open("/filter-preview?local=1", "_blank", "noopener")
 }
 
 async function onLogout() {

@@ -56,7 +56,7 @@ describe("AppHeader (P4 access scope badge)", () => {
     expect(w.html()).not.toMatch(/>LAN</)
   })
 
-  it("本地图片处理在当前标签页路由跳转，不新开窗口", async () => {
+  it("本地图片处理在新标签页打开，不改变当前标签页路由", async () => {
     const openSpy = vi.fn()
     vi.stubGlobal("open", openSpy)
     try {
@@ -65,11 +65,14 @@ describe("AppHeader (P4 access scope badge)", () => {
       await w.findAll("button").find((b) => b.text().includes("本地图片处理"))!.trigger("click")
       await flushPromises()
 
-      // 同标签页路由跳转，query 带 local=1
-      const router = w.vm.$router
-      expect(router.currentRoute.value.fullPath).toBe("/filter-preview?local=1")
-      // 没有走 window.open
-      expect(openSpy).not.toHaveBeenCalled()
+      // window.open 新标签页，query 带 local=1
+      expect(openSpy).toHaveBeenCalledWith(
+        "/filter-preview?local=1",
+        "_blank",
+        "noopener",
+      )
+      // 当前标签页仍停留在图库页
+      expect(w.vm.$router.currentRoute.value.fullPath).toBe("/galleries")
     } finally {
       vi.unstubAllGlobals()
     }
