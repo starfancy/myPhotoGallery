@@ -101,4 +101,7 @@ def _load_raw(source: str) -> PILImage.Image:
         raise
     except Exception as exc:
         raise ImageDecodeError(f"RAW decode failed for {source}: {exc}") from exc
-    return PILImage.fromarray(rgb).convert("RGB")
+    # postprocess(output_bps=8) 输出必为 HxWx3 uint8 RGB，fromarray 即 RGB 模式，
+    # 无需再 convert（同模式 convert 等价于全像素 copy）；保留守卫防御异常输出。
+    image = PILImage.fromarray(rgb)
+    return image if image.mode == "RGB" else image.convert("RGB")

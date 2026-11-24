@@ -407,7 +407,10 @@ class Tagger:
         """对一张 RGB PIL 图打标；线程安全（内部锁串行化）。"""
         with self._lock:
             self._ensure_loaded()
-            rgb = image.convert("RGB")
+            # 生产唯一调用方经 load_pil_image 喂入已转正的 RGB 图；同模式
+            # convert("RGB") 在 Pillow 里是 self.copy() 全像素拷贝（半分辨率
+            # 图 ~4.6ms/张、全分辨率 ~30ms/张），故仅在非 RGB 时才转换。
+            rgb = image if image.mode == "RGB" else image.convert("RGB")
             scene_major, scene_minor, scene_conf, img_emb = self._clip_scene(rgb)
             person_count, person_boxes = self._count_persons(rgb)
             faces = self._extract_faces(rgb, person_boxes) if person_boxes else []

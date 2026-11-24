@@ -109,7 +109,10 @@ async def cluster_face(
     def _render():
         from PIL import Image as PILImage, ImageOps
         with PILImage.open(path) as im:
-            im = ImageOps.exif_transpose(im).convert("RGB")
+            im = ImageOps.exif_transpose(im)
+            # 同模式 convert("RGB") 是全像素 copy，仅非 RGB 时才需要
+            if im.mode != "RGB":
+                im = im.convert("RGB")
             bbox = json.loads(face.bbox) if face.bbox else None
             if bbox and len(bbox) == 4:
                 # 归一化分数先按转正后全分辨率原图还原为像素，再走统一外扩逻辑
