@@ -122,3 +122,25 @@ async def rescan_luts(
         "skipped_existing": result.skipped_existing,
         "soft_deleted": result.soft_deleted,
     }
+
+
+@router.post("/admin/luts/cleanup-missing")
+async def cleanup_missing_luts(
+    request: Request,
+    _admin: User = Depends(admin_required),
+):
+    from myphoto.services.lut_scanner import purge_missing_luts
+    luts_dir = _luts_dir(request)
+    # 硬守卫：目录缺失（盘未挂载/配置错误）时中止，避免把整表当幽灵行清掉
+    if not luts_dir.exists():
+        raise AppError(
+            "lut_dir_missing", 409,
+            "luts directory not found; aborting cleanup to avoid wiping the table",
+        )
+    sm = request.app.state.sessionmaker
+    result = await purge_missing_luts(sm, luts_dir)
+    deleted = [{
+        "slug": d.slug, "group": d.group,
+        "file_path": d.file_path, "enabled": d.enabled,
+    } for d in result.deleted]
+    return {"deleted": deleted, "count": len(deleted)}

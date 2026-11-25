@@ -18,6 +18,9 @@ vi.stubGlobal("fetch", vi.fn(async (url: string, opts?: any) => {
   if (url === "/api/admin/luts/rescan" && opts?.method === "POST") {
     return { ok: true, json: async () => ({ discovered: [], skipped_existing: [], soft_deleted: [] }) }
   }
+  if (url === "/api/admin/luts/cleanup-missing" && opts?.method === "POST") {
+    return { ok: true, json: async () => ({ deleted: [], count: 0 }) }
+  }
   return { ok: false, json: async () => ({}) }
 }))
 
@@ -75,5 +78,38 @@ describe("AdminLuts", () => {
       (c: any[]) => c[1]?.method === "POST" && c[0].includes("/rescan"),
     )
     expect(postCalls.length).toBe(1)
+  })
+
+  it("cleanup button confirms then posts and reloads", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    ;(fetch as any).mockClear()
+    const w = mount(AdminLuts)
+    await flushPromises()
+    await w.find('button[data-test="cleanup-missing"]').trigger("click")
+    await flushPromises()
+    const postCalls = (fetch as any).mock.calls.filter(
+      (c: any[]) => c[1]?.method === "POST" && c[0].includes("/cleanup-missing"),
+    )
+    expect(postCalls.length).toBe(1)
+    // 清理完成后重新拉取列表：初始 GET + 清理后 GET
+    const getCalls = (fetch as any).mock.calls.filter(
+      (c: any[]) => c[0] === "/api/admin/luts" && !c[1]?.method,
+    )
+    expect(getCalls.length).toBe(2)
+    vi.restoreAllMocks()
+  })
+
+  it("cleanup does nothing when confirm is cancelled", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false)
+    ;(fetch as any).mockClear()
+    const w = mount(AdminLuts)
+    await flushPromises()
+    await w.find('button[data-test="cleanup-missing"]').trigger("click")
+    await flushPromises()
+    const postCalls = (fetch as any).mock.calls.filter(
+      (c: any[]) => c[1]?.method === "POST" && c[0].includes("/cleanup-missing"),
+    )
+    expect(postCalls.length).toBe(0)
+    vi.restoreAllMocks()
   })
 })
