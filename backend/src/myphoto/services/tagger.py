@@ -34,7 +34,7 @@ log = logging.getLogger("myphoto.tagger")
 #   face_embeddings.bbox 是归一化分数还是 legacy 像素坐标。
 # - FACE_MODEL_VERSION 仅盖人脸模型，写入 face_embeddings.model_version；bbox 几何
 #   归一化不 bump 它，所以不能靠 face 行自己的戳判别 bbox 年代（见 bbox_is_normalized）。
-TAG_MODEL_VERSION = "clip-v5-mpo-halfres"
+TAG_MODEL_VERSION = "clip-v6-scene-abstain"
 CLIP_MODEL_VERSION = "clip-vit-b32-v2"
 FACE_MODEL_VERSION = "w600k-mbf-v1"
 
@@ -42,12 +42,24 @@ FACE_MODEL_VERSION = "w600k-mbf-v1"
 # 必须把新戳追加进此集合（精确相等会在 bump 后静默退回像素解释）。
 # v4 仅新增月亮类目 prompt，几何未变；v5 把 DCT 半分辨率解码放宽到 MPO
 # （decode._DCT_DRAFT_FORMATS），送入模型的像素分辨率变了但 bbox 仍是归一化
-# 分数，几何约定未变；v3/v4 旧行同样必须保留。
+# 分数，几何约定未变；v6 新增闭集弃权策略（标签可能落 NULL），几何仍未变；
+# v3/v4/v5 旧行同样必须保留。
 NORMALIZED_BBOX_TAGS = frozenset({
     "clip-v3-predownscale",
     "clip-v4-moon-category",
     "clip-v5-mpo-halfres",
+    "clip-v6-scene-abstain",
 })
+
+# 闭集弃权阈值（v6）：HIERARCHY 是 9 大类闭集，闭集外内容（产品静物、文档、
+# 纯物体等）对所有 prompt 都只给噪声级低分，硬选 top1 必然误判——实测镜头
+# 照片在 0.22 区间被选成「人物/单人肖像」「食物/饮品」。
+# 全库 44,131 条已存向量回测（prototypes/abstain_threshold_*.py）：
+#   top1 一级类 cosine 的 P5=0.2356；score<0.24 命中 3,148 张（7.1%），
+#   两张镜头样品（0.2232/0.2218）均被捕获，0.30+ 的月亮/花卉样品不受影响。
+# 不采用 top1/top2 margin 规则：本模型 margin 中位数仅 0.026，margin<0.01
+# 会让 29% 含人物照片的正确场景标签也被置 NULL，误伤面不可接受。
+SCENE_ABSTAIN_MIN_SCORE = 0.24
 
 # 两级分类体系 V2（原型实测：一级 ~93%、二级 ~83%）。
 # 结构：{一级: {二级: [prompt, ...]}}；prompt 级 score 取组内 max。
@@ -142,12 +154,23 @@ class FaceResult:
 
 @dataclass(frozen=True)
 class TagResult:
-    scene_major: str
-    scene_minor: str
+    # v6 起闭集弃权：低置信度图片 scene_major/minor 为 None（落库 NULL），
+    # scene_conf 仍记录一级类 top1 得分，便于后续分析与阈值回调。
+    scene_major: str | None
+    scene_minor: str | None
     scene_conf: float
     person_count: int
     image_embedding: np.ndarray  # 512 维 float32，已 L2 归一化
     faces: list[FaceResult] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SceneDecision:
+    """闭集分类决策。abstained=True 时 major/minor 为 None（标签落 NULL）。"""
+    major: str | None
+    minor: str | None
+    score: float
+    abstained: bool
 
 
 def flatten_prompts() -> list[tuple[str, str, str]]:
@@ -160,17 +183,11 @@ def flatten_prompts() -> list[tuple[str, str, str]]:
     return out
 
 
-def classify_scene(
+def _pooled_scene_scores(
     similarities: np.ndarray,
-    flat_prompts: list[tuple[str, str, str]] | None = None,
-) -> tuple[str, str, float]:
-    """纯函数：prompt 级 cosine 得分 → (一级, 二级, 二级得分)。
-
-    二级得分 = 该 (一级, 二级) 下所有 prompt 得分的 max；
-    一级得分 = 其下所有二级得分的 max；最终在 top1 一级内取 top2 二级。
-    与原型 eval_hierarchy.py 完全一致。
-    """
-    prompts = flat_prompts or flatten_prompts()
+    prompts: list[tuple[str, str, str]],
+) -> tuple[dict[tuple[str, str], float], dict[str, float]]:
+    """prompt 级 cosine → (二级类 max-pool 得分, 一级类 max-pool 得分)。"""
     sims = np.asarray(similarities, dtype=np.float64).reshape(-1)
 
     cat2_scores: dict[tuple[str, str], float] = {}
@@ -181,6 +198,48 @@ def classify_scene(
     cat1_scores: dict[str, float] = {}
     for (c1, _c2), s in cat2_scores.items():
         cat1_scores[c1] = max(cat1_scores.get(c1, -9.0), s)
+    return cat2_scores, cat1_scores
+
+
+def should_abstain_scene(top1_score: float) -> bool:
+    """闭集弃权判定：一级类 top1 绝对分低于阈值，说明闭集内没有任何类
+    真正匹配（闭集外内容），此时硬选 top1 即误判。"""
+    return top1_score < SCENE_ABSTAIN_MIN_SCORE
+
+
+def decide_scene(
+    similarities: np.ndarray,
+    flat_prompts: list[tuple[str, str, str]] | None = None,
+) -> SceneDecision:
+    """带弃权策略的分类入口。低分时 abstained=True、major/minor=None。
+
+    池化/top-k 规则与 classify_scene 完全一致，只在最后叠加弃权策略，
+    保证非弃权图片的标签与 v5 逐位相同（全库回测可复现）。
+    """
+    prompts = flat_prompts or flatten_prompts()
+    cat2_scores, cat1_scores = _pooled_scene_scores(similarities, prompts)
+    top1, top1_score = max(cat1_scores.items(), key=lambda kv: kv[1])
+    if should_abstain_scene(top1_score):
+        return SceneDecision(None, None, top1_score, True)
+    top2, top2_score = max(
+        ((c2, s) for (c1, c2), s in cat2_scores.items() if c1 == top1),
+        key=lambda kv: kv[1],
+    )
+    return SceneDecision(top1, top2, top2_score, False)
+
+
+def classify_scene(
+    similarities: np.ndarray,
+    flat_prompts: list[tuple[str, str, str]] | None = None,
+) -> tuple[str, str, float]:
+    """纯函数（旧契约，不带弃权）：prompt 级 cosine 得分 → (一级, 二级, 二级得分)。
+
+    二级得分 = 该 (一级, 二级) 下所有 prompt 得分的 max；
+    一级得分 = 其下所有二级得分的 max；最终在 top1 一级内取 top2 二级。
+    与原型 eval_hierarchy.py 完全一致。新代码请用 decide_scene。
+    """
+    prompts = flat_prompts or flatten_prompts()
+    cat2_scores, cat1_scores = _pooled_scene_scores(similarities, prompts)
 
     top1 = max(cat1_scores.items(), key=lambda kv: kv[1])[0]
     top2, top2_score = max(
@@ -420,16 +479,24 @@ class Tagger:
                 faces=faces,
             )
 
-    def classify_embedding(self, img_embedding: np.ndarray) -> tuple[str, str, float]:
-        """基于已存的图像向量重算场景标签（relabel 用，不跑视觉模型）。"""
+    def classify_embedding(
+        self, img_embedding: np.ndarray,
+    ) -> tuple[str | None, str | None, float]:
+        """基于已存的图像向量重算场景标签（relabel 用，不跑视觉模型）。
+
+        v6 起可能返回 (None, None, score)：闭集弃权，调用方落 NULL。
+        """
         with self._lock:
             self._ensure_loaded()
             emb = np.asarray(img_embedding, dtype=np.float32).reshape(1, -1)
             emb = emb / np.linalg.norm(emb, axis=-1, keepdims=True)
             sims = (emb @ self._clip_text_emb.T).squeeze(0)
-            return classify_scene(sims, self._flat_prompts)
+            decision = decide_scene(sims, self._flat_prompts)
+            return decision.major, decision.minor, decision.score
 
-    def _clip_scene(self, rgb: PILImage.Image) -> tuple[str, str, float, np.ndarray]:
+    def _clip_scene(
+        self, rgb: PILImage.Image,
+    ) -> tuple[str | None, str | None, float, np.ndarray]:
         small = resize_shortest_edge(rgb, CLIP_SHORTEST_EDGE)
         x = self._clip_proc(images=small, return_tensors="np")
         pixel_values = x["pixel_values"].astype(np.float32)
@@ -442,8 +509,8 @@ class Tagger:
             img_emb = next(iter(out.values()))
         img_emb = img_emb / np.linalg.norm(img_emb, axis=-1, keepdims=True)
         sims = (img_emb @ self._clip_text_emb.T).squeeze(0)
-        major, minor, conf = classify_scene(sims, self._flat_prompts)
-        return major, minor, float(conf), img_emb.reshape(-1)
+        decision = decide_scene(sims, self._flat_prompts)
+        return decision.major, decision.minor, float(decision.score), img_emb.reshape(-1)
 
     def _yolo_infer(self, arr: np.ndarray) -> np.ndarray:
         """单张 letterbox 批次 (1,3,640,640) → (84,8400)，两后端输出同构。"""

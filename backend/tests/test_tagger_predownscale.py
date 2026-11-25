@@ -39,8 +39,14 @@ def test_clip_scene_feeds_224_shortest_edge(tmp_path):
     assert captured["size"] == (448, 224)
 
 
-def test_tag_model_version_bumped_for_mpo_halfres():
-    # MPO 纳入 DCT 半分辨率解码（decode._DCT_DRAFT_FORMATS）改变了送入模型
-    # 的像素几何，按约定 bump 版本戳，供库内向量来源追溯；旧戳图片不会被
-    # 自动重打（pending 只看 tagged_sha1 vs sha1），新旧戳行允许共存。
-    assert TAG_MODEL_VERSION == "clip-v5-mpo-halfres"
+def test_tag_model_version_bumped_for_scene_abstain():
+    # v6 引入闭集弃权策略（低置信度场景标签落 NULL），按约定 bump 版本戳，
+    # 供库内标签语义追溯；旧戳图片不会被自动重打（pending 只看
+    # tagged_sha1 vs sha1），新旧戳行允许共存，但新戳必须在归一化 bbox
+    # allow-set 内（几何未变，test_tags 另有守卫）。
+    from myphoto.services.tagger import NORMALIZED_BBOX_TAGS
+
+    assert TAG_MODEL_VERSION == "clip-v6-scene-abstain"
+    assert TAG_MODEL_VERSION in NORMALIZED_BBOX_TAGS
+    # 历史戳共存：v5 行的归一化 bbox 解释不能因 bump 失效
+    assert "clip-v5-mpo-halfres" in NORMALIZED_BBOX_TAGS

@@ -362,6 +362,9 @@ async def relabel(sm, tagger, progress_cb=None) -> int:
             image.scene_major = major
             image.scene_minor = minor
             image.scene_conf = conf
+            # 标签策略随版本戳演进（如 v6 闭集弃权）：relabel 产出的行盖当前戳，
+            # 与 tag run 新打行保持同一语义版本；embedding 本身不重算，不动其行。
+            image.tag_model_version = TAG_MODEL_VERSION
             updated += 1
             if progress_cb is not None and _should_report(idx + 1, len(rows)):
                 await progress_cb(idx + 1, len(rows), None)
