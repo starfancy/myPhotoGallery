@@ -29,13 +29,16 @@ from myphoto.core.models import (
 from myphoto.services.scanner import Scanner
 from myphoto.services.tagger import (
     HIERARCHY,
+    SCENE_ABSTAIN_MIN_SCORE,
     TAG_MODEL_VERSION,
     TagResult,
     bbox_is_normalized,
     classify_scene,
+    decide_scene,
     denormalize_bbox,
     flatten_prompts,
     normalize_bbox,
+    should_abstain_scene,
 )
 
 
@@ -229,6 +232,68 @@ def test_classify_scene_routes_moon_similarities_to_moon_category():
     assert conf == pytest.approx(0.31)
 
 
+# ---------- v6 闭集弃权（低置信度场景标签落 NULL） ----------
+
+
+def test_should_abstain_scene_uses_strict_less_than_threshold():
+    assert should_abstain_scene(SCENE_ABSTAIN_MIN_SCORE - 1e-9) is True
+    # 恰为阈值不弃权：边界稳定，避免浮点抖动导致标签闪烁
+    assert should_abstain_scene(SCENE_ABSTAIN_MIN_SCORE) is False
+    assert should_abstain_scene(0.31) is False
+
+
+def test_decide_scene_abstains_on_flat_noise_floor():
+    # 闭集外内容的典型形态：所有 prompt 都在 0.22 噪声带
+    prompts = flatten_prompts()
+    sims = np.full(len(prompts), 0.22, dtype=np.float64)
+    d = decide_scene(sims)
+    assert d.abstained is True
+    assert d.major is None
+    assert d.minor is None
+    # scene_conf 仍记录 top1 得分，供阈值回调与诊断
+    assert d.score == pytest.approx(0.22)
+
+
+def test_decide_scene_keeps_strong_label_and_matches_legacy_classify():
+    prompts = flatten_prompts()
+    rng = np.random.default_rng(7)
+    # 整体抬到阈值之上的随机分，非弃权路径必须与 classify_scene 逐位一致
+    sims = 0.25 + rng.random(len(prompts)) * 0.05
+    d = decide_scene(sims)
+    assert d.abstained is False
+    major, minor, conf = classify_scene(sims)
+    assert (d.major, d.minor, d.score) == (major, minor, conf)
+
+
+def test_decide_scene_moon_shape_not_abstained():
+    # 月亮样品 0.31 领跑：有明确语义，不能被弃权误伤
+    prompts = flatten_prompts()
+    sims = np.full(len(prompts), 0.22, dtype=np.float64)
+    moon_idx = prompts.index(("自然风光", "月亮", MOON_PROMPTS[0]))
+    sims[moon_idx] = 0.31
+    d = decide_scene(sims)
+    assert d.abstained is False
+    assert d.major == "自然风光"
+    assert d.minor == "月亮"
+
+
+def test_decide_scene_lens_like_person_top1_still_abstains():
+    # 复现 IMGP8995 实测分数形态：人物 prompt 0.2232 领跑、饮品 0.2154 紧随，
+    # 全闭集无镜头/产品桶——top1 是「人物」也必须弃权
+    prompts = flatten_prompts()
+    sims = np.full(len(prompts), 0.20, dtype=np.float64)
+    person_idx = prompts.index(
+        ("人物", "单人肖像", "a photo of a person looking at camera")
+    )
+    coffee_idx = prompts.index(("食物", "饮品", "a photo of a cup of coffee"))
+    sims[person_idx] = 0.2232
+    sims[coffee_idx] = 0.2154
+    d = decide_scene(sims)
+    assert d.abstained is True
+    assert d.major is None
+    assert d.score == pytest.approx(0.2232)
+
+
 # ---------- bbox 归一化/还原纯函数（与解码分辨率无关） ----------
 
 
@@ -412,6 +477,74 @@ async def test_tag_images_single_failure_does_not_abort(env):
         rows = (await s.execute(select(Image))).scalars().all()
         assert all(r.tag_error == "fake boom" for r in rows)
         assert all(r.tagged_at is None for r in rows)
+
+
+# ---------- relabel（v6 弃权 + 版本戳） ----------
+
+
+class _RelabelFake:
+    """只实现 relabel 所需 classify_embedding 的最小假打标器。"""
+
+    def __init__(self, decision):
+        self._decision = decision
+
+    def classify_embedding(self, emb):
+        return self._decision
+
+
+async def _add_image_with_embedding(sm, root_id, rel_path, old_stamp="clip-v5-mpo-halfres"):
+    from myphoto.services.tagging_jobs import _emb_to_bytes
+
+    img_id = await _add_image(sm, root_id, rel_path)
+    async with sm() as s:
+        img = await s.get(Image, img_id)
+        img.scene_major = "人物"
+        img.scene_minor = "单人肖像"
+        img.scene_conf = 0.2232
+        img.tag_model_version = old_stamp
+        img.tagged_at = 1000
+        s.add(ImageEmbedding(
+            image_id=img_id,
+            embedding=_emb_to_bytes(_unit_vec(512, 3)),
+            model_version=old_stamp,
+            created_at=1000,
+        ))
+        await s.commit()
+    return img_id
+
+
+async def test_relabel_writes_null_when_scene_abstained_and_bumps_stamp(env):
+    from myphoto.services.tagging_jobs import relabel
+
+    _root_dir, sm, root_id, _gallery_id = env
+    img_id = await _add_image_with_embedding(sm, root_id, "lens.jpg")
+
+    updated = await relabel(sm, _RelabelFake((None, None, 0.2232)))
+    assert updated == 1
+
+    async with sm() as s:
+        img = await s.get(Image, img_id)
+        assert img.scene_major is None
+        assert img.scene_minor is None
+        assert img.scene_conf == pytest.approx(0.2232)  # 诊断分保留
+        assert img.tag_model_version == TAG_MODEL_VERSION
+        # embedding 行不被重算，保留原戳（向量本身未变）
+        emb = await s.get(ImageEmbedding, img_id)
+        assert emb.model_version == "clip-v5-mpo-halfres"
+
+
+async def test_relabel_keeps_label_but_still_bumps_stamp(env):
+    from myphoto.services.tagging_jobs import relabel
+
+    _root_dir, sm, root_id, _gallery_id = env
+    img_id = await _add_image_with_embedding(sm, root_id, "moon.jpg")
+
+    await relabel(sm, _RelabelFake(("自然风光", "月亮", 0.31)))
+
+    async with sm() as s:
+        img = await s.get(Image, img_id)
+        assert (img.scene_major, img.scene_minor) == ("自然风光", "月亮")
+        assert img.tag_model_version == TAG_MODEL_VERSION
 
 
 # ---------- cluster_faces ----------

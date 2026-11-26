@@ -9,16 +9,26 @@
       <section class="rounded-lg bg-surface p-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-sm font-medium text-ink-2">滤镜 LUT 管理</h2>
-          <button type="button"
-                  data-test="rescan"
-                  @click="onRescan"
-                  :disabled="scanning"
-                  class="rounded bg-surface-3 px-3 py-1.5 text-sm text-ink hover:bg-surface-4 disabled:cursor-not-allowed disabled:opacity-50">
-            {{ scanning ? "扫描中..." : "重新扫描磁盘" }}
-          </button>
+          <div class="flex gap-2">
+            <button type="button"
+                    data-test="cleanup-missing"
+                    @click="onCleanup"
+                    :disabled="cleaning"
+                    class="rounded bg-surface-3 px-3 py-1.5 text-sm text-ink hover:bg-surface-4 disabled:cursor-not-allowed disabled:opacity-50">
+              {{ cleaning ? "清理中..." : "清理缺失项" }}
+            </button>
+            <button type="button"
+                    data-test="rescan"
+                    @click="onRescan"
+                    :disabled="scanning"
+                    class="rounded bg-surface-3 px-3 py-1.5 text-sm text-ink hover:bg-surface-4 disabled:cursor-not-allowed disabled:opacity-50">
+              {{ scanning ? "扫描中..." : "重新扫描磁盘" }}
+            </button>
+          </div>
         </div>
         <p class="mt-2 text-xs text-ink-2">
-          新增 .cube 文件需放到 <code>backend/data/luts/&lt;group&gt;/</code> 后点"重新扫描"。
+          新增 .cube 文件需放到 <code>backend/data/luts/&lt;group&gt;/</code> 后点"重新扫描"；
+          重命名或删除目录后，点"清理缺失项"永久移除数据库中文件已不存在的记录。
         </p>
       </section>
 
@@ -94,6 +104,7 @@
 import { computed, onMounted, reactive, ref } from "vue"
 import AppHeader from "../components/AppHeader.vue"
 import { groupLabel } from "../lib/lutGroups"
+import { useToastStore } from "../stores/toast"
 
 interface LutRow {
   slug: string; label: string; group: string
@@ -103,6 +114,8 @@ interface LutRow {
 
 const rows = ref<LutRow[]>([])
 const scanning = ref(false)
+const cleaning = ref(false)
+const toast = useToastStore()
 // 默认全部折叠
 const collapsed = reactive<Record<string, boolean>>({})
 
@@ -175,6 +188,28 @@ async function onRescan() {
     await load()
   } finally {
     scanning.value = false
+  }
+}
+
+async function onCleanup() {
+  if (!window.confirm(
+    "将永久删除数据库中 .cube 文件已不在磁盘上的 LUT 条目（含分组与启用设置），此操作不可撤销。是否继续？",
+  )) return
+  cleaning.value = true
+  try {
+    const res = await fetch("/api/admin/luts/cleanup-missing", { method: "POST" })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      toast.push("error", body?.error?.message ?? "清理失败")
+      return
+    }
+    const data = await res.json()
+    toast.push("info", data.count ? `已清理 ${data.count} 条缺失项` : "没有需要清理的缺失项")
+    await load()
+  } catch {
+    toast.push("error", "清理失败")
+  } finally {
+    cleaning.value = false
   }
 }
 

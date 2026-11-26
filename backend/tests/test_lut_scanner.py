@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from myphoto.services.lut_scanner import scan_luts
+from myphoto.services.lut_scanner import purge_missing_luts, scan_luts
 from myphoto.core.models import Base, Lut
 
 
@@ -108,3 +108,62 @@ def test_scan_returns_empty_when_dir_missing(tmp_path, sm):
     result = asyncio.run(scan_luts(sm, luts_dir))
     assert result.discovered == []
     assert not luts_dir.exists()  # 不应创建
+
+
+def _seed_lut(s, slug, file_path, enabled):
+    group = Path(file_path).parent.name if "/" in file_path else ""
+    s.add(Lut(
+        slug=slug, label=slug, group=group,
+        file_path=file_path, enabled=enabled, sort_order=0,
+        source="", license="", created_at=int(time.time()),
+    ))
+
+
+def test_purge_deletes_missing_rows_keeps_existing(tmp_path, sm):
+    luts_dir = tmp_path / "luts"
+    _write_cube(luts_dir, "keep.cube")
+
+    async def seed():
+        async with sm() as s:
+            _seed_lut(s, "keep", "keep.cube", 1)
+            # 缺失行两种 enabled 状态都应被硬删
+            _seed_lut(s, "ghost_on", "ghost_on.cube", 1)
+            _seed_lut(s, "ghost_off", "ghost_off.cube", 0)
+            await s.commit()
+    asyncio.run(seed())
+
+    result = asyncio.run(purge_missing_luts(sm, luts_dir))
+    assert sorted(d.slug for d in result.deleted) == ["ghost_off", "ghost_on"]
+    # 快照里保留 enabled 状态，供路由层提示
+    by_slug = {d.slug: d for d in result.deleted}
+    assert by_slug["ghost_on"].enabled == 1
+    assert by_slug["ghost_off"].enabled == 0
+
+    async def check():
+        async with sm() as s:
+            from sqlalchemy import select
+            slugs = {r.slug for r in (await s.execute(select(Lut))).scalars()}
+            assert slugs == {"keep"}
+    asyncio.run(check())
+
+
+def test_purge_noop_when_all_files_present(tmp_path, sm):
+    luts_dir = tmp_path / "luts"
+    _write_cube(luts_dir, "a.cube")
+    _write_cube(luts_dir, "b.cube")
+
+    async def seed():
+        async with sm() as s:
+            _seed_lut(s, "a", "a.cube", 0)
+            _seed_lut(s, "b", "b.cube", 1)
+            await s.commit()
+    asyncio.run(seed())
+
+    result = asyncio.run(purge_missing_luts(sm, luts_dir))
+    assert result.deleted == []
+
+    async def check():
+        async with sm() as s:
+            from sqlalchemy import select
+            assert len((await s.execute(select(Lut))).scalars().all()) == 2
+    asyncio.run(check())

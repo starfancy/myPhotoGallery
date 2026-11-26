@@ -21,6 +21,19 @@ class ScanResult:
     soft_deleted: list[str] = field(default_factory=list)
 
 
+@dataclass
+class PurgedLut:
+    slug: str
+    group: str
+    file_path: str
+    enabled: int
+
+
+@dataclass
+class PurgeResult:
+    deleted: list[PurgedLut] = field(default_factory=list)
+
+
 def _slug_from_path(p: Path) -> str:
     stem = p.stem.lower()
     return re.sub(r"[^a-z0-9]+", "_", stem).strip("_") or "lut"
@@ -87,4 +100,32 @@ async def scan_luts(
                 result.soft_deleted.append(rel)
 
         await s.commit()
+    return result
+
+
+async def purge_missing_luts(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    luts_dir: Path,
+) -> PurgeResult:
+    """硬删 file_path 已不在磁盘上的 LUT 行（scan_luts 软删的出口）。
+
+    重命名/移动 LUT 目录后，旧路径的行只被 scan_luts 置 enabled=0，
+    管理页仍会显示幽灵分组；本函数把文件缺失的行物理删除。
+    调用方必须先确认 luts_dir 存在——盘未挂载时绝不能清空整表。
+    """
+    result = PurgeResult()
+    async with sessionmaker() as s:
+        db_rows = (await s.execute(select(Lut))).scalars().all()
+        for row in db_rows:
+            if not (luts_dir / row.file_path).exists():
+                # 会话关闭后行即为 detached，先快照需要的字段
+                result.deleted.append(PurgedLut(
+                    slug=row.slug,
+                    group=row.group,
+                    file_path=row.file_path,
+                    enabled=row.enabled,
+                ))
+                await s.delete(row)
+        if result.deleted:
+            await s.commit()
     return result

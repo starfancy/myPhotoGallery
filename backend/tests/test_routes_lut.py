@@ -79,3 +79,43 @@ def test_admin_rescan_discover_new_file(client_with_luts):
     r = c.get("/api/admin/luts")
     slugs = [x["slug"] for x in r.json()]
     assert "astia" in slugs
+
+
+def test_admin_cleanup_missing_deletes_ghost_rows(client_with_luts):
+    c, tmp_path = client_with_luts
+    # 模拟磁盘上的 LUT 目录被重命名/删除：warm.cube 消失
+    (tmp_path / "luts" / "synthetic" / "warm.cube").unlink()
+
+    r = c.post("/api/admin/luts/cleanup-missing")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["count"] == 1
+    assert data["deleted"][0]["file_path"] == "synthetic/warm.cube"
+
+    # 幽灵行已硬删，磁盘仍在的 velvia 保留
+    rows = c.get("/api/admin/luts").json()
+    assert [x["slug"] for x in rows] == ["velvia"]
+
+
+def test_admin_cleanup_missing_noop_when_all_present(client_with_luts):
+    c, _ = client_with_luts
+    r = c.post("/api/admin/luts/cleanup-missing")
+    assert r.status_code == 200
+    assert r.json() == {"deleted": [], "count": 0}
+    # 两行原样保留
+    assert len(c.get("/api/admin/luts").json()) == 2
+
+
+def test_admin_cleanup_missing_aborts_when_dir_missing(client_with_luts):
+    c, tmp_path = client_with_luts
+    luts_dir = tmp_path / "luts"
+    hidden = tmp_path / "luts_hidden"
+    luts_dir.rename(hidden)
+    try:
+        r = c.post("/api/admin/luts/cleanup-missing")
+        assert r.status_code == 409
+        assert r.json()["error"]["code"] == "lut_dir_missing"
+        # 守卫触发：一行都不能删
+        assert len(c.get("/api/admin/luts").json()) == 2
+    finally:
+        hidden.rename(luts_dir)
